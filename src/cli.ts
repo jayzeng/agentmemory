@@ -413,7 +413,15 @@ function cmdInstallSkills(flags: Record<string, string | boolean>) {
 		return;
 	}
 
-	if (report.detected.length === 0) {
+	if (report.checked.length > 0) {
+		for (const item of report.checked) {
+			if (item.status === "detected") {
+				console.log(`Detecting ${item.label}... found`);
+			} else {
+				console.log(`Detecting ${item.label}... not found (${item.reason ?? "unknown"})`);
+			}
+		}
+	} else if (report.detected.length === 0) {
 		console.log("No supported agent installations detected.");
 	} else {
 		const detectedLabels = report.detected.map((item) => item.label).join(", ");

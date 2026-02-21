@@ -18,18 +18,21 @@ install_skill() {
   local home_marker="$4"
   local detect_cmd="$5"
 
+  echo "Detecting $label..."
   if [ ! -d "$home_marker" ]; then
-    echo "Skipping $label ($home_marker not found)"
+    echo "Not found ($home_marker not found)"
     return
   fi
 
   if [ -n "$detect_cmd" ] && ! eval "$detect_cmd"; then
-    echo "Skipping $label (not detected)"
+    echo "Not found (not detected)"
     return
   fi
 
+  echo "Found"
   if [ -d "$src_dir" ]; then
     mkdir -p "$dest_dir"
+    echo "Installing to $dest_dir/SKILL.md"
     cp "$src_dir/SKILL.md" "$dest_dir/SKILL.md"
     echo "Installed $label: $dest_dir/SKILL.md"
   else

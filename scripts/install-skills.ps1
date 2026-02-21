@@ -12,19 +12,22 @@ function Install-Skill {
 		[ScriptBlock]$Detect
 	)
 
+	Write-Host "Detecting $Label..."
 	if (-not (Test-Path $HomeMarker)) {
-		Write-Host "Skipping $Label ($HomeMarker not found)"
+		Write-Host "Not found ($HomeMarker not found)"
 		return
 	}
 
 	if ($Detect -and -not (& $Detect)) {
-		Write-Host "Skipping $Label (not detected)"
+		Write-Host "Not found (not detected)"
 		return
 	}
 
+	Write-Host "Found"
 	$SkillSrc = Join-Path $SrcDir "SKILL.md"
 	if (Test-Path $SkillSrc) {
 		New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+		Write-Host "Installing to $DestDir\\SKILL.md"
 		Copy-Item -Force $SkillSrc (Join-Path $DestDir "SKILL.md")
 		Write-Host "Installed $Label: $DestDir\\SKILL.md"
 	} else {

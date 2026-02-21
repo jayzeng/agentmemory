@@ -738,6 +738,7 @@ export interface InstallSkillsReport {
 	ok: boolean;
 	projectDir?: string;
 	homeDir?: string;
+	checked: Array<{ label: string; status: "detected" | "skipped"; reason?: string }>;
 	detected: Array<{ label: string; homeMarker: string }>;
 	installed: Array<{ label: string; path: string }>;
 	skipped: Array<{ label: string; reason: string }>;
@@ -752,6 +753,7 @@ export function installSkills(): InstallSkillsReport {
 			detected: [],
 			installed: [],
 			skipped: [],
+			checked: [],
 			error: "Home directory not found. Set HOME (or USERPROFILE on Windows) and retry.",
 		};
 	}
@@ -764,6 +766,7 @@ export function installSkills(): InstallSkillsReport {
 			detected: [],
 			installed: [],
 			skipped: [],
+			checked: [],
 			error: "Could not locate the skills directory. Ensure the package includes skills/ (reinstall if needed).",
 		};
 	}
@@ -777,6 +780,7 @@ export function installSkills(): InstallSkillsReport {
 			detected: [],
 			installed: [],
 			skipped: [],
+			checked: [],
 			error: `Skills directory not found: ${skillsDir}`,
 		};
 	}
@@ -817,10 +821,12 @@ export function installSkills(): InstallSkillsReport {
 	const detected: Array<{ label: string; homeMarker: string }> = [];
 	const installed: Array<{ label: string; path: string }> = [];
 	const skipped: Array<{ label: string; reason: string }> = [];
+	const checked: Array<{ label: string; status: "detected" | "skipped"; reason?: string }> = [];
 
 	for (const target of targets) {
 		if (!fs.existsSync(target.homeMarker)) {
 			skipped.push({ label: target.label, reason: `${target.homeMarker} not found` });
+			checked.push({ label: target.label, status: "skipped", reason: `${target.homeMarker} not found` });
 			continue;
 		}
 		const detectedByFile = (target.detectFiles ?? []).some((file) => fs.existsSync(file));
@@ -828,10 +834,12 @@ export function installSkills(): InstallSkillsReport {
 		const requiresDetection = (target.detectFiles?.length ?? 0) > 0 || !!target.detectCommand;
 		if (requiresDetection && !detectedByFile && !detectedByCommand) {
 			skipped.push({ label: target.label, reason: "not detected" });
+			checked.push({ label: target.label, status: "skipped", reason: "not detected" });
 			continue;
 		}
 
 		detected.push({ label: target.label, homeMarker: target.homeMarker });
+		checked.push({ label: target.label, status: "detected" });
 
 		const skillFile = path.join(target.srcDir, "SKILL.md");
 		if (!fs.existsSync(skillFile)) {
@@ -848,6 +856,7 @@ export function installSkills(): InstallSkillsReport {
 		ok: true,
 		projectDir,
 		homeDir,
+		checked,
 		detected,
 		installed,
 		skipped,
