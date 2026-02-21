@@ -10,7 +10,7 @@ Long-term facts, daily logs, and a scratchpad checklist stored as plain markdown
 
 ```bash
 # Install the CLI globally
-npm install -g agent-memory
+npm install -g myagentmemory
 
 # Or build from source
 bun run build:cli
