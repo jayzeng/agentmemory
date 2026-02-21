@@ -1,6 +1,6 @@
 {
 	"name": "agent-memory",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "Persistent memory for coding agents (Claude Code, Codex) with qmd-powered semantic search across daily logs, long-term memory, and scratchpad",
 	"main": "./dist/core.js",
 	"types": "./dist/core.d.ts",
