@@ -20,9 +20,6 @@
 
 import * as fs from "node:fs";
 
-declare const __VERSION__: string;
-const VERSION = typeof __VERSION__ !== "undefined" ? __VERSION__ : "dev";
-
 import {
 	_setBaseDir,
 	buildMemoryContext,
@@ -37,12 +34,12 @@ import {
 	getDailyDir,
 	getMemoryDir,
 	getMemoryFile,
-	getTopicsDir,
 	getQmdEmbedMode,
 	getQmdHealth,
 	getQmdResultPath,
 	getQmdResultText,
 	getScratchpadFile,
+	getTopicsDir,
 	installSkills,
 	nowTimestamp,
 	parseScratchpad,
@@ -60,6 +57,9 @@ import {
 	topicPath,
 	uninstallSkills,
 } from "./core.js";
+
+declare const __VERSION__: string;
+const VERSION = typeof __VERSION__ !== "undefined" ? __VERSION__ : "dev";
 
 // ---------------------------------------------------------------------------
 // Arg parsing (no external deps)

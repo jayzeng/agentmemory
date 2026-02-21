@@ -1744,8 +1744,7 @@ function stripDailyLinkLines(content: string): string {
 	const lines = content.split("\n");
 	const filtered = lines.filter(
 		(line) =>
-			!/^\s*Daily:\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*$/i.test(line) &&
-			!/^\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*$/i.test(line),
+			!/^\s*Daily:\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*$/i.test(line) && !/^\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*$/i.test(line),
 	);
 	const cleaned = filtered.join("\n").trim();
 	return cleaned || content.trim();
@@ -1815,7 +1814,7 @@ function summarizeEntry(entry: DistilEntry): string {
 }
 
 /** Sort entries recent-first by date then timestamp. */
-function sortRecentFirst(entries: DistilEntry[]): DistilEntry[] {
+function sortRecentFirst<T extends { date: string; timestamp: string }>(entries: T[]): T[] {
 	return [...entries].sort((a, b) => {
 		if (a.date !== b.date) return b.date.localeCompare(a.date);
 		return b.timestamp.localeCompare(a.timestamp);
