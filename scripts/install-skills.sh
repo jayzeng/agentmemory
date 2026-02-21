@@ -7,14 +7,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
 install_skill() {
   local label="$1"
   local src_dir="$2"
   local dest_dir="$3"
   local home_marker="$4"
+  local detect_cmd="$5"
 
   if [ ! -d "$home_marker" ]; then
     echo "Skipping $label ($home_marker not found)"
+    return
+  fi
+
+  if [ -n "$detect_cmd" ] && ! eval "$detect_cmd"; then
+    echo "Skipping $label (not detected)"
     return
   fi
 
@@ -27,8 +37,8 @@ install_skill() {
   fi
 }
 
-install_skill "Claude Code skill" "$PROJECT_DIR/skills/claude-code" "$HOME/.claude/skills/agent-memory" "$HOME/.claude"
-install_skill "Codex skill" "$PROJECT_DIR/skills/codex" "$HOME/.codex/skills/agent-memory" "$HOME/.codex"
+install_skill "Claude Code skill" "$PROJECT_DIR/skills/claude-code" "$HOME/.claude/skills/agent-memory" "$HOME/.claude" '[ -f "$HOME/.claude/settings.json" ] || [ -f "$HOME/.claude/settings.local.json" ] || command_exists claude'
+install_skill "Codex skill" "$PROJECT_DIR/skills/codex" "$HOME/.codex/skills/agent-memory" "$HOME/.codex" '[ -f "$HOME/.codex/config.toml" ] || command_exists codex'
 install_skill "Cursor skill" "$PROJECT_DIR/skills/cursor" "$HOME/.cursor/skills/agent-memory" "$HOME/.cursor"
 install_skill "Agent CLI skill" "$PROJECT_DIR/skills/agent" "$HOME/.agents/skills/agent-memory" "$HOME/.agents"
 

@@ -476,6 +476,26 @@ function resolveHomeDir(): string | null {
 	return process.env.HOME ?? process.env.USERPROFILE ?? null;
 }
 
+function commandExists(cmd: string): boolean {
+	const envPath = process.env.PATH ?? "";
+	if (!envPath) return false;
+
+	const dirs = envPath.split(path.delimiter).filter(Boolean);
+	const isWin = process.platform === "win32";
+	const rawExts = isWin ? process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM" : "";
+	const exts = isWin ? rawExts.split(";").filter(Boolean) : [""];
+
+	for (const dir of dirs) {
+		for (const ext of exts) {
+			const fileName = isWin ? `${cmd}${ext}` : cmd;
+			const fullPath = path.join(dir, fileName);
+			if (fs.existsSync(fullPath)) return true;
+		}
+	}
+
+	return false;
+}
+
 function findSkillsRoot(): string | null {
 	const envRoot = process.env.AGENT_MEMORY_SKILLS_ROOT;
 	if (envRoot) return envRoot;
@@ -766,12 +786,19 @@ export function installSkills(): InstallSkillsReport {
 			srcDir: path.join(skillsDir, "claude-code"),
 			destDir: path.join(homeDir, ".claude", "skills", "agent-memory"),
 			homeMarker: path.join(homeDir, ".claude"),
+			detectFiles: [
+				path.join(homeDir, ".claude", "settings.json"),
+				path.join(homeDir, ".claude", "settings.local.json"),
+			],
+			detectCommand: "claude",
 		},
 		{
 			label: "Codex skill",
 			srcDir: path.join(skillsDir, "codex"),
 			destDir: path.join(homeDir, ".codex", "skills", "agent-memory"),
 			homeMarker: path.join(homeDir, ".codex"),
+			detectFiles: [path.join(homeDir, ".codex", "config.toml")],
+			detectCommand: "codex",
 		},
 		{
 			label: "Cursor skill",
@@ -796,6 +823,14 @@ export function installSkills(): InstallSkillsReport {
 			skipped.push({ label: target.label, reason: `${target.homeMarker} not found` });
 			continue;
 		}
+		const detectedByFile = (target.detectFiles ?? []).some((file) => fs.existsSync(file));
+		const detectedByCommand = target.detectCommand ? commandExists(target.detectCommand) : false;
+		const requiresDetection = (target.detectFiles?.length ?? 0) > 0 || !!target.detectCommand;
+		if (requiresDetection && !detectedByFile && !detectedByCommand) {
+			skipped.push({ label: target.label, reason: "not detected" });
+			continue;
+		}
+
 		detected.push({ label: target.label, homeMarker: target.homeMarker });
 
 		const skillFile = path.join(target.srcDir, "SKILL.md");

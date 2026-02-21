@@ -200,8 +200,15 @@ describe("ensureDirs", () => {
 describe("installSkills", () => {
 	let projectDir: string;
 	let homeDir: string;
+	let originalPath: string | undefined;
+	let originalPathExt: string | undefined;
 
 	beforeEach(() => {
+		originalPath = process.env.PATH;
+		originalPathExt = process.env.PATHEXT;
+		process.env.PATH = "";
+		process.env.PATHEXT = "";
+
 		projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-skills-"));
 		homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-home-"));
 
@@ -220,18 +227,35 @@ describe("installSkills", () => {
 	afterEach(() => {
 		_setSkillsRootForTest(null);
 		_setHomeDirForTest(null);
+		process.env.PATH = originalPath;
+		if (originalPathExt === undefined) {
+			delete process.env.PATHEXT;
+		} else {
+			process.env.PATHEXT = originalPathExt;
+		}
 		fs.rmSync(projectDir, { recursive: true, force: true });
 		fs.rmSync(homeDir, { recursive: true, force: true });
 	});
 
-	test("installs skills when home markers exist", () => {
+	test("skips Claude/Codex when only home markers exist", () => {
+		const report = installSkills();
+		expect(report.ok).toBe(true);
+		expect(report.detected.length).toBe(0);
+		expect(report.installed.length).toBe(0);
+		expect(report.skipped.some((item) => item.label === "Claude Code skill" && item.reason === "not detected")).toBe(true);
+		expect(report.skipped.some((item) => item.label === "Codex skill" && item.reason === "not detected")).toBe(true);
+	});
+
+	test("installs Claude/Codex when config files exist", () => {
+		fs.writeFileSync(path.join(homeDir, ".claude", "settings.json"), "{}", "utf-8");
+		fs.writeFileSync(path.join(homeDir, ".codex", "config.toml"), "version = 1", "utf-8");
+
 		const report = installSkills();
 		expect(report.ok).toBe(true);
 		expect(report.detected.length).toBe(2);
 		expect(report.installed.length).toBe(2);
 		expect(fs.existsSync(path.join(homeDir, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(true);
 		expect(fs.existsSync(path.join(homeDir, ".codex", "skills", "agent-memory", "SKILL.md"))).toBe(true);
-		expect(report.skipped.some((item) => item.label === "Cursor skill")).toBe(true);
 	});
 });
 

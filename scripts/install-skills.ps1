@@ -8,11 +8,17 @@ function Install-Skill {
 		[string]$Label,
 		[string]$SrcDir,
 		[string]$DestDir,
-		[string]$HomeMarker
+		[string]$HomeMarker,
+		[ScriptBlock]$Detect
 	)
 
 	if (-not (Test-Path $HomeMarker)) {
 		Write-Host "Skipping $Label ($HomeMarker not found)"
+		return
+	}
+
+	if ($Detect -and -not (& $Detect)) {
+		Write-Host "Skipping $Label (not detected)"
 		return
 	}
 
@@ -26,8 +32,8 @@ function Install-Skill {
 	}
 }
 
-Install-Skill -Label "Claude Code skill" -SrcDir (Join-Path $ProjectDir "skills\\claude-code") -DestDir (Join-Path $env:USERPROFILE ".claude\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".claude")
-Install-Skill -Label "Codex skill" -SrcDir (Join-Path $ProjectDir "skills\\codex") -DestDir (Join-Path $env:USERPROFILE ".codex\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".codex")
+Install-Skill -Label "Claude Code skill" -SrcDir (Join-Path $ProjectDir "skills\\claude-code") -DestDir (Join-Path $env:USERPROFILE ".claude\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".claude") -Detect { (Test-Path (Join-Path $env:USERPROFILE ".claude\\settings.json")) -or (Test-Path (Join-Path $env:USERPROFILE ".claude\\settings.local.json")) -or (Get-Command claude -ErrorAction SilentlyContinue) }
+Install-Skill -Label "Codex skill" -SrcDir (Join-Path $ProjectDir "skills\\codex") -DestDir (Join-Path $env:USERPROFILE ".codex\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".codex") -Detect { (Test-Path (Join-Path $env:USERPROFILE ".codex\\config.toml")) -or (Get-Command codex -ErrorAction SilentlyContinue) }
 Install-Skill -Label "Cursor skill" -SrcDir (Join-Path $ProjectDir "skills\\cursor") -DestDir (Join-Path $env:USERPROFILE ".cursor\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".cursor")
 Install-Skill -Label "Agent CLI skill" -SrcDir (Join-Path $ProjectDir "skills\\agent") -DestDir (Join-Path $env:USERPROFILE ".agents\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".agents")
 
