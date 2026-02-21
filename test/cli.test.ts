@@ -132,7 +132,7 @@ describe("write operations", () => {
 
 		const existing = readFileSafe(filePath) ?? "";
 		const separator = existing.trim() ? "\n\n" : "";
-		fs.writeFileSync(filePath, existing + separator + "Afternoon entry", "utf-8");
+		fs.writeFileSync(filePath, `${existing + separator}Afternoon entry`, "utf-8");
 
 		const result = readFileSafe(filePath)!;
 		expect(result).toContain("Morning entry");
@@ -334,8 +334,17 @@ describe("CLI subprocess", () => {
 		// Write
 		const writeResult = Bun.spawnSync(
 			[
-				"bun", "run", path.join(__dirname, "..", "src", "cli.ts"),
-				"write", "--dir", tmpDir, "--target", "long_term", "--content", "Test content", "--json",
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--dir",
+				tmpDir,
+				"--target",
+				"long_term",
+				"--content",
+				"Test content",
+				"--json",
 			],
 			{ stdout: "pipe", stderr: "pipe" },
 		);
@@ -346,8 +355,15 @@ describe("CLI subprocess", () => {
 		// Read
 		const readResult = Bun.spawnSync(
 			[
-				"bun", "run", path.join(__dirname, "..", "src", "cli.ts"),
-				"read", "--dir", tmpDir, "--target", "long_term", "--json",
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"read",
+				"--dir",
+				tmpDir,
+				"--target",
+				"long_term",
+				"--json",
 			],
 			{ stdout: "pipe", stderr: "pipe" },
 		);
@@ -362,8 +378,14 @@ describe("CLI subprocess", () => {
 
 		const result = Bun.spawnSync(
 			[
-				"bun", "run", path.join(__dirname, "..", "src", "cli.ts"),
-				"context", "--dir", tmpDir, "--no-search", "--json",
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"context",
+				"--dir",
+				tmpDir,
+				"--no-search",
+				"--json",
 			],
 			{ stdout: "pipe", stderr: "pipe" },
 		);
@@ -376,8 +398,16 @@ describe("CLI subprocess", () => {
 		// Add
 		const addResult = Bun.spawnSync(
 			[
-				"bun", "run", path.join(__dirname, "..", "src", "cli.ts"),
-				"scratchpad", "add", "--dir", tmpDir, "--text", "Test task", "--json",
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"scratchpad",
+				"add",
+				"--dir",
+				tmpDir,
+				"--text",
+				"Test task",
+				"--json",
 			],
 			{ stdout: "pipe", stderr: "pipe" },
 		);
@@ -387,10 +417,7 @@ describe("CLI subprocess", () => {
 
 		// List
 		const listResult = Bun.spawnSync(
-			[
-				"bun", "run", path.join(__dirname, "..", "src", "cli.ts"),
-				"scratchpad", "list", "--dir", tmpDir, "--json",
-			],
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "scratchpad", "list", "--dir", tmpDir, "--json"],
 			{ stdout: "pipe", stderr: "pipe" },
 		);
 		expect(listResult.exitCode).toBe(0);
@@ -400,10 +427,10 @@ describe("CLI subprocess", () => {
 	});
 
 	test("help shows usage", async () => {
-		const result = Bun.spawnSync(
-			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "help"],
-			{ stdout: "pipe", stderr: "pipe" },
-		);
+		const result = Bun.spawnSync(["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "help"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
 		expect(result.exitCode).toBe(0);
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory");
@@ -411,10 +438,10 @@ describe("CLI subprocess", () => {
 	});
 
 	test("unknown command exits with error", async () => {
-		const result = Bun.spawnSync(
-			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "invalid", "--json"],
-			{ stdout: "pipe", stderr: "pipe" },
-		);
+		const result = Bun.spawnSync(["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "invalid", "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
 		expect(result.exitCode).toBe(1);
 	});
 });

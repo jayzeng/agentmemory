@@ -10,7 +10,7 @@ Long-term facts, daily logs, and a scratchpad checklist stored as plain markdown
 
 ```bash
 # Install the CLI globally
-npm install -g agent-memory
+npm install -g myagentmemory
 
 # Or build from source
 bun run build:cli
@@ -21,11 +21,14 @@ agent-memory init
 
 # Install skill files for Claude Code and Codex
 bash scripts/install-skills.sh
+pwsh -File scripts/install-skills.ps1
 ```
 
 This installs:
 - `~/.claude/skills/agent-memory/SKILL.md` — Claude Code skill
 - `~/.codex/skills/agent-memory/SKILL.md` — Codex skill
+- `%USERPROFILE%\.claude\skills\agent-memory\SKILL.md` — Claude Code skill (Windows)
+- `%USERPROFILE%\.codex\skills\agent-memory\SKILL.md` — Codex skill (Windows)
 
 ### Optional: Enable search with qmd
 
@@ -175,6 +178,7 @@ agent-memory write --target long_term --content "test" && agent-memory read --ta
 
 # Install skills
 bash scripts/install-skills.sh
+pwsh -File scripts/install-skills.ps1
 ```
 
 ## Publishing (maintainers)

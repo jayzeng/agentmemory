@@ -1,8 +1,15 @@
 {
-	"name": "agent-memory",
-	"version": "0.4.0",
+	"name": "myagentmemory",
+	"version": "0.4.3",
 	"description": "Persistent memory for coding agents (Claude Code, Codex) with qmd-powered semantic search across daily logs, long-term memory, and scratchpad",
-	"main": "src/core.ts",
+	"main": "./dist/core.js",
+	"types": "./dist/core.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/core.d.ts",
+			"default": "./dist/core.js"
+		}
+	},
 	"bin": {
 		"agent-memory": "./dist/agent-memory"
 	},
@@ -42,7 +49,9 @@
 	"scripts": {
 		"postinstall": "node scripts/postinstall.cjs",
 		"build": "tsc -p tsconfig.json --noEmit",
+		"build:lib": "tsc -p tsconfig.build.json",
 		"build:cli": "bun build src/cli.ts --compile --outfile dist/agent-memory",
+		"prepack": "npm run build:lib && bun run build:cli",
 		"lint": "biome check .",
 		"test": "bun test test/unit.test.ts",
 		"test:unit": "bun test test/unit.test.ts",
