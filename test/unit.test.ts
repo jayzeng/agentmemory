@@ -12,25 +12,34 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
+	_clearEmbedTimer,
 	_clearUpdateTimer,
+	_getEmbedTimer,
 	_getUpdateTimer,
 	_resetBaseDir,
 	_resetExecFileForTest,
+	_resetSpawnForTest,
 	_setBaseDir,
 	_setExecFileForTest,
 	_setQmdAvailable,
+	_setSpawnForTest,
 	buildMemoryContext,
 	dailyPath,
 	ensureDirs,
+	getQmdEmbedMode,
 	memoryRead,
 	memorySearch,
 	memoryWrite,
 	nowTimestamp,
+	parseQmdStatus,
 	parseScratchpad,
 	qmdCollectionInstructions,
 	qmdInstallInstructions,
 	readFileSafe,
+	runQmdEmbedDetached,
+	runQmdSync,
 	type ScratchpadItem,
+	scheduleQmdEmbed,
 	scheduleQmdUpdate,
 	scratchpadAction,
 	serializeScratchpad,
@@ -54,6 +63,9 @@ function cleanupTmpDir() {
 	_resetBaseDir();
 	_setQmdAvailable(false);
 	_clearUpdateTimer();
+	_clearEmbedTimer();
+	_resetSpawnForTest();
+	_resetExecFileForTest();
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
@@ -794,5 +806,229 @@ describe("memorySearch", () => {
 		} finally {
 			_resetExecFileForTest();
 		}
+	});
+});
+
+// ==========================================================================
+// 9. parseQmdStatus
+// ==========================================================================
+
+describe("parseQmdStatus", () => {
+	test("parses full status output", () => {
+		const stdout = [
+			"Collections: 1",
+			"  agent-memory: 12 files",
+			"Total: 12 files",
+			"8 vectors",
+			"4 pending",
+			"Last updated: 2026-02-20 10:30:00",
+		].join("\n");
+
+		const result = parseQmdStatus(stdout, "agent-memory");
+		expect(result.totalFiles).toBe(12);
+		expect(result.vectorsEmbedded).toBe(8);
+		expect(result.pendingEmbed).toBe(4);
+		expect(result.lastUpdated).toBe("2026-02-20 10:30:00");
+		expect(result.collectionFiles).toBe(12);
+	});
+
+	test("infers zero pending when vectors equals files", () => {
+		const stdout = "10 files\n10 vectors";
+		const result = parseQmdStatus(stdout, "agent-memory");
+		expect(result.totalFiles).toBe(10);
+		expect(result.vectorsEmbedded).toBe(10);
+		expect(result.pendingEmbed).toBe(0);
+	});
+
+	test("handles missing collection", () => {
+		const stdout = "5 files\n3 embeddings";
+		const result = parseQmdStatus(stdout, "other-collection");
+		expect(result.totalFiles).toBe(5);
+		expect(result.vectorsEmbedded).toBe(3);
+		expect(result.collectionFiles).toBeNull();
+	});
+
+	test("handles empty output", () => {
+		const result = parseQmdStatus("", "agent-memory");
+		expect(result.totalFiles).toBeNull();
+		expect(result.vectorsEmbedded).toBeNull();
+		expect(result.pendingEmbed).toBeNull();
+		expect(result.lastUpdated).toBeNull();
+		expect(result.collectionFiles).toBeNull();
+	});
+});
+
+// ==========================================================================
+// 10. scheduleQmdEmbed
+// ==========================================================================
+
+describe("scheduleQmdEmbed", () => {
+	beforeEach(() => {
+		_clearEmbedTimer();
+	});
+	afterEach(() => {
+		_clearEmbedTimer();
+		_setQmdAvailable(false);
+	});
+
+	test("does nothing when qmd is not available", () => {
+		_setQmdAvailable(false);
+		scheduleQmdEmbed();
+		expect(_getEmbedTimer()).toBeNull();
+	});
+
+	test("sets a timer when qmd is available", () => {
+		_setQmdAvailable(true);
+		scheduleQmdEmbed();
+		expect(_getEmbedTimer()).not.toBeNull();
+		_clearEmbedTimer();
+	});
+
+	test("debounces multiple calls", () => {
+		_setQmdAvailable(true);
+		scheduleQmdEmbed();
+		const firstTimer = _getEmbedTimer();
+		scheduleQmdEmbed();
+		const secondTimer = _getEmbedTimer();
+		expect(secondTimer).not.toBeNull();
+		expect(firstTimer).not.toBe(secondTimer);
+		_clearEmbedTimer();
+	});
+});
+
+// ==========================================================================
+// 11. getQmdEmbedMode
+// ==========================================================================
+
+describe("getQmdEmbedMode", () => {
+	const origEnv = process.env.AGENT_MEMORY_QMD_EMBED;
+
+	afterEach(() => {
+		if (origEnv === undefined) {
+			delete process.env.AGENT_MEMORY_QMD_EMBED;
+		} else {
+			process.env.AGENT_MEMORY_QMD_EMBED = origEnv;
+		}
+	});
+
+	test("defaults to background", () => {
+		delete process.env.AGENT_MEMORY_QMD_EMBED;
+		expect(getQmdEmbedMode()).toBe("background");
+	});
+
+	test("respects manual", () => {
+		process.env.AGENT_MEMORY_QMD_EMBED = "manual";
+		expect(getQmdEmbedMode()).toBe("manual");
+	});
+
+	test("respects off", () => {
+		process.env.AGENT_MEMORY_QMD_EMBED = "off";
+		expect(getQmdEmbedMode()).toBe("off");
+	});
+
+	test("falls back to background for invalid values", () => {
+		process.env.AGENT_MEMORY_QMD_EMBED = "invalid";
+		expect(getQmdEmbedMode()).toBe("background");
+	});
+});
+
+// ==========================================================================
+// 12. runQmdEmbedDetached
+// ==========================================================================
+
+describe("runQmdEmbedDetached", () => {
+	afterEach(() => {
+		_setQmdAvailable(false);
+		_resetSpawnForTest();
+	});
+
+	test("returns null when qmd is not available", () => {
+		_setQmdAvailable(false);
+		expect(runQmdEmbedDetached()).toBeNull();
+	});
+
+	test("calls spawn with correct args when available", () => {
+		_setQmdAvailable(true);
+
+		let spawnedCmd = "";
+		let spawnedArgs: string[] = [];
+		let spawnedOpts: any = {};
+
+		const mockSpawn = ((cmd: string, args: string[], opts: any) => {
+			spawnedCmd = cmd;
+			spawnedArgs = args;
+			spawnedOpts = opts;
+			return { unref: () => {} };
+		}) as any;
+
+		_setSpawnForTest(mockSpawn);
+		const result = runQmdEmbedDetached();
+
+		expect(result).not.toBeNull();
+		expect(spawnedCmd).toBe("qmd");
+		expect(spawnedArgs).toEqual(["embed"]);
+		expect(spawnedOpts.detached).toBe(true);
+		expect(spawnedOpts.stdio).toBe("ignore");
+	});
+});
+
+// ==========================================================================
+// 13. runQmdSync
+// ==========================================================================
+
+describe("runQmdSync", () => {
+	afterEach(() => {
+		_setQmdAvailable(false);
+		_resetExecFileForTest();
+	});
+
+	test("returns false when qmd is not available", async () => {
+		_setQmdAvailable(false);
+		const result = await runQmdSync();
+		expect(result.updateOk).toBe(false);
+		expect(result.embedOk).toBe(false);
+	});
+
+	test("runs update then embed in sequence", async () => {
+		_setQmdAvailable(true);
+
+		const calls: string[] = [];
+
+		const mockExecFile = ((...args: any[]) => {
+			const cmd = args[0] as string;
+			const subArgs = args[1] as string[];
+			const callback = args[args.length - 1] as (err: Error | null, stdout: string, stderr: string) => void;
+
+			calls.push(`${cmd} ${subArgs[0]}`);
+			callback(null, "", "");
+		}) as any;
+
+		_setExecFileForTest(mockExecFile);
+		const result = await runQmdSync();
+
+		expect(result.updateOk).toBe(true);
+		expect(result.embedOk).toBe(true);
+		expect(calls).toEqual(["qmd update", "qmd embed"]);
+	});
+
+	test("reports embed failure correctly", async () => {
+		_setQmdAvailable(true);
+
+		const mockExecFile = ((...args: any[]) => {
+			const subArgs = args[1] as string[];
+			const callback = args[args.length - 1] as (err: Error | null, stdout: string, stderr: string) => void;
+
+			if (subArgs[0] === "embed") {
+				callback(new Error("embed failed"), "", "");
+			} else {
+				callback(null, "", "");
+			}
+		}) as any;
+
+		_setExecFileForTest(mockExecFile);
+		const result = await runQmdSync();
+
+		expect(result.updateOk).toBe(true);
+		expect(result.embedOk).toBe(false);
 	});
 });

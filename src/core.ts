@@ -5,7 +5,8 @@
  * Zero pi peer dependencies — only node:fs, node:path, node:child_process.
  */
 
-import { execFile } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -391,10 +392,13 @@ export function buildMemoryContext(searchResults?: string): string {
 // ---------------------------------------------------------------------------
 
 type ExecFileFn = typeof execFile;
+type SpawnFn = typeof spawn;
 let execFileFn: ExecFileFn = execFile;
+let spawnFn: SpawnFn = spawn;
 
 let qmdAvailable = false;
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
+let embedTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** QMD collection name — configurable per platform. */
 let QMD_COLLECTION_NAME = "agent-memory";
@@ -407,6 +411,16 @@ export function _setExecFileForTest(fn: ExecFileFn) {
 /** Reset execFile implementation (for testing). */
 export function _resetExecFileForTest() {
 	execFileFn = execFile;
+}
+
+/** Override spawn implementation (for testing). */
+export function _setSpawnForTest(fn: SpawnFn) {
+	spawnFn = fn;
+}
+
+/** Reset spawn implementation (for testing). */
+export function _resetSpawnForTest() {
+	spawnFn = spawn;
 }
 
 /** Set qmd availability flag (for testing). */
@@ -429,6 +443,19 @@ export function _clearUpdateTimer() {
 	if (updateTimer) {
 		clearTimeout(updateTimer);
 		updateTimer = null;
+	}
+}
+
+/** Get current embed timer (for testing). */
+export function _getEmbedTimer(): ReturnType<typeof setTimeout> | null {
+	return embedTimer;
+}
+
+/** Clear the embed timer (for testing). */
+export function _clearEmbedTimer() {
+	if (embedTimer) {
+		clearTimeout(embedTimer);
+		embedTimer = null;
 	}
 }
 
@@ -562,13 +589,47 @@ export async function ensureQmdAvailableForUpdate(): Promise<boolean> {
 	return qmdAvailable;
 }
 
+export function getQmdEmbedMode(): "background" | "manual" | "off" {
+	const mode = (process.env.AGENT_MEMORY_QMD_EMBED ?? "background").toLowerCase();
+	if (mode === "manual" || mode === "off" || mode === "background") {
+		return mode;
+	}
+	return "background";
+}
+
+export function runQmdEmbedDetached(): ChildProcess | null {
+	if (!qmdAvailable) return null;
+	const child = spawnFn("qmd", ["embed"], {
+		detached: true,
+		stdio: "ignore",
+	});
+	child.unref();
+	return child;
+}
+
+export function scheduleQmdEmbed() {
+	if (getQmdEmbedMode() !== "background") return;
+	if (!qmdAvailable) return;
+	if (embedTimer) clearTimeout(embedTimer);
+	embedTimer = setTimeout(() => {
+		embedTimer = null;
+		runQmdEmbedDetached();
+	}, 5_000);
+	// Don't prevent process exit while waiting to embed
+	if (embedTimer && typeof embedTimer === "object" && "unref" in embedTimer) {
+		(embedTimer as NodeJS.Timeout).unref();
+	}
+}
+
 export function scheduleQmdUpdate() {
 	if (getQmdUpdateMode() !== "background") return;
 	if (!qmdAvailable) return;
 	if (updateTimer) clearTimeout(updateTimer);
 	updateTimer = setTimeout(() => {
 		updateTimer = null;
-		execFileFn("qmd", ["update"], { timeout: 30_000 }, () => {});
+		execFileFn("qmd", ["update"], { timeout: 30_000 }, () => {
+			scheduleQmdEmbed();
+		});
 	}, 500);
 }
 
@@ -577,6 +638,110 @@ export async function runQmdUpdateNow() {
 	if (!qmdAvailable) return;
 	await new Promise<void>((resolve) => {
 		execFileFn("qmd", ["update"], { timeout: 30_000 }, () => resolve());
+	});
+}
+
+export async function runQmdEmbedNow(): Promise<boolean> {
+	if (!qmdAvailable) return false;
+	return new Promise((resolve) => {
+		execFileFn("qmd", ["embed"], { timeout: 120_000 }, (err) => {
+			resolve(!err);
+		});
+	});
+}
+
+export async function ensureQmdAvailableForSync(): Promise<boolean> {
+	if (qmdAvailable) return true;
+	qmdAvailable = await detectQmd();
+	return qmdAvailable;
+}
+
+export async function runQmdSync(): Promise<{ updateOk: boolean; embedOk: boolean }> {
+	if (!qmdAvailable) return { updateOk: false, embedOk: false };
+
+	const updateOk = await new Promise<boolean>((resolve) => {
+		execFileFn("qmd", ["update"], { timeout: 30_000 }, (err) => {
+			resolve(!err);
+		});
+	});
+
+	const embedOk = await runQmdEmbedNow();
+	return { updateOk, embedOk };
+}
+
+export interface QmdHealthInfo {
+	totalFiles: number | null;
+	vectorsEmbedded: number | null;
+	pendingEmbed: number | null;
+	lastUpdated: string | null;
+	collectionFiles: number | null;
+	collectionUpdated: string | null;
+	embedMode: string;
+}
+
+export function parseQmdStatus(stdout: string, collectionName: string): QmdHealthInfo {
+	const result: QmdHealthInfo = {
+		totalFiles: null,
+		vectorsEmbedded: null,
+		pendingEmbed: null,
+		lastUpdated: null,
+		collectionFiles: null,
+		collectionUpdated: null,
+		embedMode: getQmdEmbedMode(),
+	};
+
+	if (!stdout.trim()) return result;
+
+	// Total files across all collections
+	const totalFilesMatch = stdout.match(/(\d+)\s+(?:total\s+)?files?/i);
+	if (totalFilesMatch) {
+		result.totalFiles = Number.parseInt(totalFilesMatch[1], 10);
+	}
+
+	// Vectors / embeddings
+	const vectorsMatch = stdout.match(/(\d+)\s+(?:vectors?|embeddings?)/i);
+	if (vectorsMatch) {
+		result.vectorsEmbedded = Number.parseInt(vectorsMatch[1], 10);
+	}
+
+	// Pending embed
+	const pendingMatch = stdout.match(/(\d+)\s+pending/i);
+	if (pendingMatch) {
+		result.pendingEmbed = Number.parseInt(pendingMatch[1], 10);
+	}
+
+	// If we have totalFiles and vectorsEmbedded but no explicit pending, infer it
+	if (result.pendingEmbed === null && result.totalFiles !== null && result.vectorsEmbedded !== null) {
+		result.pendingEmbed = Math.max(0, result.totalFiles - result.vectorsEmbedded);
+	}
+
+	// Last updated timestamp
+	const updatedMatch = stdout.match(/(?:last\s+)?updated:?\s+(\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}[:\d]*)/i);
+	if (updatedMatch) {
+		result.lastUpdated = updatedMatch[1];
+	}
+
+	// Collection-specific info — look for collection name section
+	const collectionPattern = new RegExp(`${collectionName}[:\\s]*(?:.*?)(\\d+)\\s+files?`, "i");
+	const collMatch = stdout.match(collectionPattern);
+	if (collMatch) {
+		result.collectionFiles = Number.parseInt(collMatch[1], 10);
+	}
+
+	return result;
+}
+
+export async function getQmdHealth(): Promise<QmdHealthInfo | null> {
+	if (!qmdAvailable) return null;
+
+	return new Promise((resolve) => {
+		execFileFn("qmd", ["status"], { timeout: 10_000 }, (err, stdout) => {
+			if (err) {
+				resolve(null);
+				return;
+			}
+			resolve(parseQmdStatus(stdout ?? "", QMD_COLLECTION_NAME));
+		});
 	});
 }
 

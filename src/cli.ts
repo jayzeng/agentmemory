@@ -24,18 +24,24 @@ import {
 	dailyPath,
 	detectQmd,
 	ensureDirs,
+	ensureQmdAvailableForSync,
 	ensureQmdAvailableForUpdate,
 	getCollectionName,
 	getDailyDir,
 	getMemoryDir,
 	getMemoryFile,
+	getQmdEmbedMode,
+	getQmdHealth,
 	getQmdResultPath,
 	getQmdResultText,
 	getScratchpadFile,
 	nowTimestamp,
 	parseScratchpad,
 	readFileSafe,
+	runQmdEmbedDetached,
 	runQmdSearch,
+	runQmdSync,
+	runQmdUpdateNow,
 	scheduleQmdUpdate,
 	searchRelevantMemories,
 	serializeScratchpad,
@@ -387,6 +393,43 @@ async function cmdSearch(flags: Record<string, string | boolean>) {
 	}
 }
 
+async function cmdSync(flags: Record<string, string | boolean>) {
+	const json = hasFlag(flags, "json");
+
+	ensureDirs();
+
+	const qmdFound = await ensureQmdAvailableForSync();
+	if (!qmdFound) {
+		exitError("qmd is not installed. Install: bun install -g https://github.com/tobi/qmd", json);
+	}
+
+	const collName = getCollectionName();
+	const hasCollection = await checkCollection(collName);
+	if (!hasCollection) {
+		exitError(`qmd collection '${collName}' not found. Run: agent-memory init`, json);
+	}
+
+	const result = await runQmdSync();
+
+	if (json) {
+		output({ ok: result.updateOk && result.embedOk, updateOk: result.updateOk, embedOk: result.embedOk }, true);
+	} else {
+		if (result.updateOk) {
+			console.log("qmd update: ok");
+		} else {
+			console.log("qmd update: failed");
+		}
+		if (result.embedOk) {
+			console.log("qmd embed: ok");
+		} else {
+			console.log("qmd embed: failed");
+		}
+		if (result.updateOk && result.embedOk) {
+			console.log("\nIndex fully synced.");
+		}
+	}
+}
+
 async function cmdInit(flags: Record<string, string | boolean>) {
 	const json = hasFlag(flags, "json");
 
@@ -395,6 +438,8 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 
 	const qmdFound = await detectQmd();
 	let collectionCreated = false;
+	let indexUpdated = false;
+	let embedStarted = false;
 
 	if (qmdFound) {
 		const collName = getCollectionName();
@@ -402,6 +447,13 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 		if (!hasCollection) {
 			collectionCreated = await setupQmdCollection();
 		}
+
+		// Run initial index update + start background embed
+		await ensureQmdAvailableForUpdate();
+		await runQmdUpdateNow();
+		indexUpdated = true;
+		const child = runQmdEmbedDetached();
+		embedStarted = child !== null;
 	}
 
 	if (json) {
@@ -411,6 +463,8 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 				directory: dir,
 				qmd: qmdFound,
 				collectionCreated,
+				indexUpdated,
+				embedStarted,
 			},
 			true,
 		);
@@ -422,6 +476,12 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 				console.log(`  qmd collection '${getCollectionName()}' created.`);
 			} else {
 				console.log(`  qmd collection '${getCollectionName()}' already exists.`);
+			}
+			if (indexUpdated) {
+				console.log(`  Index updated.`);
+			}
+			if (embedStarted) {
+				console.log(`  Embedding started in background.`);
 			}
 		} else {
 			console.log(`  qmd not found — search features unavailable.`);
@@ -451,9 +511,16 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 
 	const qmdFound = await detectQmd();
 	let hasCollection = false;
+	let health = null;
 	if (qmdFound) {
 		hasCollection = await checkCollection();
+		if (hasCollection) {
+			await ensureQmdAvailableForSync();
+			health = await getQmdHealth();
+		}
 	}
+
+	const embedMode = getQmdEmbedMode();
 
 	if (json) {
 		output(
@@ -473,7 +540,9 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 				qmd: {
 					available: qmdFound,
 					collection: hasCollection ? getCollectionName() : null,
+					health,
 				},
+				embedMode,
 			},
 			true,
 		);
@@ -500,6 +569,16 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 			console.log(
 				`Collection '${getCollectionName()}': ${hasCollection ? "configured" : "not configured — run: agent-memory init"}`,
 			);
+			console.log(`Embed mode: ${embedMode}`);
+			if (health) {
+				if (health.totalFiles !== null) console.log(`Files indexed: ${health.totalFiles}`);
+				if (health.vectorsEmbedded !== null) console.log(`Vectors embedded: ${health.vectorsEmbedded}`);
+				if (health.pendingEmbed !== null && health.pendingEmbed > 0) {
+					console.log(`Pending embeds: ${health.pendingEmbed}`);
+					console.log(`  run: agent-memory sync`);
+				}
+				if (health.lastUpdated) console.log(`Last updated: ${health.lastUpdated}`);
+			}
 		} else {
 			console.log("qmd: not installed");
 		}
@@ -522,6 +601,7 @@ Commands:
   read        Read memory files
   scratchpad  Manage checklist items
   search      Search across memory files (requires qmd)
+  sync        Re-index and embed all files (requires qmd)
   init        Initialize memory directory and qmd collection
   status      Show configuration and status
 
@@ -541,6 +621,7 @@ Examples:
   agent-memory scratchpad done --text "PR #42"
   agent-memory search --query "database choice" --mode keyword
   agent-memory context --no-search
+  agent-memory sync
   agent-memory status --json`);
 }
 
@@ -578,6 +659,9 @@ async function main() {
 			break;
 		case "search":
 			await cmdSearch(flags);
+			break;
+		case "sync":
+			await cmdSync(flags);
 			break;
 		case "init":
 			await cmdInit(flags);

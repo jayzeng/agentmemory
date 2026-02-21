@@ -444,6 +444,27 @@ describe("CLI subprocess", () => {
 		});
 		expect(result.exitCode).toBe(1);
 	});
+
+	test("sync command runs without crash", async () => {
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "sync", "--dir", tmpDir, "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		// May fail if qmd not installed — that's fine, just shouldn't crash unexpectedly
+		// exitCode 1 is acceptable (qmd not found), we just check it doesn't throw
+		expect(result.exitCode === 0 || result.exitCode === 1).toBe(true);
+	});
+
+	test("status --json includes embedMode field", async () => {
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "status", "--dir", tmpDir, "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.embedMode).toBeDefined();
+		expect(["background", "manual", "off"]).toContain(out.embedMode);
+	});
 });
 
 // ---------------------------------------------------------------------------

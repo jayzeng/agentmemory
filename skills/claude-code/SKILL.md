@@ -6,96 +6,143 @@ allowed-tools: Bash(agent-memory *)
 
 # Agent Memory
 
-You have a persistent memory system. Use it to remember decisions, preferences, lessons learned, and context across sessions.
+You have a persistent memory system. Use it **proactively** — don't wait to be asked.
 
 ## Current Memory Context
 
 !`agent-memory context --no-search 2>/dev/null`
 
+## Session Lifecycle
+
+### On session start
+1. Review the memory context above — especially **open scratchpad items** (pick up where you left off)
+2. If the user's task relates to prior work, search for relevant memories:
+   ```bash
+   agent-memory search --query "<topic>" --mode keyword
+   ```
+
+### On session end (after significant work)
+1. Log what was accomplished in the daily log
+2. Mark completed scratchpad items as done; add new follow-ups
+3. Only write to long-term memory if you discovered a **durable fact** that doesn't already exist there
+
+## Where to Write — Decision Guide
+
+**Default to daily. Long-term is rare.**
+
+| What happened | Write to | Why |
+|---|---|---|
+| Made progress, fixed a bug, investigated something | `daily` | Session-specific — searchable later via qmd |
+| User said "remember this" about a preference or decision | `long_term` | Durable fact, needs to be in every session's context |
+| Discovered a recurring pattern (3rd time seeing it) | `long_term` | Graduated from daily observations to established fact |
+| Found a gotcha, workaround, or non-obvious behavior | `daily` first | If it keeps coming up, *then* promote to long-term |
+| TODO or follow-up for next session | `scratchpad` | Active task tracking |
+
+**MEMORY.md is a curated wiki, not a log.** It should stay under ~50 lines of high-signal content. If you're appending to it frequently, you're probably writing to the wrong target.
+
 ## Memory Commands
 
-All commands use the `agent-memory` CLI. Examples:
-
-### Write to memory
+### Write to daily log (default)
 
 ```bash
-# Save a long-term fact, decision, or preference
-agent-memory write --target long_term --content "User prefers TypeScript with strict mode"
+# Session notes, progress, bugs found, decisions made
+agent-memory write --target daily --content "Fixed auth bug in login.ts — token refresh was missing"
+agent-memory write --target daily --content "Investigated slow queries — N+1 in getUserOrders, added .include(:orders)"
+```
 
-# Overwrite MEMORY.md entirely (use with care)
+### Write to long-term memory (rare, curated)
+
+```bash
+# Only for durable facts that belong in every session's context
+agent-memory write --target long_term --content "Project uses Drizzle ORM with PostgreSQL. Migrations in db/migrations/. #architecture"
+
+# Overwrite MEMORY.md entirely (for curation — rewrite, don't append)
 agent-memory write --target long_term --content "..." --mode overwrite
-
-# Append to today's daily log
-agent-memory write --target daily --content "Fixed auth bug in login.ts — was missing token refresh"
 ```
 
-### Read memory
+When writing to long-term, prefer **overwrite mode** to curate the whole file rather than blindly appending. Read it first, then rewrite with the new fact incorporated.
+
+### Read
 
 ```bash
-# Read long-term memory
-agent-memory read --target long_term
-
-# Read today's daily log
-agent-memory read --target daily
-
-# Read a specific day's log
-agent-memory read --target daily --date 2026-02-15
-
-# List all daily logs
-agent-memory read --target list
-
-# Read scratchpad
-agent-memory read --target scratchpad
+agent-memory read --target daily             # Today's log
+agent-memory read --target daily --date 2026-02-15  # Specific day
+agent-memory read --target list              # All daily log files
+agent-memory read --target long_term         # MEMORY.md
+agent-memory read --target scratchpad        # Scratchpad checklist
 ```
 
-### Manage scratchpad (checklist)
+### Scratchpad (cross-session TODOs)
 
 ```bash
-# Add an item
 agent-memory scratchpad add --text "Review PR #42"
-
-# List items
 agent-memory scratchpad list
-
-# Mark item as done (matches by substring)
-agent-memory scratchpad done --text "PR #42"
-
-# Undo a done item
+agent-memory scratchpad done --text "PR #42"       # Matches by substring
 agent-memory scratchpad undo --text "PR #42"
-
-# Remove all completed items
-agent-memory scratchpad clear_done
+agent-memory scratchpad clear_done                  # Remove completed items
 ```
 
-### Search memory (requires qmd)
+### Search — recall past work
+
+Search is how you find things written to daily logs. Use it before duplicating effort.
 
 ```bash
-# Fast keyword search
-agent-memory search --query "database choice" --mode keyword
-
-# Semantic search (finds related concepts)
-agent-memory search --query "how do we handle auth" --mode semantic
-
-# Deep hybrid search with reranking
-agent-memory search --query "performance optimization" --mode deep --limit 10
+agent-memory search --query "database choice" --mode keyword    # Fast keyword
+agent-memory search --query "how we handle auth" --mode semantic # Finds related concepts
+agent-memory search --query "performance" --mode deep --limit 10 # Hybrid + reranking
 ```
 
-### Setup and status
+If qmd is not installed, fall back to reading files directly:
+```bash
+agent-memory read --target long_term
+agent-memory read --target daily
+```
+
+### Setup
 
 ```bash
-# Initialize memory directory and qmd collection
-agent-memory init
-
-# Show configuration and status
-agent-memory status
+agent-memory init      # Create dirs, detect qmd, setup collection
+agent-memory sync      # Re-index and embed all files (requires qmd)
+agent-memory status    # Show config, file counts, qmd status
 ```
+
+## Writing Good Entries
+
+### Daily log entries
+Describe what you did and what you learned. Future-you will search for these.
+
+```bash
+# Good — specific, searchable
+agent-memory write --target daily --content "Refactored auth middleware to use jose instead of jsonwebtoken. Reduced bundle by 40KB. Token validation now in middleware/auth.ts."
+
+# Bad — too vague to be useful in search
+agent-memory write --target daily --content "worked on auth stuff"
+```
+
+### Long-term entries
+Only facts that should appear in **every** session's context. Use `#tags` and `[[links]]`.
+
+```bash
+# Good — this belongs in every session
+agent-memory write --target long_term --content "Deploy: 'bun run deploy:prod', requires AWS_PROFILE=prod. #ops [[deploy]]"
+
+# Bad — this is a daily log entry, not a durable fact
+agent-memory write --target long_term --content "Fixed the deploy script today"
+```
+
+## Memory Hygiene
+
+- **Daily is the default** — when in doubt, write to daily
+- **MEMORY.md is a wiki** — curate it by reading + rewriting, not by appending endlessly
+- **Keep MEMORY.md under ~50 lines** — it's injected into every session, so only high-signal facts belong there
+- **Search before writing long-term** — the fact may already exist in a daily log, searchable via qmd
+- **Promote deliberately** — if a pattern appears in daily logs 3+ times, that's when it earns a spot in MEMORY.md
 
 ## Guidelines
 
-- When someone says "remember this" or asks you to note something, write it immediately using `agent-memory write`
-- Use `--target long_term` for durable facts: decisions, preferences, architecture choices, lessons learned
-- Use `--target daily` for session notes: what you worked on, bugs found, progress updates
-- Use the scratchpad for TODOs, follow-ups, and things to keep in mind
-- Use `#tags` (e.g. `#decision`, `#preference`, `#lesson`) and `[[links]]` (e.g. `[[auth-strategy]]`) in content to improve future search recall
-- Before starting a task, check if relevant context exists via `agent-memory search`
-- At the end of a significant work session, summarize what was done in the daily log
+- When someone says "remember this", decide: is it a durable fact (long-term) or a session note (daily)?
+- Default to `--target daily` for almost everything
+- Use `--target long_term` sparingly: architecture, preferences, key commands, hard-won lessons
+- Use the scratchpad for: TODOs, follow-ups, multi-session tracking
+- Use `#tags` and `[[links]]` in content to improve search recall
+- Use `agent-memory search` to recall past work before starting related tasks

@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 
 - `src/core.ts`: all logic — paths, truncation, scratchpad, context builder, qmd integration, standalone tool functions (`memoryWrite`, `memoryRead`, `scratchpadAction`, `memorySearch`)
-- `src/cli.ts`: CLI entry point — compiles to `dist/agent-memory` binary
+- `src/cli.ts`: CLI entry point — subcommands (context/write/read/scratchpad/search/init/status), compiles to `dist/agent-memory` binary
 - `skills/claude-code/SKILL.md`: Claude Code skill file
 - `skills/codex/SKILL.md`: Codex skill file
 - `skills/cursor/SKILL.md`: Cursor skill file
@@ -25,13 +25,14 @@ Files: `MEMORY.md`, `SCRATCHPAD.md`, `daily/YYYY-MM-DD.md`
 ## Build, Test, and Development Commands
 
 - `bun run build:cli`: compile CLI binary to `dist/agent-memory`
-- `bun test test/unit.test.ts`: run unit tests (no LLM/qmd needed)
-- `bun test test/cli.test.ts`: run CLI unit tests
+- `npm run build:lib`: emit `dist/` library build via `tsc`
 - `npm run build`: typecheck with `tsc` (`--noEmit`)
 - `npm run lint`: lint with Biome
-- `bash scripts/install-skills.sh`: install SKILL.md files for Claude Code and Codex
+- `bun test test/unit.test.ts` or `npm run test:unit`: run unit tests (no LLM/qmd needed)
+- `bun test test/cli.test.ts` or `npm run test:cli`: run CLI unit tests
+- `bash scripts/install-skills.sh` or `npm run install-skills`: install SKILL.md files for Claude Code and Codex
 - Optional (for `memory_search`, requires Bun): `command -v qmd >/dev/null 2>&1 || bun install -g https://github.com/tobi/qmd`
-- Optional search setup: `qmd collection add ~/.agent-memory --name agent-memory && qmd embed`
+- Optional search setup: `agent-memory init` (auto-creates qmd collection); run `qmd embed` once for semantic/deep search
 
 ## Coding Style & Naming Conventions
 
@@ -52,4 +53,6 @@ Files: `MEMORY.md`, `SCRATCHPAD.md`, `daily/YYYY-MM-DD.md`
 
 ## Security & Configuration Tips
 
+- `AGENT_MEMORY_DIR` controls the memory directory (default: `~/.agent-memory`).
+- `AGENT_MEMORY_QMD_UPDATE` controls qmd updates after writes (`background`, `manual`, `off`). `PI_MEMORY_QMD_UPDATE` is a legacy fallback.
 - Never commit real memory files or secrets.
