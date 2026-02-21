@@ -13,8 +13,7 @@ import * as path from "node:path";
 // Paths (mutable for testing via _setBaseDir / _resetBaseDir)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MEMORY_DIR =
-	process.env.AGENT_MEMORY_DIR ?? path.join(process.env.HOME ?? "~", ".agent-memory");
+const DEFAULT_MEMORY_DIR = process.env.AGENT_MEMORY_DIR ?? path.join(process.env.HOME ?? "~", ".agent-memory");
 
 let MEMORY_DIR = DEFAULT_MEMORY_DIR;
 let MEMORY_FILE = path.join(MEMORY_DIR, "MEMORY.md");
@@ -683,9 +682,7 @@ export function runQmdSearch(
 			}
 			try {
 				const parsed = parseQmdJson(stdout);
-				const results = Array.isArray(parsed)
-					? parsed
-					: ((parsed as any).results ?? (parsed as any).hits ?? []);
+				const results = Array.isArray(parsed) ? parsed : ((parsed as any).results ?? (parsed as any).hits ?? []);
 				resolve({ results, stderr: stderr ?? "" });
 			} catch (parseErr) {
 				if (parseErr instanceof Error) {

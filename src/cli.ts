@@ -238,12 +238,7 @@ async function cmdRead(flags: Record<string, string | boolean>) {
 	if (target === "scratchpad") {
 		const content = readFileSafe(getScratchpadFile());
 		if (!content?.trim()) {
-			output(
-				json
-					? { content: null }
-					: "SCRATCHPAD.md is empty or does not exist.",
-				json,
-			);
+			output(json ? { content: null } : "SCRATCHPAD.md is empty or does not exist.", json);
 			return;
 		}
 		output(json ? { content, path: getScratchpadFile() } : content, json);
@@ -253,28 +248,19 @@ async function cmdRead(flags: Record<string, string | boolean>) {
 	// long_term
 	const content = readFileSafe(getMemoryFile());
 	if (!content) {
-		output(
-			json ? { content: null } : "MEMORY.md is empty or does not exist.",
-			json,
-		);
+		output(json ? { content: null } : "MEMORY.md is empty or does not exist.", json);
 		return;
 	}
 	output(json ? { content, path: getMemoryFile() } : content, json);
 }
 
-async function cmdScratchpad(
-	flags: Record<string, string | boolean>,
-	positional: string[],
-) {
+async function cmdScratchpad(flags: Record<string, string | boolean>, positional: string[]) {
 	const json = hasFlag(flags, "json");
 	const action = positional[0];
 	const text = getFlag(flags, "text");
 
 	if (!action || !["add", "done", "undo", "clear_done", "list"].includes(action)) {
-		exitError(
-			"Usage: agent-memory scratchpad <add|done|undo|clear_done|list> [--text <text>]",
-			json,
-		);
+		exitError("Usage: agent-memory scratchpad <add|done|undo|clear_done|list> [--text <text>]", json);
 	}
 
 	ensureDirs();
@@ -288,11 +274,14 @@ async function cmdScratchpad(
 			return;
 		}
 		if (json) {
-			output({
-				items: items.map((i) => ({ done: i.done, text: i.text })),
-				count: items.length,
-				open: items.filter((i) => !i.done).length,
-			}, true);
+			output(
+				{
+					items: items.map((i) => ({ done: i.done, text: i.text })),
+					count: items.length,
+					open: items.filter((i) => !i.done).length,
+				},
+				true,
+			);
 		} else {
 			console.log(serializeScratchpad(items));
 		}
@@ -323,10 +312,7 @@ async function cmdScratchpad(
 			}
 		}
 		if (!matched) {
-			exitError(
-				`No matching ${targetDone ? "open" : "done"} item found for: "${text}"`,
-				json,
-			);
+			exitError(`No matching ${targetDone ? "open" : "done"} item found for: "${text}"`, json);
 		}
 		fs.writeFileSync(spFile, serializeScratchpad(items), "utf-8");
 		await ensureQmdAvailableForUpdate();
@@ -342,10 +328,7 @@ async function cmdScratchpad(
 		fs.writeFileSync(spFile, serializeScratchpad(items), "utf-8");
 		await ensureQmdAvailableForUpdate();
 		scheduleQmdUpdate();
-		output(
-			json ? { ok: true, action, removed } : `Cleared ${removed} done item(s).`,
-			json,
-		);
+		output(json ? { ok: true, action, removed } : `Cleared ${removed} done item(s).`, json);
 	}
 }
 
@@ -368,10 +351,7 @@ async function cmdSearch(flags: Record<string, string | boolean>) {
 	const collName = getCollectionName();
 	const hasCollection = await checkCollection(collName);
 	if (!hasCollection) {
-		exitError(
-			`qmd collection '${collName}' not found. Run: agent-memory init`,
-			json,
-		);
+		exitError(`qmd collection '${collName}' not found. Run: agent-memory init`, json);
 	}
 
 	try {
@@ -385,9 +365,7 @@ async function cmdSearch(flags: Record<string, string | boolean>) {
 		if (results.length === 0) {
 			const needsEmbed = /need embeddings/i.test(stderr ?? "");
 			if (needsEmbed && (mode === "semantic" || mode === "deep")) {
-				console.log(
-					`No results found. qmd reports missing embeddings — run: qmd embed`,
-				);
+				console.log(`No results found. qmd reports missing embeddings — run: qmd embed`);
 			} else {
 				console.log(`No results found for "${query}" (mode: ${mode}).`);
 			}
@@ -405,10 +383,7 @@ async function cmdSearch(flags: Record<string, string | boolean>) {
 			console.log("");
 		}
 	} catch (err) {
-		exitError(
-			`Search failed: ${err instanceof Error ? err.message : String(err)}`,
-			json,
-		);
+		exitError(`Search failed: ${err instanceof Error ? err.message : String(err)}`, json);
 	}
 }
 
@@ -430,12 +405,15 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 	}
 
 	if (json) {
-		output({
-			ok: true,
-			directory: dir,
-			qmd: qmdFound,
-			collectionCreated,
-		}, true);
+		output(
+			{
+				ok: true,
+				directory: dir,
+				qmd: qmdFound,
+				collectionCreated,
+			},
+			true,
+		);
 	} else {
 		console.log(`Memory directory: ${dir}`);
 		console.log(`  MEMORY.md, SCRATCHPAD.md, daily/ created.`);
@@ -466,9 +444,7 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 
 	let dailyCount = 0;
 	try {
-		dailyCount = fs
-			.readdirSync(dailyDir)
-			.filter((f) => f.endsWith(".md")).length;
+		dailyCount = fs.readdirSync(dailyDir).filter((f) => f.endsWith(".md")).length;
 	} catch {
 		// directory may not exist
 	}
@@ -480,26 +456,27 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 	}
 
 	if (json) {
-		output({
-			directory: dir,
-			memoryFile: {
-				exists: memContent !== null,
-				chars: memContent?.length ?? 0,
-				lines: memContent ? memContent.split("\n").length : 0,
+		output(
+			{
+				directory: dir,
+				memoryFile: {
+					exists: memContent !== null,
+					chars: memContent?.length ?? 0,
+					lines: memContent ? memContent.split("\n").length : 0,
+				},
+				scratchpadFile: {
+					exists: spContent !== null,
+					items: spContent ? parseScratchpad(spContent).length : 0,
+					openItems: spContent ? parseScratchpad(spContent).filter((i) => !i.done).length : 0,
+				},
+				dailyLogs: dailyCount,
+				qmd: {
+					available: qmdFound,
+					collection: hasCollection ? getCollectionName() : null,
+				},
 			},
-			scratchpadFile: {
-				exists: spContent !== null,
-				items: spContent ? parseScratchpad(spContent).length : 0,
-				openItems: spContent
-					? parseScratchpad(spContent).filter((i) => !i.done).length
-					: 0,
-			},
-			dailyLogs: dailyCount,
-			qmd: {
-				available: qmdFound,
-				collection: hasCollection ? getCollectionName() : null,
-			},
-		}, true);
+			true,
+		);
 	} else {
 		console.log(`Memory directory: ${dir}`);
 		console.log("");
