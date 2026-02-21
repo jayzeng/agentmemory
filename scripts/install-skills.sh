@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install agent-memory skills for Claude Code and Codex CLI.
+# Install agent-memory skills for Claude Code, Codex, Cursor, and Agent CLI.
 # Usage: bash scripts/install-skills.sh
 
 set -euo pipefail
@@ -7,25 +7,30 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Claude Code skill
-CLAUDE_SKILL_DIR="$HOME/.claude/skills/agent-memory"
-if [ -d "$PROJECT_DIR/skills/claude-code" ]; then
-  mkdir -p "$CLAUDE_SKILL_DIR"
-  cp "$PROJECT_DIR/skills/claude-code/SKILL.md" "$CLAUDE_SKILL_DIR/SKILL.md"
-  echo "Installed Claude Code skill: $CLAUDE_SKILL_DIR/SKILL.md"
-else
-  echo "Skipping Claude Code skill (skills/claude-code/ not found)"
-fi
+install_skill() {
+  local label="$1"
+  local src_dir="$2"
+  local dest_dir="$3"
+  local home_marker="$4"
 
-# Codex skill
-CODEX_SKILL_DIR="$HOME/.codex/skills/agent-memory"
-if [ -d "$PROJECT_DIR/skills/codex" ]; then
-  mkdir -p "$CODEX_SKILL_DIR"
-  cp "$PROJECT_DIR/skills/codex/SKILL.md" "$CODEX_SKILL_DIR/SKILL.md"
-  echo "Installed Codex skill: $CODEX_SKILL_DIR/SKILL.md"
-else
-  echo "Skipping Codex skill (skills/codex/ not found)"
-fi
+  if [ ! -d "$home_marker" ]; then
+    echo "Skipping $label ($home_marker not found)"
+    return
+  fi
+
+  if [ -d "$src_dir" ]; then
+    mkdir -p "$dest_dir"
+    cp "$src_dir/SKILL.md" "$dest_dir/SKILL.md"
+    echo "Installed $label: $dest_dir/SKILL.md"
+  else
+    echo "Skipping $label ($src_dir not found)"
+  fi
+}
+
+install_skill "Claude Code skill" "$PROJECT_DIR/skills/claude-code" "$HOME/.claude/skills/agent-memory" "$HOME/.claude"
+install_skill "Codex skill" "$PROJECT_DIR/skills/codex" "$HOME/.codex/skills/agent-memory" "$HOME/.codex"
+install_skill "Cursor skill" "$PROJECT_DIR/skills/cursor" "$HOME/.cursor/skills/agent-memory" "$HOME/.cursor"
+install_skill "Agent CLI skill" "$PROJECT_DIR/skills/agent" "$HOME/.agents/skills/agent-memory" "$HOME/.agents"
 
 echo ""
 echo "Done."

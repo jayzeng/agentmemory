@@ -445,3 +445,61 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(1);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 7. Install scripts
+// ---------------------------------------------------------------------------
+
+describe("install scripts", () => {
+	let tmpHome: string;
+	const repoRoot = path.join(__dirname, "..");
+
+	beforeEach(() => {
+		tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-home-"));
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpHome, { recursive: true, force: true });
+	});
+
+	test("install-skills.sh copies skill files into HOME", () => {
+		fs.mkdirSync(path.join(tmpHome, ".claude"), { recursive: true });
+		fs.mkdirSync(path.join(tmpHome, ".codex"), { recursive: true });
+		fs.mkdirSync(path.join(tmpHome, ".cursor"), { recursive: true });
+		fs.mkdirSync(path.join(tmpHome, ".agents"), { recursive: true });
+
+		const result = Bun.spawnSync(["bash", path.join(repoRoot, "scripts", "install-skills.sh")], {
+			cwd: repoRoot,
+			env: { ...process.env, HOME: tmpHome },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(result.exitCode).toBe(0);
+
+		const cases: Array<{ src: string; dest: string }> = [
+			{
+				src: path.join(repoRoot, "skills", "claude-code", "SKILL.md"),
+				dest: path.join(tmpHome, ".claude", "skills", "agent-memory", "SKILL.md"),
+			},
+			{
+				src: path.join(repoRoot, "skills", "codex", "SKILL.md"),
+				dest: path.join(tmpHome, ".codex", "skills", "agent-memory", "SKILL.md"),
+			},
+			{
+				src: path.join(repoRoot, "skills", "cursor", "SKILL.md"),
+				dest: path.join(tmpHome, ".cursor", "skills", "agent-memory", "SKILL.md"),
+			},
+			{
+				src: path.join(repoRoot, "skills", "agent", "SKILL.md"),
+				dest: path.join(tmpHome, ".agents", "skills", "agent-memory", "SKILL.md"),
+			},
+		];
+
+		for (const c of cases) {
+			expect(fs.existsSync(c.dest)).toBe(true);
+			const src = fs.readFileSync(c.src, "utf-8");
+			const dest = fs.readFileSync(c.dest, "utf-8");
+			expect(dest).toBe(src);
+		}
+	});
+});

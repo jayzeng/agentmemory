@@ -3,27 +3,33 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 
-# Claude Code skill
-$ClaudeSkillDir = Join-Path $env:USERPROFILE ".claude\\skills\\agent-memory"
-$ClaudeSkillSrc = Join-Path $ProjectDir "skills\\claude-code\\SKILL.md"
-if (Test-Path $ClaudeSkillSrc) {
-	New-Item -ItemType Directory -Force -Path $ClaudeSkillDir | Out-Null
-	Copy-Item -Force $ClaudeSkillSrc (Join-Path $ClaudeSkillDir "SKILL.md")
-	Write-Host "Installed Claude Code skill: $ClaudeSkillDir\\SKILL.md"
-} else {
-	Write-Host "Skipping Claude Code skill (skills\\claude-code\\SKILL.md not found)"
+function Install-Skill {
+	param(
+		[string]$Label,
+		[string]$SrcDir,
+		[string]$DestDir,
+		[string]$HomeMarker
+	)
+
+	if (-not (Test-Path $HomeMarker)) {
+		Write-Host "Skipping $Label ($HomeMarker not found)"
+		return
+	}
+
+	$SkillSrc = Join-Path $SrcDir "SKILL.md"
+	if (Test-Path $SkillSrc) {
+		New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+		Copy-Item -Force $SkillSrc (Join-Path $DestDir "SKILL.md")
+		Write-Host "Installed $Label: $DestDir\\SKILL.md"
+	} else {
+		Write-Host "Skipping $Label ($SkillSrc not found)"
+	}
 }
 
-# Codex skill
-$CodexSkillDir = Join-Path $env:USERPROFILE ".codex\\skills\\agent-memory"
-$CodexSkillSrc = Join-Path $ProjectDir "skills\\codex\\SKILL.md"
-if (Test-Path $CodexSkillSrc) {
-	New-Item -ItemType Directory -Force -Path $CodexSkillDir | Out-Null
-	Copy-Item -Force $CodexSkillSrc (Join-Path $CodexSkillDir "SKILL.md")
-	Write-Host "Installed Codex skill: $CodexSkillDir\\SKILL.md"
-} else {
-	Write-Host "Skipping Codex skill (skills\\codex\\SKILL.md not found)"
-}
+Install-Skill -Label "Claude Code skill" -SrcDir (Join-Path $ProjectDir "skills\\claude-code") -DestDir (Join-Path $env:USERPROFILE ".claude\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".claude")
+Install-Skill -Label "Codex skill" -SrcDir (Join-Path $ProjectDir "skills\\codex") -DestDir (Join-Path $env:USERPROFILE ".codex\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".codex")
+Install-Skill -Label "Cursor skill" -SrcDir (Join-Path $ProjectDir "skills\\cursor") -DestDir (Join-Path $env:USERPROFILE ".cursor\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".cursor")
+Install-Skill -Label "Agent CLI skill" -SrcDir (Join-Path $ProjectDir "skills\\agent") -DestDir (Join-Path $env:USERPROFILE ".agents\\skills\\agent-memory") -HomeMarker (Join-Path $env:USERPROFILE ".agents")
 
 Write-Host ""
 Write-Host "Done."

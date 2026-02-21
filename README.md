@@ -1,6 +1,6 @@
 # agent-memory
 
-Persistent memory for coding agents — [Claude Code](https://claude.ai/code) and [OpenAI Codex](https://github.com/openai/codex). Semantic search powered by [qmd](https://github.com/tobi/qmd).
+Persistent memory for coding agents — [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), Cursor, and Agent (Cursor CLI). Semantic search powered by [qmd](https://github.com/tobi/qmd).
 
 Thanks to https://github.com/skyfallsin/pi-mem for inspiration.
 
@@ -12,6 +12,9 @@ Long-term facts, daily logs, and a scratchpad checklist stored as plain markdown
 # Install the CLI globally
 npm install -g myagentmemory
 
+# If you hit SSL errors due to corporate MITM/inspection, try:
+# npm config set strict-ssl false
+
 # Or build from source
 bun run build:cli
 # => produces dist/agent-memory
@@ -19,7 +22,7 @@ bun run build:cli
 # Initialize memory directory
 agent-memory init
 
-# Install skill files for Claude Code and Codex
+# Install skill files for Claude Code, Codex, Cursor, and Agent
 bash scripts/install-skills.sh
 pwsh -File scripts/install-skills.ps1
 ```
@@ -27,8 +30,12 @@ pwsh -File scripts/install-skills.ps1
 This installs:
 - `~/.claude/skills/agent-memory/SKILL.md` — Claude Code skill
 - `~/.codex/skills/agent-memory/SKILL.md` — Codex skill
+- `~/.cursor/skills/agent-memory/SKILL.md` — Cursor skill
+- `~/.agents/skills/agent-memory/SKILL.md` — Agent CLI skill (Cursor)
 - `%USERPROFILE%\.claude\skills\agent-memory\SKILL.md` — Claude Code skill (Windows)
 - `%USERPROFILE%\.codex\skills\agent-memory\SKILL.md` — Codex skill (Windows)
+- `%USERPROFILE%\.cursor\skills\agent-memory\SKILL.md` — Cursor skill (Windows)
+- `%USERPROFILE%\.agents\skills\agent-memory\SKILL.md` — Agent CLI skill (Windows)
 
 ### Optional: Enable search with qmd
 
@@ -58,7 +65,9 @@ Without qmd, all core tools (write/read/scratchpad) work normally. Only `memory_
   ┌──────────┐   ┌──────────────┐
   │ src/     │   │ skills/      │
   │ cli.ts   │   │ ├─ claude-code/SKILL.md
-  │          │   │ └─ codex/SKILL.md
+  │          │   │ ├─ codex/SKILL.md
+  │          │   │ ├─ cursor/SKILL.md
+  │          │   │ └─ agent/SKILL.md
   └──────────┘   └──────────────┘
    CLI binary     instruction files
    `agent-memory` that invoke CLI
@@ -116,7 +125,7 @@ Before every agent turn, the following are injected into the system prompt (in p
 
 Total injection is capped at 16K chars. When qmd is unavailable, step 3 is skipped and the rest works as before.
 
-For Claude Code, context is injected via the `!`agent-memory context`` syntax in the SKILL.md. For Codex, the agent runs `agent-memory context` at session start.
+For Claude Code, context is injected via the `!`agent-memory context`` syntax in the SKILL.md. For Codex, Cursor, and Agent, the agent runs `agent-memory context` at session start.
 
 ### Selective injection
 

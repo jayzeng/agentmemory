@@ -6,6 +6,8 @@
 - `src/cli.ts`: CLI entry point — compiles to `dist/agent-memory` binary
 - `skills/claude-code/SKILL.md`: Claude Code skill file
 - `skills/codex/SKILL.md`: Codex skill file
+- `skills/cursor/SKILL.md`: Cursor skill file
+- `skills/agent/SKILL.md`: Agent (Cursor CLI) skill file
 - `test/unit.test.ts`, `test/cli.test.ts`: unit tests (bun:test)
 - `README.md`: user-facing install/usage docs
 
