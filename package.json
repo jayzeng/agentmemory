@@ -52,7 +52,7 @@
 		"postinstall": "node scripts/postinstall.cjs",
 		"build": "tsc -p tsconfig.json --noEmit",
 		"build:lib": "tsc -p tsconfig.build.json",
-		"build:cli": "bun build src/cli.ts --compile --outfile dist/agent-memory",
+		"build:cli": "bun build src/cli.ts --compile --outfile dist/agent-memory --define __VERSION__=\"'$(node -p \"require('./package.json').version\")'\"",
 		"prepack": "npm run build:lib && bun run build:cli",
 		"lint": "biome check .",
 		"test": "bun test test/unit.test.ts",

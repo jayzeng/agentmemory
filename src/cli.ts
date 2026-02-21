@@ -3,6 +3,7 @@
  * agent-memory CLI
  *
  * Subcommands:
+ *   version    — Print binary version
  *   context    — Build & print context injection string to stdout
  *   write      — Write to memory files
  *   read       — Read memory files
@@ -17,6 +18,10 @@
  */
 
 import * as fs from "node:fs";
+
+declare const __VERSION__: string;
+const VERSION = typeof __VERSION__ !== "undefined" ? __VERSION__ : "dev";
+
 import {
 	_setBaseDir,
 	buildMemoryContext,
@@ -596,6 +601,7 @@ Usage:
   agent-memory <command> [options]
 
 Commands:
+  version     Show binary version
   context     Build & print context injection string
   write       Write to memory files
   read        Read memory files
@@ -637,6 +643,11 @@ async function main() {
 	const dir = getFlag(flags, "dir");
 	if (dir) {
 		_setBaseDir(dir);
+	}
+
+	if (command === "version" || hasFlag(flags, "version")) {
+		output(json ? { version: VERSION } : VERSION, json);
+		return;
 	}
 
 	if (!command || command === "help" || hasFlag(flags, "help")) {
