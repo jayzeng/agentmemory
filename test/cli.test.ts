@@ -70,6 +70,7 @@ describe("core imports", () => {
 	test("ensureDirs creates directory structure", () => {
 		expect(fs.existsSync(tmpDir)).toBe(true);
 		expect(fs.existsSync(path.join(tmpDir, "daily"))).toBe(true);
+		expect(fs.existsSync(path.join(tmpDir, "topics"))).toBe(true);
 	});
 });
 
@@ -328,6 +329,7 @@ describe("CLI subprocess", () => {
 		const out = JSON.parse(result.stdout.toString());
 		expect(out.directory).toBe(tmpDir);
 		expect(out.dailyLogs).toBe(0);
+		expect(out.topics).toBe(0);
 	});
 
 	test("write and read round-trip", async () => {
@@ -372,9 +374,65 @@ describe("CLI subprocess", () => {
 		expect(readOut.content).toContain("Test content");
 	});
 
+	test("write and read topic round-trip", async () => {
+		const writeResult = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--dir",
+				tmpDir,
+				"--target",
+				"topic",
+				"--topic",
+				"auth",
+				"--content",
+				"JWT refresh rolled out #auth",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(writeResult.exitCode).toBe(0);
+		const writeOut = JSON.parse(writeResult.stdout.toString());
+		expect(writeOut.ok).toBe(true);
+
+		const readResult = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"read",
+				"--dir",
+				tmpDir,
+				"--target",
+				"topic",
+				"--topic",
+				"auth",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(readResult.exitCode).toBe(0);
+		const readOut = JSON.parse(readResult.stdout.toString());
+		expect(readOut.content).toContain("JWT refresh rolled out");
+	});
+
 	test("context returns memory content", async () => {
 		// Write some memory first
 		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Context test memory", "utf-8");
+		fs.writeFileSync(
+			path.join(tmpDir, "topics", "auth.md"),
+			[
+				"# Topic: Auth",
+				"<!-- created: 2026-02-21 09:00:00 [init] -->",
+				"",
+				"<!-- 2026-02-21 10:00:00 [abc] -->",
+				"Rolled JWT refresh to edge #auth",
+				"Daily: [[2026-02-21]]",
+			].join("\n"),
+			"utf-8",
+		);
 
 		const result = Bun.spawnSync(
 			[
@@ -392,6 +450,7 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		const out = JSON.parse(result.stdout.toString());
 		expect(out.context).toContain("Context test memory");
+		expect(out.context).toContain("## Topics (recent)");
 	});
 
 	test("scratchpad add and list round-trip", async () => {
@@ -526,7 +585,162 @@ describe("CLI subprocess", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Install scripts
+// 7. Default write target (CLI subprocess)
+// ---------------------------------------------------------------------------
+
+describe("CLI default write target", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	test("write without --target defaults to daily", async () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--dir",
+				tmpDir,
+				"--content",
+				"Default target test",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+		expect(out.target).toBe("daily");
+
+		// Verify file was written to daily directory
+		const today = todayStr();
+		const dailyContent = readFileSafe(dailyPath(today));
+		expect(dailyContent).toContain("Default target test");
+	});
+
+	test("write with --target long_term still works", async () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--dir",
+				tmpDir,
+				"--target",
+				"long_term",
+				"--content",
+				"Long-term test",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+		expect(out.target).toBe("long_term");
+	});
+
+	test("write with invalid --target errors", async () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--dir",
+				tmpDir,
+				"--target",
+				"invalid",
+				"--content",
+				"test",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 8. Distil command (CLI subprocess)
+// ---------------------------------------------------------------------------
+
+describe("CLI distil command", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	test("distil --dry-run --json returns result without writing", async () => {
+		// Create a daily log
+		const dailyDir = path.join(tmpDir, "daily");
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-20.md"),
+			"<!-- 2026-02-20 10:00:00 [abc] -->\nFixed auth bug #auth",
+			"utf-8",
+		);
+
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "distil", "--dir", tmpDir, "--dry-run", "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+		expect(out.dryRun).toBe(true);
+		expect(out.totalEntries).toBe(1);
+		expect(out.output).toContain("# Memory Index");
+
+		// MEMORY.md should not exist (dry run)
+		expect(readFileSafe(path.join(tmpDir, "MEMORY.md"))).toBeNull();
+	});
+
+	test("distil --json writes MEMORY.md", async () => {
+		const dailyDir = path.join(tmpDir, "daily");
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-20.md"),
+			"<!-- 2026-02-20 10:00:00 [abc] -->\nFixed bug #testing",
+			"utf-8",
+		);
+
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "distil", "--dir", tmpDir, "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+		expect(out.dryRun).toBe(false);
+
+		// MEMORY.md should now exist
+		const content = readFileSafe(path.join(tmpDir, "MEMORY.md"));
+		expect(content).not.toBeNull();
+		expect(content).toContain("# Memory Index");
+	});
+
+	test("distill (double-l) also works", async () => {
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "distill", "--dir", tmpDir, "--dry-run", "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+	});
+
+	test("distil with no daily logs", async () => {
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "distil", "--dir", tmpDir, "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+		expect(out.totalEntries).toBe(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 9. Install scripts
 // ---------------------------------------------------------------------------
 
 describe("install scripts", () => {

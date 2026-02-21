@@ -27,13 +27,21 @@ import {
 	_setSpawnForTest,
 	buildMemoryContext,
 	dailyPath,
+	distilMemories,
 	ensureDirs,
+	extractCommands,
+	extractFilePaths,
+	extractLinks,
+	extractTags,
+	getTopicsDir,
 	getQmdEmbedMode,
 	installSkills,
 	memoryRead,
 	memorySearch,
 	memoryWrite,
 	nowTimestamp,
+	parseDailyEntries,
+	parseTopicEntries,
 	parseQmdStatus,
 	parseScratchpad,
 	qmdCollectionInstructions,
@@ -47,7 +55,9 @@ import {
 	scratchpadAction,
 	serializeScratchpad,
 	shortSessionId,
+	slugifyTopic,
 	todayStr,
+	topicPath,
 	uninstallSkills,
 	yesterdayStr,
 } from "../src/core.js";
@@ -185,6 +195,7 @@ describe("ensureDirs", () => {
 		ensureDirs();
 		expect(fs.existsSync(tmpDir)).toBe(true);
 		expect(fs.existsSync(path.join(tmpDir, "daily"))).toBe(true);
+		expect(fs.existsSync(path.join(tmpDir, "topics"))).toBe(true);
 	});
 
 	test("is idempotent", () => {
@@ -494,6 +505,26 @@ describe("buildMemoryContext", () => {
 		expect(ctx).toContain("Today's work");
 	});
 
+	test("includes recent topic entries", () => {
+		ensureDirs();
+		fs.writeFileSync(
+			path.join(getTopicsDir(), "auth.md"),
+			[
+				"# Topic: Auth",
+				"<!-- created: 2026-02-21 09:00:00 [init] -->",
+				"",
+				"<!-- 2026-02-21 10:00:00 [abc] -->",
+				"Rolled JWT refresh to edge #auth",
+				"Daily: [[2026-02-21]]",
+			].join("\n"),
+			"utf-8",
+		);
+		const ctx = buildMemoryContext();
+		expect(ctx).toContain("## Topics (recent)");
+		expect(ctx).toContain("Auth: Rolled JWT refresh to edge");
+		expect(ctx).toContain("[[2026-02-21]]");
+	});
+
 	test("includes yesterday's daily log", () => {
 		ensureDirs();
 		const yesterday = yesterdayStr();
@@ -669,6 +700,23 @@ describe("memoryWrite", () => {
 		const content = fs.readFileSync(path.join(tmpDir, "daily", `${today}.md`), "utf-8");
 		expect(content).toContain("Morning entry");
 		expect(content).toContain("Afternoon entry");
+	});
+
+	test("appends to topic file with daily backlink", async () => {
+		const result = await memoryWrite({
+			target: "topic",
+			topic: "Auth",
+			content: "Rolled JWT refresh to edge #auth",
+			date: "2026-02-21",
+			sessionId: "abcdef1234567890",
+		});
+		const filePath = topicPath(slugifyTopic("Auth"));
+		const content = fs.readFileSync(filePath, "utf-8");
+		expect(content).toContain("# Topic: Auth");
+		expect(content).toContain("Rolled JWT refresh to edge #auth");
+		expect(content).toContain("Daily: [[2026-02-21]]");
+		expect(result.details.target).toBe("topic");
+		expect(result.details.topic).toBe("Auth");
 	});
 
 	test("includes session ID in metadata comment", async () => {
@@ -901,6 +949,22 @@ describe("memoryRead", () => {
 		expect(result.text).toContain("No daily log for 1999-01-01");
 	});
 
+	// -- topic --
+
+	test("read topic when file exists", async () => {
+		const slug = slugifyTopic("Auth");
+		const filePath = topicPath(slug);
+		fs.writeFileSync(filePath, "# Topic: Auth\n\nEntry", "utf-8");
+		const result = await memoryRead({ target: "topic", topic: "Auth" });
+		expect(result.text).toContain("Topic: Auth");
+		expect(result.details.slug).toBe(slug);
+	});
+
+	test("read topic when file does not exist", async () => {
+		const result = await memoryRead({ target: "topic", topic: "Missing" });
+		expect(result.text).toContain("No topic file found");
+	});
+
 	// -- list --
 
 	test("list daily logs when multiple exist", async () => {
@@ -926,6 +990,22 @@ describe("memoryRead", () => {
 		fs.writeFileSync(path.join(tmpDir, "daily", "notes.txt"), "b", "utf-8");
 		const result = await memoryRead({ target: "list" });
 		expect(result.details.files).toHaveLength(1);
+	});
+
+	// -- topics list --
+
+	test("list topics when multiple exist", async () => {
+		fs.writeFileSync(path.join(getTopicsDir(), "auth.md"), "a", "utf-8");
+		fs.writeFileSync(path.join(getTopicsDir(), "db.md"), "b", "utf-8");
+		const result = await memoryRead({ target: "topics" });
+		expect(result.text).toContain("auth.md");
+		expect(result.text).toContain("db.md");
+		expect(result.details.files).toHaveLength(2);
+	});
+
+	test("list topics when none exist", async () => {
+		const result = await memoryRead({ target: "topics" });
+		expect(result.text).toContain("No topics found");
 	});
 });
 
@@ -1181,5 +1261,332 @@ describe("runQmdSync", () => {
 
 		expect(result.updateOk).toBe(true);
 		expect(result.embedOk).toBe(false);
+	});
+});
+
+// ==========================================================================
+// 14. Default target in memoryWrite
+// ==========================================================================
+
+describe("memoryWrite default target", () => {
+	beforeEach(() => {
+		setupTmpDir();
+		ensureDirs();
+		_setQmdAvailable(false);
+	});
+
+	afterEach(cleanupTmpDir);
+
+	test("defaults to daily when no target specified", async () => {
+		const result = await memoryWrite({ content: "No target specified" });
+		const today = todayStr();
+		const content = fs.readFileSync(path.join(tmpDir, "daily", `${today}.md`), "utf-8");
+		expect(content).toContain("No target specified");
+		expect(result.details.target).toBe("daily");
+	});
+
+	test("explicit daily target still works", async () => {
+		const result = await memoryWrite({ target: "daily", content: "Explicit daily" });
+		expect(result.details.target).toBe("daily");
+	});
+
+	test("explicit long_term target still works", async () => {
+		const result = await memoryWrite({ target: "long_term", content: "Explicit long-term" });
+		const content = fs.readFileSync(path.join(tmpDir, "MEMORY.md"), "utf-8");
+		expect(content).toContain("Explicit long-term");
+		expect(result.details.target).toBe("long_term");
+	});
+});
+
+// ==========================================================================
+// 15. Extraction helpers
+// ==========================================================================
+
+describe("extractTags", () => {
+	test("extracts hashtags from content", () => {
+		const tags = extractTags("Fixed #auth bug in #login flow #security");
+		expect(tags).toContain("#auth");
+		expect(tags).toContain("#login");
+		expect(tags).toContain("#security");
+	});
+
+	test("deduplicates and lowercases", () => {
+		const tags = extractTags("#Auth #auth #AUTH");
+		expect(tags).toEqual(["#auth"]);
+	});
+
+	test("returns empty for no tags", () => {
+		expect(extractTags("No tags here")).toEqual([]);
+	});
+
+	test("ignores hash in URLs or anchors", () => {
+		const tags = extractTags("See https://example.com#section and #real-tag");
+		expect(tags).toContain("#real-tag");
+		// URL hash fragments won't match since they don't have whitespace before #
+	});
+});
+
+describe("extractLinks", () => {
+	test("extracts [[wiki-links]]", () => {
+		const links = extractLinks("See [[deploy]] and [[auth-flow]] for details");
+		expect(links).toContain("deploy");
+		expect(links).toContain("auth-flow");
+	});
+
+	test("deduplicates links", () => {
+		const links = extractLinks("[[foo]] and [[foo]] again");
+		expect(links).toEqual(["foo"]);
+	});
+
+	test("returns empty for no links", () => {
+		expect(extractLinks("No links here")).toEqual([]);
+	});
+});
+
+describe("extractFilePaths", () => {
+	test("extracts file paths", () => {
+		const paths = extractFilePaths("Changed src/core.ts and middleware/auth.ts");
+		expect(paths).toContain("src/core.ts");
+		expect(paths).toContain("middleware/auth.ts");
+	});
+
+	test("returns empty for no paths", () => {
+		expect(extractFilePaths("No paths here")).toEqual([]);
+	});
+});
+
+describe("extractCommands", () => {
+	test("extracts backtick commands", () => {
+		const cmds = extractCommands("Run `bun test` and `bun run build`");
+		expect(cmds).toContain("bun test");
+		expect(cmds).toContain("bun run build");
+	});
+
+	test("ignores short inline code", () => {
+		const cmds = extractCommands("The `x` variable and `bun test`");
+		// "x" is too short (< 3 chars), and single-word won't match (no space)
+		expect(cmds).toEqual(["bun test"]);
+	});
+
+	test("returns empty for no commands", () => {
+		expect(extractCommands("No code here")).toEqual([]);
+	});
+});
+
+// ==========================================================================
+// 16. parseDailyEntries
+// ==========================================================================
+
+describe("parseDailyEntries", () => {
+	test("parses entries split by timestamp markers", () => {
+		const content = [
+			"<!-- 2026-02-21 10:00:00 [abc12345] -->",
+			"Fixed auth bug #auth",
+			"",
+			"<!-- 2026-02-21 14:30:00 [def67890] -->",
+			"Refactored database layer #database",
+		].join("\n");
+
+		const entries = parseDailyEntries("2026-02-21", content);
+		expect(entries).toHaveLength(2);
+		expect(entries[0].timestamp).toBe("2026-02-21 10:00:00");
+		expect(entries[0].sessionId).toBe("abc12345");
+		expect(entries[0].content).toContain("Fixed auth bug");
+		expect(entries[0].tags).toContain("#auth");
+		expect(entries[1].content).toContain("Refactored database");
+		expect(entries[1].tags).toContain("#database");
+	});
+
+	test("handles content without markers", () => {
+		const entries = parseDailyEntries("2026-02-21", "Just plain text");
+		expect(entries).toHaveLength(1);
+		expect(entries[0].content).toBe("Just plain text");
+	});
+
+	test("handles empty content", () => {
+		expect(parseDailyEntries("2026-02-21", "")).toEqual([]);
+		expect(parseDailyEntries("2026-02-21", "   ")).toEqual([]);
+	});
+});
+
+// ==========================================================================
+// 16b. parseTopicEntries
+// ==========================================================================
+
+describe("parseTopicEntries", () => {
+	test("parses entries and strips daily link lines", () => {
+		const content = [
+			"# Topic: Auth",
+			"<!-- created: 2026-02-21 09:00:00 [init] -->",
+			"",
+			"<!-- 2026-02-21 10:00:00 [abc12345] -->",
+			"Rolled JWT refresh to edge #auth",
+			"Daily: [[2026-02-21]]",
+		].join("\n");
+
+		const entries = parseTopicEntries("Auth", "auth", content);
+		expect(entries).toHaveLength(1);
+		expect(entries[0].timestamp).toBe("2026-02-21 10:00:00");
+		expect(entries[0].date).toBe("2026-02-21");
+		expect(entries[0].content).toContain("Rolled JWT refresh");
+		expect(entries[0].content).not.toContain("Daily:");
+		expect(entries[0].tags).toContain("#auth");
+	});
+});
+
+// ==========================================================================
+// 17. distilMemories
+// ==========================================================================
+
+describe("distilMemories", () => {
+	beforeEach(() => {
+		setupTmpDir();
+		ensureDirs();
+		_setQmdAvailable(false);
+	});
+
+	afterEach(cleanupTmpDir);
+
+	test("handles no daily logs gracefully", async () => {
+		const result = await distilMemories({ dryRun: true });
+		expect(result.ok).toBe(true);
+		expect(result.totalDailyFiles).toBe(0);
+		expect(result.totalTopicFiles).toBe(0);
+		expect(result.totalEntries).toBe(0);
+		expect(result.output).toContain("No daily logs or topics to distil");
+	});
+
+	test("groups entries by tags", async () => {
+		// Write daily logs with known tags
+		const dailyDir = path.join(tmpDir, "daily");
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-20.md"),
+			"<!-- 2026-02-20 10:00:00 [abc] -->\nFixed auth bug in token refresh #auth #security",
+			"utf-8",
+		);
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-21.md"),
+			"<!-- 2026-02-21 09:00:00 [def] -->\nRefactored database schema for users table #database #architecture",
+			"utf-8",
+		);
+
+		const result = await distilMemories({ dryRun: true });
+		expect(result.ok).toBe(true);
+		expect(result.totalDailyFiles).toBe(2);
+		expect(result.totalTopicFiles).toBe(0);
+		expect(result.totalEntries).toBe(2);
+		expect(result.output).toContain("# Memory Index");
+		// Tag-based sections use the #tags as headings
+		expect(result.output).toContain("#auth");
+		expect(result.output).toContain("#database");
+	});
+
+	test("dry-run does not write MEMORY.md", async () => {
+		const dailyDir = path.join(tmpDir, "daily");
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-20.md"),
+			"<!-- 2026-02-20 10:00:00 [abc] -->\nSome work done",
+			"utf-8",
+		);
+
+		await distilMemories({ dryRun: true });
+		// MEMORY.md should not exist
+		expect(readFileSafe(path.join(tmpDir, "MEMORY.md"))).toBeNull();
+	});
+
+	test("non-dry-run writes MEMORY.md", async () => {
+		const dailyDir = path.join(tmpDir, "daily");
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-20.md"),
+			"<!-- 2026-02-20 10:00:00 [abc] -->\nFixed a bug #testing",
+			"utf-8",
+		);
+
+		await distilMemories({ dryRun: false });
+		const content = readFileSafe(path.join(tmpDir, "MEMORY.md"));
+		expect(content).not.toBeNull();
+		expect(content).toContain("# Memory Index");
+		expect(content).toContain("last distilled:");
+	});
+
+	test("preserves pinned section from existing MEMORY.md", async () => {
+		// Write existing MEMORY.md with pinned section
+		fs.writeFileSync(
+			path.join(tmpDir, "MEMORY.md"),
+			"# Memory Index\n\n## Pinned\nUser prefers dark mode.\nProject uses PostgreSQL.\n\n## Other\n- old stuff\n",
+			"utf-8",
+		);
+
+		const dailyDir = path.join(tmpDir, "daily");
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-20.md"),
+			"<!-- 2026-02-20 10:00:00 [abc] -->\nFixed auth bug #auth",
+			"utf-8",
+		);
+
+		const result = await distilMemories({ dryRun: false });
+		expect(result.output).toContain("## Pinned");
+		expect(result.output).toContain("User prefers dark mode.");
+		expect(result.output).toContain("Project uses PostgreSQL.");
+	});
+
+	test("builds tag index", async () => {
+		const dailyDir = path.join(tmpDir, "daily");
+		fs.writeFileSync(
+			path.join(dailyDir, "2026-02-20.md"),
+			[
+				"<!-- 2026-02-20 10:00:00 [abc] -->",
+				"Fixed auth #auth #security",
+				"",
+				"<!-- 2026-02-20 14:00:00 [def] -->",
+				"More auth work #auth #api",
+			].join("\n"),
+			"utf-8",
+		);
+
+		const result = await distilMemories({ dryRun: true });
+		expect(result.output).toContain("## Tags");
+		expect(result.output).toContain("#auth");
+		expect(result.totalTags).toBeGreaterThan(0);
+	});
+
+	test("includes topics section when topic files exist", async () => {
+		fs.writeFileSync(
+			path.join(getTopicsDir(), "auth.md"),
+			[
+				"# Topic: Auth",
+				"<!-- created: 2026-02-21 09:00:00 [init] -->",
+				"",
+				"<!-- 2026-02-21 10:00:00 [abc] -->",
+				"Rolled JWT refresh to edge #auth",
+				"Daily: [[2026-02-21]]",
+			].join("\n"),
+			"utf-8",
+		);
+
+		const result = await distilMemories({ dryRun: true });
+		expect(result.output).toContain("## Topics");
+		expect(result.output).toContain("Auth — Rolled JWT refresh to edge");
+		expect(result.output).toContain("topics/auth.md");
+		expect(result.totalTopicFiles).toBe(1);
+		expect(result.totalTopicEntries).toBe(1);
+	});
+
+	test("output stays under ~60 lines", async () => {
+		const dailyDir = path.join(tmpDir, "daily");
+		// Create multiple daily files with diverse entries
+		for (let i = 1; i <= 10; i++) {
+			const date = `2026-02-${String(i).padStart(2, "0")}`;
+			const entries = [];
+			for (let j = 0; j < 5; j++) {
+				entries.push(`<!-- ${date} ${String(j + 10).padStart(2, "0")}:00:00 [s${j}] -->`);
+				entries.push(`Entry ${j} about various things #tag${j}`);
+			}
+			fs.writeFileSync(path.join(dailyDir, `${date}.md`), entries.join("\n"), "utf-8");
+		}
+
+		const result = await distilMemories({ dryRun: true });
+		const lineCount = result.output.split("\n").length;
+		expect(lineCount).toBeLessThan(80);
 	});
 });

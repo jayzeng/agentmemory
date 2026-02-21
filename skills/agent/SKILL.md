@@ -1,11 +1,13 @@
 ---
 name: agent-memory
-description: Persistent memory across coding sessions — long-term facts, daily logs, scratchpad checklist, and semantic search.
+description: Persistent memory across coding sessions — long-term facts, daily logs, topic notes, scratchpad checklist, and semantic search.
 ---
 
 # Agent Memory
 
 You have a persistent memory system. Use it **proactively** — don't wait to be asked.
+
+Pi users can choose the native extension (`pi-memory`: https://github.com/jayzeng/pi-memory) or use this CLI + skill workflow as the cross-platform alternative.
 
 This skill works with any CLI-based coding agent that can execute shell commands. All state is stored as plain markdown files in `~/.agent-memory/` (configurable via `AGENT_MEMORY_DIR` env var or `--dir` flag).
 
@@ -37,21 +39,22 @@ agent-memory search --query "<topic>" --mode keyword
 | What happened | Write to | Why |
 |---|---|---|
 | Made progress, fixed a bug, investigated something | `daily` | Session-specific — searchable later via qmd |
+| Tracking a topic or event across days | `topic` | Builds a per-topic file with backlinks to daily logs |
 | User said "remember this" about a preference or decision | `long_term` | Durable fact, needs to be in every session's context |
 | Discovered a recurring pattern (3rd time seeing it) | `long_term` | Graduated from daily observations to established fact |
 | Found a gotcha, workaround, or non-obvious behavior | `daily` first | If it keeps coming up, *then* promote to long-term |
-| TODO or follow-up for next session | `scratchpad` | Active task tracking |
+| TODO or follow-up for any task (persistent todo) | `scratchpad` | Persistent, cross-session task tracking |
 
 **MEMORY.md is a curated wiki, not a log.** It should stay under ~50 lines of high-signal content. If you're appending to it frequently, you're probably writing to the wrong target.
 
 ## Memory Commands
 
-### Write to daily log (default)
+### Write to daily log (default — no --target needed)
 
 ```bash
 # Session notes, progress, bugs found, decisions made
-agent-memory write --target daily --content "Fixed auth bug in login.ts — token refresh was missing"
-agent-memory write --target daily --content "Investigated slow queries — N+1 in getUserOrders, added .include(:orders)"
+agent-memory write --content "Fixed auth bug in login.ts — token refresh was missing"
+agent-memory write --content "Investigated slow queries — N+1 in getUserOrders, added .include(:orders)"
 ```
 
 ### Write to long-term memory (rare, curated)
@@ -66,17 +69,26 @@ agent-memory write --target long_term --content "..." --mode overwrite
 
 When writing to long-term, prefer **overwrite mode** to curate the whole file rather than blindly appending. Read it first, then rewrite with the new fact incorporated.
 
+### Write to a topic/event file
+
+```bash
+# Event- or theme-based log with backlinks to the daily entry
+agent-memory write --target topic --topic "auth" --content "JWT refresh rolled out to edge #auth"
+```
+
 ### Read
 
 ```bash
 agent-memory read --target daily             # Today's log
 agent-memory read --target daily --date 2026-02-15  # Specific day
 agent-memory read --target list              # All daily log files
+agent-memory read --target topic --topic "auth"
+agent-memory read --target topics            # All topic files
 agent-memory read --target long_term         # MEMORY.md
 agent-memory read --target scratchpad        # Scratchpad checklist
 ```
 
-### Scratchpad (cross-session TODOs)
+### Scratchpad (persistent TODOs)
 
 ```bash
 agent-memory scratchpad add --text "Review PR #42"
@@ -113,14 +125,17 @@ agent-memory status    # Show config, file counts, qmd status
 ## Writing Good Entries
 
 ### Daily log entries
-Describe what you did and what you learned. Future-you will search for these.
+Describe what you did and what you learned. Include `#tags` — distil uses them to organize MEMORY.md.
+
+**Recommended tags** (use what fits, invent your own as needed):
+`#architecture` `#auth` `#bugfix` `#database` `#deploy` `#docs` `#ops` `#perf` `#refactor` `#security` `#testing` `#ui`
 
 ```bash
-# Good — specific, searchable
-agent-memory write --target daily --content "Refactored auth middleware to use jose instead of jsonwebtoken. Reduced bundle by 40KB. Token validation now in middleware/auth.ts."
+# Good — specific, searchable, tagged
+agent-memory write --content "Refactored auth middleware to use jose instead of jsonwebtoken. Reduced bundle by 40KB. #refactor #auth"
 
-# Bad — too vague to be useful in search
-agent-memory write --target daily --content "worked on auth stuff"
+# Bad — too vague, no tags
+agent-memory write --content "worked on auth stuff"
 ```
 
 ### Long-term entries
@@ -136,18 +151,28 @@ agent-memory write --target long_term --content "Fixed the deploy script today"
 
 ## Memory Hygiene
 
-- **Daily is the default** — when in doubt, write to daily
+- **Daily is the default** — when in doubt, write to daily (no `--target` needed)
 - **MEMORY.md is a wiki** — curate it by reading + rewriting, not by appending endlessly
 - **Keep MEMORY.md under ~50 lines** — it's injected into every session, so only high-signal facts belong there
 - **Search before writing long-term** — the fact may already exist in a daily log, searchable via qmd
 - **Promote deliberately** — if a pattern appears in daily logs 3+ times, that's when it earns a spot in MEMORY.md
+- **Distil periodically** — run `agent-memory distil` to auto-generate a compact tagged index in MEMORY.md from daily logs and topics
+
+### Distil — auto-curate MEMORY.md
+
+```bash
+agent-memory distil --dry-run   # Preview without writing
+agent-memory distil             # Overwrite MEMORY.md with distilled index
+```
+
+Distil scans daily logs and topic notes, groups entries by their `#tags`, and generates a compact MEMORY.md with tag-based sections, a topic index, and a tag index. Any `## Pinned` section in the existing MEMORY.md is preserved. The more consistently you tag entries, the better the distilled output.
 
 ## Guidelines
 
 - When someone says "remember this", decide: is it a durable fact (long-term) or a session note (daily)?
-- Default to `--target daily` for almost everything
+- Default to daily for almost everything (just `--content "..."` — no `--target` needed)
 - Use `--target long_term` sparingly: architecture, preferences, key commands, hard-won lessons
-- Use the scratchpad for: TODOs, follow-ups, multi-session tracking
+- Prefer the scratchpad for any TODOs or follow-ups (persistent, cross-session tracking)
 - Use `#tags` and `[[links]]` in content to improve search recall
 - Use `agent-memory search` to recall past work before starting related tasks
 - All `agent-memory` commands are safe — they read/write only to the memory directory (`~/.agent-memory/` by default)

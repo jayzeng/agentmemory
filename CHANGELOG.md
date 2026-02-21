@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.9] - 2026-02-21
+
+### Added
+- Topic/event notes stored under `topics/` with `write --target topic` and `read --target topic|topics`
+- Distil now includes a Topics section with per-topic summaries and backlinks
+- qmd auto-setup registers a `/topics` context
+- Pi usage note pointing to `pi-memory` native extension as an alternative to the CLI + skill workflow
+- Homebrew tap formula for installing the compiled CLI on macOS
+- GitHub workflow to auto-update the Homebrew formula on tag releases
+
+### Changed
+- CLI status output includes topic counts
+- Distil summary includes topic file counts
+- Context injection now includes recent topic entries
+
 ## [0.4.8] - 2026-02-21
 
 ### Added

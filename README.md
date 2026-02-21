@@ -4,11 +4,15 @@ Persistent memory for coding agents — [Claude Code](https://claude.ai/code), [
 
 Thanks to https://github.com/skyfallsin/pi-mem for inspiration.
 
-Long-term facts, daily logs, and a scratchpad checklist stored as plain markdown files. Optional qmd integration adds keyword, semantic, and hybrid search across all memory files, plus automatic selective injection of relevant past memories into every turn.
+Long-term facts, daily logs, topic/event notes, and a scratchpad checklist stored as plain markdown files. Optional qmd integration adds keyword, semantic, and hybrid search across all memory files, plus automatic selective injection of relevant past memories into every turn.
 
 ## Installation
 
 ```bash
+# Homebrew (macOS)
+brew tap jayzeng/agentmemory
+brew install agent-memory
+
 # Install the CLI globally
 npm install -g myagentmemory
 
@@ -24,7 +28,14 @@ agent-memory init
 
 # Install skill files for Claude Code, Codex, Cursor, and Agent
 agent-memory install-skills
+
+# Uninstall skill files
+agent-memory uninstall-skills
 ```
+
+### Pi users
+
+If you're on Pi and prefer a native extension, use `pi-memory` (https://github.com/jayzeng/pi-memory) instead of installing this skill. The CLI + skill workflow here is the cross-platform alternative, and works fine on Pi without any extension.
 
 This installs:
 - `~/.claude/skills/agent-memory/SKILL.md` — Claude Code skill
@@ -79,11 +90,12 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 | Command | Purpose |
 |---------|---------|
 | `agent-memory context [--no-search]` | Build & print context injection string to stdout |
-| `agent-memory write --target <long_term\|daily> --content <text> [--mode append\|overwrite]` | Write to memory files |
-| `agent-memory read --target <long_term\|scratchpad\|daily\|list> [--date YYYY-MM-DD]` | Read memory files |
+| `agent-memory write --target <long_term\|daily\|topic> --content <text> [--mode append\|overwrite] [--topic <name>] [--date YYYY-MM-DD]` | Write to memory files |
+| `agent-memory read --target <long_term\|scratchpad\|daily\|list\|topic\|topics> [--date YYYY-MM-DD] [--topic <name>]` | Read memory files |
 | `agent-memory scratchpad <add\|done\|undo\|clear_done\|list> [--text <text>]` | Manage checklist |
 | `agent-memory search --query <text> [--mode keyword\|semantic\|deep] [--limit N]` | Search via qmd |
 | `agent-memory install-skills` | Install bundled SKILL.md files into local agent directories |
+| `agent-memory uninstall-skills` | Uninstall bundled SKILL.md files from local agent directories |
 | `agent-memory init` | Create dirs, detect qmd, setup collection |
 | `agent-memory status` | Show config, qmd status, file counts |
 
@@ -109,6 +121,18 @@ If the first search doesn't find what you need, try rephrasing or switching mode
     2026-02-15.md         # Daily append-only log
     2026-02-14.md
     ...
+  topics/
+    auth.md               # Topic/event log linked back to daily entries
+```
+
+## Topic notes
+
+Topic files are for event- or theme-based tracking across days. Each topic entry includes a `Daily: [[YYYY-MM-DD]]` backlink so you can jump from the topic to the full daily log.
+
+```bash
+agent-memory write --target topic --topic "auth" --content "JWT refresh rolled out to edge #auth"
+agent-memory read --target topic --topic "auth"
+agent-memory read --target topics
 ```
 
 ## How it works
@@ -118,10 +142,11 @@ If the first search doesn't find what you need, try rephrasing or switching mode
 Before every agent turn, the following are injected into the system prompt (in priority order):
 
 1. **Open scratchpad items** (up to 2K chars)
-2. **Today's daily log** (up to 3K chars, tail)
-3. **Relevant memories via qmd search** (up to 2.5K chars) — searches using the user's current prompt to surface related past context
-4. **MEMORY.md** (up to 4K chars, middle-truncated)
-5. **Yesterday's daily log** (up to 3K chars, tail — lowest priority, trimmed first)
+2. **Recent topic entries** (up to 2K chars) — most recent topic notes with backlinks
+3. **Today's daily log** (up to 3K chars, tail)
+4. **Relevant memories via qmd search** (up to 2.5K chars) — searches using the user's current prompt to surface related past context
+5. **MEMORY.md** (up to 4K chars, middle-truncated)
+6. **Yesterday's daily log** (up to 3K chars, tail — lowest priority, trimmed first)
 
 Total injection is capped at 16K chars. When qmd is unavailable, step 3 is skipped and the rest works as before.
 

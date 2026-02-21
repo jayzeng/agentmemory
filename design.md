@@ -119,26 +119,28 @@ exceeds the budget, the assembled output is truncated from the start:
   Priority    Section                      Budget    Truncation
   --------    -------                      ------    ----------
   1 (high)    Open scratchpad items        2.0K      from start
-  2           Today's daily log            3.0K      from end (tail)
-  3           qmd search results           2.5K      from start
-  4           MEMORY.md (long-term)        4.0K      from middle
-  5 (low)     Yesterday's daily log        3.0K      from end (tail)
+  2           Recent topic entries         2.0K      from start
+  3           Today's daily log            3.0K      from end (tail)
+  4           qmd search results           2.5K      from start
+  5           MEMORY.md (long-term)        4.0K      from middle
+  6 (low)     Yesterday's daily log        3.0K      from end (tail)
                                           ------
-                                          14.5K (individual caps)
+                                          16.5K (individual caps)
                                           16.0K (total cap)
 ```
 
-The gap between individual caps (14.5K) and total cap (16K) provides headroom
-for section headers and separator lines.
+Individual caps can exceed the 16K total cap; the final assembled context is
+still hard-truncated to 16K to keep prompt size bounded.
 
 ### Why This Order
 
 Scratchpad first because it represents active work items — things the agent was
-told to keep in mind. Today's log next because it's the running record of the
-current session. Search results third because they're the system's best guess at
-what's relevant to the current prompt. MEMORY.md fourth because it's curated but
-may contain entries unrelated to the current task. Yesterday last because it's
-the oldest context and most likely to be stale.
+told to keep in mind. Topics next because they track cross-day threads that
+often matter more than the raw daily log. Today's log follows as the running
+record of the current session. Search results come next as the system's best
+guess at what is relevant to the current prompt. MEMORY.md is curated but may
+contain entries unrelated to the current task, so it is lower priority. Yesterday
+is last because it is the oldest context and most likely to be stale.
 
 ### Selective Injection Flow
 
@@ -201,6 +203,7 @@ commands. Now:
        |               |
        |               +-- qmd collection add ~/.agent-memory --name agent-memory
        |               +-- qmd context add /daily "Daily work logs" -c agent-memory
+       |               +-- qmd context add /topics "Topic and event notes" -c agent-memory
        |               +-- qmd context add / "Long-term memory" -c agent-memory
        |               |
        |               +-- any step fails? log and continue (not critical)

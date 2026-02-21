@@ -1,0 +1,83 @@
+name: Update Homebrew Formula
+
+on:
+  workflow_run:
+    workflows: ["Publish to npm"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.4.9). Optional when triggered from Publish to npm."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag + sha256
+        id: meta
+        run: |
+          INPUT_TAG="${{ inputs.tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            if [ -z "$SHA" ]; then
+              echo "No head SHA found. Provide inputs.tag."
+              exit 1
+            fi
+            TAG="$(git tag --points-at "$SHA" | head -n 1)"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "No tag found. Provide inputs.tag."
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          TARBALL_URL="https://github.com/jayzeng/agentmemory/archive/refs/tags/${TAG}.tar.gz"
+          curl -L -o /tmp/source.tar.gz "$TARBALL_URL"
+          SHA256="$(sha256sum /tmp/source.tar.gz | awk '{print $1}')"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "url=$TARBALL_URL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout default branch
+        run: |
+          DEFAULT_BRANCH="$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')"
+          git checkout "$DEFAULT_BRANCH"
+
+      - name: Update formula
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          url = "${{ steps.meta.outputs.url }}"
+          sha = "${{ steps.meta.outputs.sha256 }}"
+          version = "${{ steps.meta.outputs.version }}"
+          path = Path("Formula/agent-memory.rb")
+          text = path.read_text()
+          text = re.sub(r'^\\turl ".*"$', f'\\turl "{url}"', text, flags=re.M)
+          text = re.sub(r'^\\tsha256 ".*"$', f'\\tsha256 "{sha}"', text, flags=re.M)
+          text = re.sub(r'^\\tversion ".*"$', f'\\tversion "{version}"', text, flags=re.M)
+          path.write_text(text)
+          PY
+
+      - name: Commit and push
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: update Homebrew formula for ${{ steps.meta.outputs.tag }}"
+          title: "chore: update Homebrew formula for ${{ steps.meta.outputs.tag }}"
+          body: "Automated update of Formula/agent-memory.rb for ${{ steps.meta.outputs.tag }}."
+          branch: "chore/update-homebrew-formula-${{ steps.meta.outputs.tag }}"
+          delete-branch: true

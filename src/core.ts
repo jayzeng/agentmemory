@@ -20,6 +20,7 @@ let MEMORY_DIR = DEFAULT_MEMORY_DIR;
 let MEMORY_FILE = path.join(MEMORY_DIR, "MEMORY.md");
 let SCRATCHPAD_FILE = path.join(MEMORY_DIR, "SCRATCHPAD.md");
 let DAILY_DIR = path.join(MEMORY_DIR, "daily");
+let TOPICS_DIR = path.join(MEMORY_DIR, "topics");
 
 /** Override base directory (for testing or platform-specific defaults). */
 export function _setBaseDir(baseDir: string) {
@@ -27,6 +28,7 @@ export function _setBaseDir(baseDir: string) {
 	MEMORY_FILE = path.join(baseDir, "MEMORY.md");
 	SCRATCHPAD_FILE = path.join(baseDir, "SCRATCHPAD.md");
 	DAILY_DIR = path.join(baseDir, "daily");
+	TOPICS_DIR = path.join(baseDir, "topics");
 }
 
 /** Reset to default paths. */
@@ -54,6 +56,11 @@ export function getDailyDir(): string {
 	return DAILY_DIR;
 }
 
+/** Get the current topics directory path. */
+export function getTopicsDir(): string {
+	return TOPICS_DIR;
+}
+
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
@@ -61,6 +68,7 @@ export function getDailyDir(): string {
 export function ensureDirs() {
 	fs.mkdirSync(MEMORY_DIR, { recursive: true });
 	fs.mkdirSync(DAILY_DIR, { recursive: true });
+	fs.mkdirSync(TOPICS_DIR, { recursive: true });
 }
 
 export function todayStr(): string {
@@ -97,6 +105,19 @@ export function dailyPath(date: string): string {
 	return path.join(DAILY_DIR, `${date}.md`);
 }
 
+export function topicPath(slug: string): string {
+	return path.join(TOPICS_DIR, `${slug}.md`);
+}
+
+export function slugifyTopic(name: string): string {
+	return name
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.replace(/--+/g, "-");
+}
+
 // ---------------------------------------------------------------------------
 // Limits + preview helpers
 // ---------------------------------------------------------------------------
@@ -108,6 +129,8 @@ const CONTEXT_LONG_TERM_MAX_CHARS = 4_000;
 const CONTEXT_LONG_TERM_MAX_LINES = 150;
 const CONTEXT_SCRATCHPAD_MAX_CHARS = 2_000;
 const CONTEXT_SCRATCHPAD_MAX_LINES = 120;
+const CONTEXT_TOPICS_MAX_CHARS = 2_000;
+const CONTEXT_TOPICS_MAX_LINES = 100;
 const CONTEXT_DAILY_MAX_CHARS = 3_000;
 const CONTEXT_DAILY_MAX_LINES = 120;
 const CONTEXT_SEARCH_MAX_CHARS = 2_500;
@@ -298,7 +321,7 @@ export function serializeScratchpad(items: ScratchpadItem[]): string {
 
 export function buildMemoryContext(searchResults?: string): string {
 	ensureDirs();
-	// Priority order: scratchpad > today's daily > search results > MEMORY.md > yesterday's daily
+	// Priority order: scratchpad > topics > today's daily > search results > MEMORY.md > yesterday's daily
 	const sections: string[] = [];
 
 	const scratchpad = readFileSafe(SCRATCHPAD_FILE);
@@ -316,6 +339,9 @@ export function buildMemoryContext(searchResults?: string): string {
 			if (section) sections.push(section);
 		}
 	}
+
+	const topicsSection = buildTopicsContextSection();
+	if (topicsSection) sections.push(topicsSection);
 
 	const today = todayStr();
 	const yesterday = yesterdayStr();
@@ -385,6 +411,48 @@ export function buildMemoryContext(searchResults?: string): string {
 	}
 
 	return context;
+}
+
+function buildTopicsContextSection(): string | null {
+	let topicFiles: string[];
+	try {
+		topicFiles = fs
+			.readdirSync(TOPICS_DIR)
+			.filter((f) => f.endsWith(".md"))
+			.sort();
+	} catch {
+		return null;
+	}
+
+	if (topicFiles.length === 0) return null;
+
+	const entries: TopicEntry[] = [];
+	for (const file of topicFiles) {
+		const slug = file.replace(/\.md$/, "");
+		const content = readFileSafe(path.join(TOPICS_DIR, file));
+		if (!content?.trim()) continue;
+		const titleMatch = content.match(/^# Topic:\s*(.+)$/m);
+		const title = titleMatch?.[1]?.trim() || slug;
+		entries.push(...parseTopicEntries(title, slug, content));
+	}
+
+	if (entries.length === 0) return null;
+
+	const recent = sortRecentFirst(entries).slice(0, 8);
+	const lines = recent.map((entry) => {
+		const firstLine = entry.content.split("\n")[0].slice(0, 120);
+		const suffix = entry.content.split("\n")[0].length > 120 ? "..." : "";
+		const datePart = entry.date ? ` → [[${entry.date}]]` : "";
+		return `- ${entry.topic}: ${firstLine}${suffix}${datePart}`;
+	});
+
+	return formatContextSection(
+		"## Topics (recent)",
+		lines.join("\n"),
+		"start",
+		CONTEXT_TOPICS_MAX_LINES,
+		CONTEXT_TOPICS_MAX_CHARS,
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +647,7 @@ export async function setupQmdCollection(): Promise<boolean> {
 	// Add path contexts (best-effort, ignore errors)
 	const contexts: [string, string][] = [
 		["/daily", "Daily append-only work logs organized by date"],
+		["/topics", "Topic and event notes linked back to daily logs"],
 		["/", "Curated long-term memory: decisions, preferences, facts, lessons"],
 	];
 	for (const [ctxPath, desc] of contexts) {
@@ -1113,13 +1182,16 @@ export interface ToolResult {
 }
 
 export async function memoryWrite(params: {
-	target: "long_term" | "daily";
+	target?: "long_term" | "daily" | "topic";
 	content: string;
 	mode?: "append" | "overwrite";
 	sessionId?: string;
+	topic?: string;
+	date?: string;
 }): Promise<ToolResult> {
 	ensureDirs();
-	const { target, content, mode } = params;
+	const target = params.target ?? "daily";
+	const { content, mode } = params;
 	const sid = shortSessionId(params.sessionId ?? "cli");
 	const ts = nowTimestamp();
 
@@ -1148,6 +1220,51 @@ export async function memoryWrite(params: {
 				mode: "append",
 				sessionId: sid,
 				timestamp: ts,
+				qmdUpdateMode: getQmdUpdateMode(),
+				existingPreview,
+			},
+		};
+	}
+
+	if (target === "topic") {
+		const topic = params.topic?.trim();
+		if (!topic) {
+			return { text: "Error: 'topic' is required for target 'topic'.", details: {}, isError: true };
+		}
+		const slug = slugifyTopic(topic);
+		if (!slug) {
+			return { text: "Error: 'topic' must include at least one letter or number.", details: {}, isError: true };
+		}
+		const filePath = topicPath(slug);
+		const existing = readFileSafe(filePath) ?? "";
+		const existingPreview = buildPreview(existing, {
+			maxLines: RESPONSE_PREVIEW_MAX_LINES,
+			maxChars: RESPONSE_PREVIEW_MAX_CHARS,
+			mode: "end",
+		});
+		const existingSnippet = existingPreview.preview
+			? `\n\n${formatPreviewBlock("Existing topic preview", existing, "end")}`
+			: "\n\nTopic file was empty.";
+
+		const linkDate = params.date?.trim() || todayStr();
+		const header = `# Topic: ${topic}\n\n<!-- created: ${ts} [${sid}] -->\n`;
+		const separator = existing.trim() ? "\n\n" : "";
+		const base = existing.trim() ? existing : header.trimEnd();
+		const stamped = `<!-- ${ts} [${sid}] -->\n${content.trim()}\nDaily: [[${linkDate}]]`;
+		fs.writeFileSync(filePath, `${base}${separator}${stamped}`, "utf-8");
+		await ensureQmdAvailableForUpdate();
+		scheduleQmdUpdate();
+		return {
+			text: `Appended to topic: ${filePath}${existingSnippet}`,
+			details: {
+				path: filePath,
+				target,
+				mode: "append",
+				sessionId: sid,
+				timestamp: ts,
+				topic,
+				slug,
+				date: linkDate,
 				qmdUpdateMode: getQmdUpdateMode(),
 				existingPreview,
 			},
@@ -1334,11 +1451,12 @@ export async function scratchpadAction(params: {
 }
 
 export async function memoryRead(params: {
-	target: "long_term" | "scratchpad" | "daily" | "list";
+	target: "long_term" | "scratchpad" | "daily" | "list" | "topic" | "topics";
 	date?: string;
+	topic?: string;
 }): Promise<ToolResult> {
 	ensureDirs();
-	const { target, date } = params;
+	const { target, date, topic } = params;
 
 	if (target === "list") {
 		try {
@@ -1367,6 +1485,39 @@ export async function memoryRead(params: {
 			return { text: `No daily log for ${d}.`, details: {} };
 		}
 		return { text: content, details: { path: filePath, date: d } };
+	}
+
+	if (target === "topics") {
+		try {
+			const files = fs
+				.readdirSync(getTopicsDir())
+				.filter((f) => f.endsWith(".md"))
+				.sort()
+				.reverse();
+			if (files.length === 0) {
+				return { text: "No topics found.", details: {} };
+			}
+			return {
+				text: `Topics:\n${files.map((f) => `- ${f}`).join("\n")}`,
+				details: { files },
+			};
+		} catch {
+			return { text: "No topics directory.", details: {} };
+		}
+	}
+
+	if (target === "topic") {
+		const name = topic?.trim();
+		if (!name) {
+			return { text: "Error: 'topic' is required for target 'topic'.", details: {}, isError: true };
+		}
+		const slug = slugifyTopic(name);
+		const filePath = topicPath(slug);
+		const content = readFileSafe(filePath);
+		if (!content) {
+			return { text: `No topic file found for ${name}.`, details: {} };
+		}
+		return { text: content, details: { path: filePath, topic: name, slug } };
 	}
 
 	if (target === "scratchpad") {
@@ -1486,4 +1637,396 @@ export async function memorySearch(params: {
 			isError: true,
 		};
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Distil — extraction helpers
+// ---------------------------------------------------------------------------
+
+/** Extract #tag patterns, deduplicated and lowercased. */
+export function extractTags(content: string): string[] {
+	const matches = content.match(/(?:^|\s)#([a-zA-Z][\w-]*)/g);
+	if (!matches) return [];
+	const tags = new Set(matches.map((m) => m.trim().toLowerCase()));
+	return [...tags].sort();
+}
+
+/** Extract [[link]] patterns. */
+export function extractLinks(content: string): string[] {
+	const matches = content.match(/\[\[([^\]]+)\]\]/g);
+	if (!matches) return [];
+	const links = new Set(matches.map((m) => m.slice(2, -2).trim()));
+	return [...links].sort();
+}
+
+/** Extract file-path-like patterns (e.g. src/foo.ts), filtering out URLs. */
+export function extractFilePaths(content: string): string[] {
+	const matches = content.match(/(?:^|\s)((?:[\w.-]+\/)+[\w.-]+\.\w+)/g);
+	if (!matches) return [];
+	const paths = new Set<string>();
+	for (const m of matches) {
+		const p = m.trim();
+		// Skip URLs
+		if (p.startsWith("http://") || p.startsWith("https://") || p.startsWith("//")) continue;
+		paths.add(p);
+	}
+	return [...paths].sort();
+}
+
+/** Extract backtick-quoted commands. */
+export function extractCommands(content: string): string[] {
+	const matches = content.match(/`([^`]+)`/g);
+	if (!matches) return [];
+	const cmds = new Set(matches.map((m) => m.slice(1, -1).trim()).filter((c) => c.length > 2 && c.includes(" ")));
+	return [...cmds];
+}
+
+// ---------------------------------------------------------------------------
+// Distil — daily entry parsing
+// ---------------------------------------------------------------------------
+
+export interface DailyEntry {
+	date: string;
+	timestamp: string;
+	sessionId: string;
+	content: string;
+	tags: string[];
+	links: string[];
+	filePaths: string[];
+	commands: string[];
+}
+
+/** Split a daily file on <!-- timestamp --> markers into individual entries. */
+export function parseDailyEntries(date: string, content: string): DailyEntry[] {
+	const entries: DailyEntry[] = [];
+	// Split on timestamp markers: <!-- 2026-02-21 14:30:00 [sid] -->
+	const parts = content.split(/(?=<!-- \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[)/);
+
+	for (const part of parts) {
+		const trimmed = part.trim();
+		if (!trimmed) continue;
+
+		const metaMatch = trimmed.match(/^<!-- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[([^\]]*)\] -->/);
+		const timestamp = metaMatch?.[1] ?? "";
+		const sessionId = metaMatch?.[2] ?? "";
+		const body = metaMatch ? trimmed.slice(metaMatch[0].length).trim() : trimmed;
+		if (!body) continue;
+
+		entries.push({
+			date,
+			timestamp,
+			sessionId,
+			content: body,
+			tags: extractTags(body),
+			links: extractLinks(body),
+			filePaths: extractFilePaths(body),
+			commands: extractCommands(body),
+		});
+	}
+
+	return entries;
+}
+
+export interface TopicEntry {
+	topic: string;
+	slug: string;
+	date: string;
+	timestamp: string;
+	sessionId: string;
+	content: string;
+	tags: string[];
+	links: string[];
+	filePaths: string[];
+	commands: string[];
+}
+
+function stripDailyLinkLines(content: string): string {
+	const lines = content.split("\n");
+	const filtered = lines.filter(
+		(line) =>
+			!/^\s*Daily:\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*$/i.test(line) &&
+			!/^\s*\[\[\d{4}-\d{2}-\d{2}\]\]\s*$/i.test(line),
+	);
+	const cleaned = filtered.join("\n").trim();
+	return cleaned || content.trim();
+}
+
+/** Split a topic file on <!-- timestamp --> markers into entries. */
+export function parseTopicEntries(topic: string, slug: string, content: string): TopicEntry[] {
+	const entries: TopicEntry[] = [];
+	const parts = content.split(/(?=<!-- \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[)/);
+
+	for (const part of parts) {
+		const trimmed = part.trim();
+		if (!trimmed) continue;
+
+		const metaMatch = trimmed.match(/^<!-- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \[([^\]]*)\] -->/);
+		if (!metaMatch) continue;
+
+		const timestamp = metaMatch[1] ?? "";
+		const sessionId = metaMatch[2] ?? "";
+		const body = trimmed.slice(metaMatch[0].length).trim();
+		if (!body) continue;
+
+		const dateMatch = body.match(/\[\[(\d{4}-\d{2}-\d{2})\]\]/);
+		const date = dateMatch?.[1] ?? timestamp.slice(0, 10);
+		const cleaned = stripDailyLinkLines(body);
+
+		entries.push({
+			topic,
+			slug,
+			date,
+			timestamp,
+			sessionId,
+			content: cleaned,
+			tags: extractTags(cleaned),
+			links: extractLinks(cleaned),
+			filePaths: extractFilePaths(cleaned),
+			commands: extractCommands(cleaned),
+		});
+	}
+
+	return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Distil — main function
+// ---------------------------------------------------------------------------
+
+export interface DistilResult {
+	ok: boolean;
+	dryRun: boolean;
+	totalDailyFiles: number;
+	totalTopicFiles: number;
+	totalEntries: number;
+	totalTopicEntries: number;
+	totalTags: number;
+	tagCounts: Record<string, number>;
+	output: string;
+}
+
+/** Summarize entry content: first line, truncated at 80 chars. */
+type DistilEntry = DailyEntry | TopicEntry;
+
+function summarizeEntry(entry: DistilEntry): string {
+	const firstLine = entry.content.split("\n")[0].slice(0, 80);
+	const suffix = entry.content.split("\n")[0].length > 80 ? "..." : "";
+	return `${firstLine}${suffix}`;
+}
+
+/** Sort entries recent-first by date then timestamp. */
+function sortRecentFirst(entries: DistilEntry[]): DistilEntry[] {
+	return [...entries].sort((a, b) => {
+		if (a.date !== b.date) return b.date.localeCompare(a.date);
+		return b.timestamp.localeCompare(a.timestamp);
+	});
+}
+
+function entryKey(entry: DistilEntry): string {
+	const base = `${entry.date}:${entry.timestamp}:${entry.sessionId}`;
+	return "topic" in entry ? `topic:${entry.slug}:${base}` : `daily:${base}`;
+}
+
+export async function distilMemories(params?: { dryRun?: boolean; sessionId?: string }): Promise<DistilResult> {
+	ensureDirs();
+	const dryRun = params?.dryRun ?? false;
+
+	// 1. Read all daily + topic files
+	let dailyFiles: string[];
+	try {
+		dailyFiles = fs
+			.readdirSync(DAILY_DIR)
+			.filter((f) => f.endsWith(".md"))
+			.sort();
+	} catch {
+		dailyFiles = [];
+	}
+
+	let topicFiles: string[];
+	try {
+		topicFiles = fs
+			.readdirSync(TOPICS_DIR)
+			.filter((f) => f.endsWith(".md"))
+			.sort();
+	} catch {
+		topicFiles = [];
+	}
+
+	if (dailyFiles.length === 0 && topicFiles.length === 0) {
+		return {
+			ok: true,
+			dryRun,
+			totalDailyFiles: 0,
+			totalTopicFiles: 0,
+			totalEntries: 0,
+			totalTopicEntries: 0,
+			totalTags: 0,
+			tagCounts: {},
+			output: "# Memory Index\n\nNo daily logs or topics to distil.\n",
+		};
+	}
+
+	// 2. Parse all entries
+	const allEntries: DistilEntry[] = [];
+	for (const file of dailyFiles) {
+		const date = file.replace(/\.md$/, "");
+		const content = readFileSafe(path.join(DAILY_DIR, file));
+		if (!content?.trim()) continue;
+		allEntries.push(...parseDailyEntries(date, content));
+	}
+	const topicEntriesByTopic = new Map<string, TopicEntry[]>();
+	let totalTopicEntries = 0;
+	for (const file of topicFiles) {
+		const slug = file.replace(/\.md$/, "");
+		const content = readFileSafe(path.join(TOPICS_DIR, file));
+		if (!content?.trim()) continue;
+		const titleMatch = content.match(/^# Topic:\s*(.+)$/m);
+		const title = titleMatch?.[1]?.trim() || slug;
+		const entries = parseTopicEntries(title, slug, content);
+		if (entries.length === 0) continue;
+		totalTopicEntries += entries.length;
+		allEntries.push(...entries);
+		topicEntriesByTopic.set(title, entries);
+	}
+
+	if (allEntries.length === 0) {
+		return {
+			ok: true,
+			dryRun,
+			totalDailyFiles: dailyFiles.length,
+			totalTopicFiles: topicFiles.length,
+			totalEntries: 0,
+			totalTopicEntries: 0,
+			totalTags: 0,
+			tagCounts: {},
+			output: "# Memory Index\n\nNo entries found in daily logs or topics.\n",
+		};
+	}
+
+	// 3. Build tag → entries map and tag → dates map
+	const tagEntries = new Map<string, DistilEntry[]>();
+	const tagDates = new Map<string, Set<string>>();
+	const untagged: DistilEntry[] = [];
+
+	for (const entry of allEntries) {
+		if (entry.tags.length === 0) {
+			untagged.push(entry);
+		} else {
+			for (const tag of entry.tags) {
+				if (!tagEntries.has(tag)) tagEntries.set(tag, []);
+				tagEntries.get(tag)!.push(entry);
+				if (!tagDates.has(tag)) tagDates.set(tag, new Set());
+				tagDates.get(tag)!.add(entry.date);
+			}
+		}
+	}
+
+	// Sort tags by entry count (most used first), take top 15 for sections
+	const sortedTags = [...tagEntries.entries()].sort((a, b) => b[1].length - a[1].length);
+	const sectionTags = sortedTags.slice(0, 15);
+	const indexTags = sortedTags.slice(0, 20);
+
+	// 4. Preserve existing ## Pinned section from MEMORY.md
+	let pinnedSection = "";
+	const existingMemory = readFileSafe(MEMORY_FILE);
+	if (existingMemory) {
+		const pinnedMatch = existingMemory.match(/## Pinned\n([\s\S]*?)(?=\n## |\n# |$)/);
+		if (pinnedMatch) {
+			pinnedSection = pinnedMatch[1].trim();
+		}
+	}
+
+	// 5. Generate output
+	const lines: string[] = [];
+	const ts = nowTimestamp();
+	lines.push("# Memory Index");
+	lines.push(`<!-- last distilled: ${ts} -->`);
+	lines.push("");
+
+	// Pinned section
+	if (pinnedSection) {
+		lines.push("## Pinned");
+		lines.push(pinnedSection);
+		lines.push("");
+	}
+
+	// Topics section — list topics with latest entry summary
+	if (topicEntriesByTopic.size > 0) {
+		lines.push("## Topics");
+		const sortedTopics = [...topicEntriesByTopic.entries()].sort((a, b) => b[1].length - a[1].length);
+		for (const [topic, entries] of sortedTopics) {
+			const recent = sortRecentFirst(entries)[0];
+			const summary = summarizeEntry(recent);
+			const dateLink = recent.date ? `[[${recent.date}]]` : "";
+			const filePath = `topics/${entries[0].slug}.md`;
+			const parts = [
+				`${topic} — ${summary}`,
+				dateLink ? `→ ${dateLink}` : "",
+				`(${entries.length} entries)`,
+				`(${filePath})`,
+			].filter(Boolean);
+			lines.push(`- ${parts.join(" ")}`);
+		}
+		lines.push("");
+	}
+
+	// Tag-based sections — top tags become section headers, each capped at 3 entries
+	const tagCounts: Record<string, number> = {};
+	const shownEntryIds = new Set<string>();
+
+	for (const [tag, entries] of sectionTags) {
+		tagCounts[tag] = entries.length;
+		lines.push(`## ${tag}`);
+		const recent = sortRecentFirst(entries).slice(0, 3);
+		for (const entry of recent) {
+			const entryId = entryKey(entry);
+			shownEntryIds.add(entryId);
+			lines.push(`- ${summarizeEntry(entry)} → [[${entry.date}]]`);
+		}
+		lines.push("");
+	}
+
+	// Recent untagged entries (up to 5, not already shown)
+	const unseenUntagged = sortRecentFirst(untagged)
+		.filter((e) => !shownEntryIds.has(entryKey(e)))
+		.slice(0, 5);
+	if (unseenUntagged.length > 0) {
+		lines.push("## Recent");
+		for (const entry of unseenUntagged) {
+			lines.push(`- ${summarizeEntry(entry)} → [[${entry.date}]]`);
+		}
+		lines.push("");
+	}
+
+	// Tag index — all tags with their dates
+	if (indexTags.length > 0) {
+		lines.push("## Tags");
+		for (const [tag] of indexTags) {
+			const dates = tagDates.get(tag)!;
+			const recentDates = [...dates].sort().reverse().slice(0, 5);
+			lines.push(`${tag} → ${recentDates.join(", ")}`);
+		}
+		lines.push("");
+	}
+
+	const output = lines.join("\n");
+
+	// 6. Write if not dry-run
+	if (!dryRun) {
+		fs.writeFileSync(MEMORY_FILE, output, "utf-8");
+		await ensureQmdAvailableForUpdate();
+		scheduleQmdUpdate();
+	}
+
+	return {
+		ok: true,
+		dryRun,
+		totalDailyFiles: dailyFiles.length,
+		totalTopicFiles: topicFiles.length,
+		totalEntries: allEntries.length,
+		totalTopicEntries,
+		totalTags: indexTags.length,
+		tagCounts,
+		output,
+	};
 }

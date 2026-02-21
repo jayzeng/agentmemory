@@ -29,6 +29,7 @@ import {
 	checkCollection,
 	dailyPath,
 	detectQmd,
+	distilMemories,
 	ensureDirs,
 	ensureQmdAvailableForSync,
 	ensureQmdAvailableForUpdate,
@@ -36,6 +37,7 @@ import {
 	getDailyDir,
 	getMemoryDir,
 	getMemoryFile,
+	getTopicsDir,
 	getQmdEmbedMode,
 	getQmdHealth,
 	getQmdResultPath,
@@ -53,7 +55,9 @@ import {
 	searchRelevantMemories,
 	serializeScratchpad,
 	setupQmdCollection,
+	slugifyTopic,
 	todayStr,
+	topicPath,
 	uninstallSkills,
 } from "./core.js";
 
@@ -152,12 +156,14 @@ async function cmdContext(flags: Record<string, string | boolean>) {
 
 async function cmdWrite(flags: Record<string, string | boolean>) {
 	const json = hasFlag(flags, "json");
-	const target = getFlag(flags, "target");
+	const target = getFlag(flags, "target") ?? "daily";
 	const content = getFlag(flags, "content");
 	const mode = getFlag(flags, "mode") ?? "append";
+	const topic = getFlag(flags, "topic");
+	const date = getFlag(flags, "date");
 
-	if (!target || !["long_term", "daily"].includes(target)) {
-		exitError("--target must be 'long_term' or 'daily'", json);
+	if (!["long_term", "daily", "topic"].includes(target)) {
+		exitError("--target must be 'long_term', 'daily', or 'topic' (default: daily)", json);
 	}
 	if (!content) {
 		exitError("--content is required", json);
@@ -179,6 +185,33 @@ async function cmdWrite(flags: Record<string, string | boolean>) {
 			json
 				? { ok: true, path: filePath, target, mode: "append", timestamp: ts }
 				: `Appended to daily log: ${filePath}`,
+			json,
+		);
+		return;
+	}
+
+	if (target === "topic") {
+		if (!topic) {
+			exitError("--topic is required when --target is 'topic'", json);
+		}
+		const slug = slugifyTopic(topic);
+		if (!slug) {
+			exitError("--topic must include at least one letter or number", json);
+		}
+		const filePath = topicPath(slug);
+		const existing = readFileSafe(filePath) ?? "";
+		const linkDate = date?.trim() || todayStr();
+		const header = `# Topic: ${topic}\n\n<!-- created: ${ts} [${sid}] -->\n`;
+		const separator = existing.trim() ? "\n\n" : "";
+		const base = existing.trim() ? existing : header.trimEnd();
+		const stamped = `<!-- ${ts} [${sid}] -->\n${content.trim()}\nDaily: [[${linkDate}]]`;
+		fs.writeFileSync(filePath, `${base}${separator}${stamped}`, "utf-8");
+		await ensureQmdAvailableForUpdate();
+		scheduleQmdUpdate();
+		output(
+			json
+				? { ok: true, path: filePath, target, mode: "append", timestamp: ts, topic, slug, date: linkDate }
+				: `Appended to topic: ${filePath}`,
 			json,
 		);
 		return;
@@ -210,9 +243,10 @@ async function cmdRead(flags: Record<string, string | boolean>) {
 	const json = hasFlag(flags, "json");
 	const target = getFlag(flags, "target");
 	const date = getFlag(flags, "date");
+	const topic = getFlag(flags, "topic");
 
-	if (!target || !["long_term", "scratchpad", "daily", "list"].includes(target)) {
-		exitError("--target must be 'long_term', 'scratchpad', 'daily', or 'list'", json);
+	if (!target || !["long_term", "scratchpad", "daily", "list", "topic", "topics"].includes(target)) {
+		exitError("--target must be 'long_term', 'scratchpad', 'daily', 'list', 'topic', or 'topics'", json);
 	}
 
 	ensureDirs();
@@ -246,6 +280,41 @@ async function cmdRead(flags: Record<string, string | boolean>) {
 			return;
 		}
 		output(json ? { content, date: d, path: filePath } : content, json);
+		return;
+	}
+
+	if (target === "topics") {
+		try {
+			const files = fs
+				.readdirSync(getTopicsDir())
+				.filter((f) => f.endsWith(".md"))
+				.sort()
+				.reverse();
+			if (json) {
+				output({ files }, true);
+			} else if (files.length === 0) {
+				console.log("No topics found.");
+			} else {
+				console.log(`Topics:\n${files.map((f) => `- ${f}`).join("\n")}`);
+			}
+		} catch {
+			output(json ? { files: [] } : "No topics directory.", json);
+		}
+		return;
+	}
+
+	if (target === "topic") {
+		if (!topic) {
+			exitError("--topic is required when --target is 'topic'", json);
+		}
+		const slug = slugifyTopic(topic);
+		const filePath = topicPath(slug);
+		const content = readFileSafe(filePath);
+		if (!content) {
+			output(json ? { content: null, topic } : `No topic file found for ${topic}.`, json);
+			return;
+		}
+		output(json ? { content, topic, slug, path: filePath } : content, json);
 		return;
 	}
 
@@ -547,7 +616,7 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 		);
 	} else {
 		console.log(`Memory directory: ${dir}`);
-		console.log(`  MEMORY.md, SCRATCHPAD.md, daily/ created.`);
+		console.log(`  MEMORY.md, SCRATCHPAD.md, daily/, topics/ created.`);
 		if (qmdFound) {
 			if (collectionCreated) {
 				console.log(`  qmd collection '${getCollectionName()}' created.`);
@@ -575,6 +644,7 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 	const memFile = getMemoryFile();
 	const spFile = getScratchpadFile();
 	const dailyDir = getDailyDir();
+	const topicsDir = getTopicsDir();
 
 	const memContent = readFileSafe(memFile);
 	const spContent = readFileSafe(spFile);
@@ -582,6 +652,12 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 	let dailyCount = 0;
 	try {
 		dailyCount = fs.readdirSync(dailyDir).filter((f) => f.endsWith(".md")).length;
+	} catch {
+		// directory may not exist
+	}
+	let topicCount = 0;
+	try {
+		topicCount = fs.readdirSync(topicsDir).filter((f) => f.endsWith(".md")).length;
 	} catch {
 		// directory may not exist
 	}
@@ -614,6 +690,7 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 					openItems: spContent ? parseScratchpad(spContent).filter((i) => !i.done).length : 0,
 				},
 				dailyLogs: dailyCount,
+				topics: topicCount,
 				qmd: {
 					available: qmdFound,
 					collection: hasCollection ? getCollectionName() : null,
@@ -640,6 +717,7 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 			console.log("SCRATCHPAD.md: not created yet");
 		}
 		console.log(`Daily logs: ${dailyCount} file(s)`);
+		console.log(`Topics: ${topicCount} file(s)`);
 		console.log("");
 		if (qmdFound) {
 			console.log(`qmd: available`);
@@ -662,6 +740,33 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 	}
 }
 
+async function cmdDistil(flags: Record<string, string | boolean>) {
+	const json = hasFlag(flags, "json");
+	const dryRun = hasFlag(flags, "dry-run");
+
+	const result = await distilMemories({ dryRun });
+
+	if (json) {
+		output(result, true);
+	} else {
+		if (result.totalEntries === 0) {
+			console.log(result.output.trim());
+			return;
+		}
+		if (dryRun) {
+			console.log("--- Dry run (MEMORY.md not modified) ---\n");
+		}
+		console.log(result.output.trim());
+		console.log("");
+		console.log(
+			`Distilled ${result.totalEntries} entries from ${result.totalDailyFiles} daily file(s) and ${result.totalTopicFiles} topic file(s), ${result.totalTags} tag(s).`,
+		);
+		if (!dryRun) {
+			console.log("MEMORY.md updated.");
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Usage
 // ---------------------------------------------------------------------------
@@ -675,11 +780,13 @@ Usage:
 Commands:
   version     Show binary version
   install-skills  Install (or --uninstall) bundled skills
+  uninstall-skills  Uninstall bundled skills
   context     Build & print context injection string
-  write       Write to memory files
+  write       Write to memory files (default: daily)
   read        Read memory files
   scratchpad  Manage checklist items
   search      Search across memory files (requires qmd)
+  distil      Generate compact MEMORY.md index from daily logs + topics
   sync        Re-index and embed all files (requires qmd)
   init        Initialize memory directory and qmd collection
   status      Show configuration and status
@@ -690,15 +797,19 @@ Global flags:
 
 Examples:
   agent-memory init
+  agent-memory write --content "Fixed auth bug in login flow"
   agent-memory write --target long_term --content "User prefers dark mode"
-  agent-memory write --target daily --content "Fixed auth bug in login flow"
+  agent-memory write --target topic --topic "auth" --content "Rolled JWT refresh to edge"
   agent-memory read --target long_term
   agent-memory read --target daily --date 2026-02-15
   agent-memory read --target list
+  agent-memory read --target topic --topic "auth"
+  agent-memory read --target topics
   agent-memory scratchpad add --text "Review PR #42"
   agent-memory scratchpad list
   agent-memory scratchpad done --text "PR #42"
   agent-memory search --query "database choice" --mode keyword
+  agent-memory distil --dry-run
   agent-memory context --no-search
   agent-memory sync
   agent-memory status --json`);
@@ -746,6 +857,13 @@ async function main() {
 			break;
 		case "install-skills":
 			cmdInstallSkills(flags);
+			break;
+		case "uninstall-skills":
+			cmdInstallSkills({ ...flags, uninstall: true });
+			break;
+		case "distil":
+		case "distill":
+			await cmdDistil(flags);
 			break;
 		case "sync":
 			await cmdSync(flags);
