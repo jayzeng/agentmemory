@@ -21,12 +21,15 @@ import {
 	_resetSpawnForTest,
 	_setBaseDir,
 	_setExecFileForTest,
+	_setHomeDirForTest,
 	_setQmdAvailable,
+	_setSkillsRootForTest,
 	_setSpawnForTest,
 	buildMemoryContext,
 	dailyPath,
 	ensureDirs,
 	getQmdEmbedMode,
+	installSkills,
 	memoryRead,
 	memorySearch,
 	memoryWrite,
@@ -66,6 +69,8 @@ function cleanupTmpDir() {
 	_clearEmbedTimer();
 	_resetSpawnForTest();
 	_resetExecFileForTest();
+	_setSkillsRootForTest(null);
+	_setHomeDirForTest(null);
 	fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
@@ -185,6 +190,48 @@ describe("ensureDirs", () => {
 		ensureDirs();
 		ensureDirs(); // should not throw
 		expect(fs.existsSync(tmpDir)).toBe(true);
+	});
+});
+
+// ==========================================================================
+// 1b. Skill installation helpers
+// ==========================================================================
+
+describe("installSkills", () => {
+	let projectDir: string;
+	let homeDir: string;
+
+	beforeEach(() => {
+		projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-skills-"));
+		homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-home-"));
+
+		fs.mkdirSync(path.join(projectDir, "skills", "claude-code"), { recursive: true });
+		fs.mkdirSync(path.join(projectDir, "skills", "codex"), { recursive: true });
+		fs.writeFileSync(path.join(projectDir, "skills", "claude-code", "SKILL.md"), "# Claude", "utf-8");
+		fs.writeFileSync(path.join(projectDir, "skills", "codex", "SKILL.md"), "# Codex", "utf-8");
+
+		fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
+		fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
+
+		_setSkillsRootForTest(projectDir);
+		_setHomeDirForTest(homeDir);
+	});
+
+	afterEach(() => {
+		_setSkillsRootForTest(null);
+		_setHomeDirForTest(null);
+		fs.rmSync(projectDir, { recursive: true, force: true });
+		fs.rmSync(homeDir, { recursive: true, force: true });
+	});
+
+	test("installs skills when home markers exist", () => {
+		const report = installSkills();
+		expect(report.ok).toBe(true);
+		expect(report.detected.length).toBe(2);
+		expect(report.installed.length).toBe(2);
+		expect(fs.existsSync(path.join(homeDir, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(true);
+		expect(fs.existsSync(path.join(homeDir, ".codex", "skills", "agent-memory", "SKILL.md"))).toBe(true);
+		expect(report.skipped.some((item) => item.label === "Cursor skill")).toBe(true);
 	});
 });
 

@@ -465,6 +465,37 @@ describe("CLI subprocess", () => {
 		expect(out.embedMode).toBeDefined();
 		expect(["background", "manual", "off"]).toContain(out.embedMode);
 	});
+
+	test("install-skills copies SKILL.md into home", async () => {
+		const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-skill-cli-"));
+		const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-home-cli-"));
+
+		fs.mkdirSync(path.join(projectDir, "skills", "claude-code"), { recursive: true });
+		fs.writeFileSync(path.join(projectDir, "skills", "claude-code", "SKILL.md"), "# Claude", "utf-8");
+		fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
+
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "install-skills", "--json"],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+				env: {
+					...process.env,
+					HOME: homeDir,
+					AGENT_MEMORY_SKILLS_ROOT: projectDir,
+				},
+			},
+		);
+
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+		expect(out.detected.length).toBe(1);
+		expect(fs.existsSync(path.join(homeDir, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(true);
+
+		fs.rmSync(projectDir, { recursive: true, force: true });
+		fs.rmSync(homeDir, { recursive: true, force: true });
+	});
 });
 
 // ---------------------------------------------------------------------------

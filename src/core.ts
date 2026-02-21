@@ -399,6 +399,8 @@ let spawnFn: SpawnFn = spawn;
 let qmdAvailable = false;
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
 let embedTimer: ReturnType<typeof setTimeout> | null = null;
+let skillsRootOverride: string | null = null;
+let homeDirOverride: string | null = null;
 
 /** QMD collection name — configurable per platform. */
 let QMD_COLLECTION_NAME = "agent-memory";
@@ -411,6 +413,16 @@ export function _setExecFileForTest(fn: ExecFileFn) {
 /** Reset execFile implementation (for testing). */
 export function _resetExecFileForTest() {
 	execFileFn = execFile;
+}
+
+/** Override skills root directory (for testing). */
+export function _setSkillsRootForTest(dir: string | null) {
+	skillsRootOverride = dir;
+}
+
+/** Override home directory (for testing). */
+export function _setHomeDirForTest(dir: string | null) {
+	homeDirOverride = dir;
 }
 
 /** Override spawn implementation (for testing). */
@@ -457,6 +469,39 @@ export function _clearEmbedTimer() {
 		clearTimeout(embedTimer);
 		embedTimer = null;
 	}
+}
+
+function resolveHomeDir(): string | null {
+	if (homeDirOverride !== null) return homeDirOverride;
+	return process.env.HOME ?? process.env.USERPROFILE ?? null;
+}
+
+function findSkillsRoot(): string | null {
+	const envRoot = process.env.AGENT_MEMORY_SKILLS_ROOT;
+	if (envRoot) return envRoot;
+	if (skillsRootOverride) return skillsRootOverride;
+
+	const scanUp = (startDir: string): string | null => {
+		let dir = startDir;
+		while (true) {
+			if (fs.existsSync(path.join(dir, "skills"))) return dir;
+			const parent = path.dirname(dir);
+			if (parent === dir) return null;
+			dir = parent;
+		}
+	};
+
+	const argvPath = process.argv[1];
+	if (argvPath) {
+		const found = scanUp(path.resolve(path.dirname(argvPath)));
+		if (found) return found;
+	}
+
+	const execDir = path.dirname(process.execPath);
+	const found = scanUp(path.resolve(execDir));
+	if (found) return found;
+
+	return scanUp(path.resolve(process.cwd()));
 }
 
 /** Get the current QMD collection name. */
@@ -667,6 +712,111 @@ export async function runQmdSync(): Promise<{ updateOk: boolean; embedOk: boolea
 
 	const embedOk = await runQmdEmbedNow();
 	return { updateOk, embedOk };
+}
+
+export interface InstallSkillsReport {
+	ok: boolean;
+	projectDir?: string;
+	homeDir?: string;
+	detected: Array<{ label: string; homeMarker: string }>;
+	installed: Array<{ label: string; path: string }>;
+	skipped: Array<{ label: string; reason: string }>;
+	error?: string;
+}
+
+export function installSkills(): InstallSkillsReport {
+	const homeDir = resolveHomeDir();
+	if (!homeDir) {
+		return {
+			ok: false,
+			detected: [],
+			installed: [],
+			skipped: [],
+			error: "Home directory not found. Set HOME (or USERPROFILE on Windows) and retry.",
+		};
+	}
+
+	const projectDir = findSkillsRoot();
+	if (!projectDir) {
+		return {
+			ok: false,
+			homeDir,
+			detected: [],
+			installed: [],
+			skipped: [],
+			error: "Could not locate the skills directory. Ensure the package includes skills/ (reinstall if needed).",
+		};
+	}
+
+	const skillsDir = path.join(projectDir, "skills");
+	if (!fs.existsSync(skillsDir)) {
+		return {
+			ok: false,
+			projectDir,
+			homeDir,
+			detected: [],
+			installed: [],
+			skipped: [],
+			error: `Skills directory not found: ${skillsDir}`,
+		};
+	}
+	const targets = [
+		{
+			label: "Claude Code skill",
+			srcDir: path.join(skillsDir, "claude-code"),
+			destDir: path.join(homeDir, ".claude", "skills", "agent-memory"),
+			homeMarker: path.join(homeDir, ".claude"),
+		},
+		{
+			label: "Codex skill",
+			srcDir: path.join(skillsDir, "codex"),
+			destDir: path.join(homeDir, ".codex", "skills", "agent-memory"),
+			homeMarker: path.join(homeDir, ".codex"),
+		},
+		{
+			label: "Cursor skill",
+			srcDir: path.join(skillsDir, "cursor"),
+			destDir: path.join(homeDir, ".cursor", "skills", "agent-memory"),
+			homeMarker: path.join(homeDir, ".cursor"),
+		},
+		{
+			label: "Agent CLI skill",
+			srcDir: path.join(skillsDir, "agent"),
+			destDir: path.join(homeDir, ".agents", "skills", "agent-memory"),
+			homeMarker: path.join(homeDir, ".agents"),
+		},
+	];
+
+	const detected: Array<{ label: string; homeMarker: string }> = [];
+	const installed: Array<{ label: string; path: string }> = [];
+	const skipped: Array<{ label: string; reason: string }> = [];
+
+	for (const target of targets) {
+		if (!fs.existsSync(target.homeMarker)) {
+			skipped.push({ label: target.label, reason: `${target.homeMarker} not found` });
+			continue;
+		}
+		detected.push({ label: target.label, homeMarker: target.homeMarker });
+
+		const skillFile = path.join(target.srcDir, "SKILL.md");
+		if (!fs.existsSync(skillFile)) {
+			skipped.push({ label: target.label, reason: `${skillFile} not found` });
+			continue;
+		}
+
+		fs.mkdirSync(target.destDir, { recursive: true });
+		fs.copyFileSync(skillFile, path.join(target.destDir, "SKILL.md"));
+		installed.push({ label: target.label, path: path.join(target.destDir, "SKILL.md") });
+	}
+
+	return {
+		ok: true,
+		projectDir,
+		homeDir,
+		detected,
+		installed,
+		skipped,
+	};
 }
 
 export interface QmdHealthInfo {

@@ -23,8 +23,7 @@ bun run build:cli
 agent-memory init
 
 # Install skill files for Claude Code, Codex, Cursor, and Agent
-bash scripts/install-skills.sh
-pwsh -File scripts/install-skills.ps1
+agent-memory install-skills
 ```
 
 This installs:
@@ -84,6 +83,7 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 | `agent-memory read --target <long_term\|scratchpad\|daily\|list> [--date YYYY-MM-DD]` | Read memory files |
 | `agent-memory scratchpad <add\|done\|undo\|clear_done\|list> [--text <text>]` | Manage checklist |
 | `agent-memory search --query <text> [--mode keyword\|semantic\|deep] [--limit N]` | Search via qmd |
+| `agent-memory install-skills` | Install bundled SKILL.md files into local agent directories |
 | `agent-memory init` | Create dirs, detect qmd, setup collection |
 | `agent-memory status` | Show config, qmd status, file counts |
 
@@ -186,8 +186,7 @@ bun run build:cli
 agent-memory write --target long_term --content "test" && agent-memory read --target long_term
 
 # Install skills
-bash scripts/install-skills.sh
-pwsh -File scripts/install-skills.ps1
+agent-memory install-skills
 ```
 
 ## Publishing (maintainers)

@@ -4,6 +4,7 @@
  *
  * Subcommands:
  *   version    — Print binary version
+ *   install-skills — Install SKILL.md files into local agent directories
  *   context    — Build & print context injection string to stdout
  *   write      — Write to memory files
  *   read       — Read memory files
@@ -40,6 +41,7 @@ import {
 	getQmdResultPath,
 	getQmdResultText,
 	getScratchpadFile,
+	installSkills,
 	nowTimestamp,
 	parseScratchpad,
 	readFileSafe,
@@ -398,6 +400,41 @@ async function cmdSearch(flags: Record<string, string | boolean>) {
 	}
 }
 
+function cmdInstallSkills(flags: Record<string, string | boolean>) {
+	const json = hasFlag(flags, "json");
+	const report = installSkills();
+
+	if (!report.ok) {
+		exitError(report.error ?? "Failed to install skills.", json);
+	}
+
+	if (json) {
+		output(report, true);
+		return;
+	}
+
+	if (report.detected.length === 0) {
+		console.log("No supported agent installations detected.");
+	} else {
+		const detectedLabels = report.detected.map((item) => item.label).join(", ");
+		console.log(`Detected: ${detectedLabels}`);
+	}
+
+	if (report.installed.length === 0) {
+		console.log("No skills installed.");
+	} else {
+		for (const item of report.installed) {
+			console.log(`Installed ${item.label}: ${item.path}`);
+		}
+	}
+
+	if (report.skipped.length > 0) {
+		for (const item of report.skipped) {
+			console.log(`Skipped ${item.label} (${item.reason})`);
+		}
+	}
+}
+
 async function cmdSync(flags: Record<string, string | boolean>) {
 	const json = hasFlag(flags, "json");
 
@@ -602,6 +639,7 @@ Usage:
 
 Commands:
   version     Show binary version
+  install-skills  Install bundled skills into local agent directories
   context     Build & print context injection string
   write       Write to memory files
   read        Read memory files
@@ -670,6 +708,9 @@ async function main() {
 			break;
 		case "search":
 			await cmdSearch(flags);
+			break;
+		case "install-skills":
+			cmdInstallSkills(flags);
 			break;
 		case "sync":
 			await cmdSync(flags);
