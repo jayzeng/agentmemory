@@ -4,7 +4,7 @@
  *
  * Subcommands:
  *   version    — Print binary version
- *   install-skills — Install SKILL.md files into local agent directories
+ *   install-skills — Install (or --uninstall) SKILL.md files into local agent directories
  *   context    — Build & print context injection string to stdout
  *   write      — Write to memory files
  *   read       — Read memory files
@@ -54,6 +54,7 @@ import {
 	serializeScratchpad,
 	setupQmdCollection,
 	todayStr,
+	uninstallSkills,
 } from "./core.js";
 
 // ---------------------------------------------------------------------------
@@ -402,6 +403,32 @@ async function cmdSearch(flags: Record<string, string | boolean>) {
 
 function cmdInstallSkills(flags: Record<string, string | boolean>) {
 	const json = hasFlag(flags, "json");
+	const uninstall = hasFlag(flags, "uninstall");
+
+	if (uninstall) {
+		const report = uninstallSkills();
+
+		if (!report.ok) {
+			exitError(report.error ?? "Failed to uninstall skills.", json);
+		}
+
+		if (json) {
+			output(report, true);
+			return;
+		}
+
+		for (const item of report.removed) {
+			console.log(`Uninstalled ${item.label}: ${item.path}`);
+		}
+		for (const item of report.skipped) {
+			console.log(`Skipping ${item.label} (${item.reason})`);
+		}
+		if (report.removed.length === 0) {
+			console.log("No skills were installed.");
+		}
+		return;
+	}
+
 	const report = installSkills();
 
 	if (!report.ok) {
@@ -647,7 +674,7 @@ Usage:
 
 Commands:
   version     Show binary version
-  install-skills  Install bundled skills into local agent directories
+  install-skills  Install (or --uninstall) bundled skills
   context     Build & print context injection string
   write       Write to memory files
   read        Read memory files

@@ -482,7 +482,7 @@ function commandExists(cmd: string): boolean {
 
 	const dirs = envPath.split(path.delimiter).filter(Boolean);
 	const isWin = process.platform === "win32";
-	const rawExts = isWin ? process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM" : "";
+	const rawExts = isWin ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM") : "";
 	const exts = isWin ? rawExts.split(";").filter(Boolean) : [""];
 
 	for (const dir of dirs) {
@@ -861,6 +861,54 @@ export function installSkills(): InstallSkillsReport {
 		installed,
 		skipped,
 	};
+}
+
+export interface UninstallSkillsReport {
+	ok: boolean;
+	homeDir?: string;
+	removed: Array<{ label: string; path: string }>;
+	skipped: Array<{ label: string; reason: string }>;
+	error?: string;
+}
+
+export function uninstallSkills(): UninstallSkillsReport {
+	const homeDir = resolveHomeDir();
+	if (!homeDir) {
+		return {
+			ok: false,
+			removed: [],
+			skipped: [],
+			error: "Home directory not found. Set HOME (or USERPROFILE on Windows) and retry.",
+		};
+	}
+
+	const targets = [
+		{ label: "Claude Code skill", destDir: path.join(homeDir, ".claude", "skills", "agent-memory") },
+		{ label: "Codex skill", destDir: path.join(homeDir, ".codex", "skills", "agent-memory") },
+		{ label: "Cursor skill", destDir: path.join(homeDir, ".cursor", "skills", "agent-memory") },
+		{ label: "Agent CLI skill", destDir: path.join(homeDir, ".agents", "skills", "agent-memory") },
+	];
+
+	const removed: Array<{ label: string; path: string }> = [];
+	const skipped: Array<{ label: string; reason: string }> = [];
+
+	for (const target of targets) {
+		const skillFile = path.join(target.destDir, "SKILL.md");
+		if (fs.existsSync(skillFile)) {
+			fs.unlinkSync(skillFile);
+			// Clean up empty directory
+			try {
+				fs.rmdirSync(target.destDir);
+			} catch {
+				// directory not empty or already gone — fine
+			}
+			removed.push({ label: target.label, path: skillFile });
+		} else {
+			skipped.push({ label: target.label, reason: "not installed" });
+		}
+	}
+
+	return { ok: true, homeDir, removed, skipped };
 }
 
 export interface QmdHealthInfo {

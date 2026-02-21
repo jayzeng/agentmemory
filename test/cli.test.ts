@@ -466,6 +466,33 @@ describe("CLI subprocess", () => {
 		expect(["background", "manual", "off"]).toContain(out.embedMode);
 	});
 
+	test("install-skills --uninstall removes SKILL.md from home", async () => {
+		const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-home-cli-uninstall-"));
+
+		// Install a skill first
+		const skillDir = path.join(homeDir, ".claude", "skills", "agent-memory");
+		fs.mkdirSync(skillDir, { recursive: true });
+		fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# Claude", "utf-8");
+
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "install-skills", "--uninstall", "--json"],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+				env: { ...process.env, HOME: homeDir },
+			},
+		);
+
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(true);
+		expect(out.removed.length).toBe(1);
+		expect(out.removed[0].label).toBe("Claude Code skill");
+		expect(fs.existsSync(path.join(skillDir, "SKILL.md"))).toBe(false);
+
+		fs.rmSync(homeDir, { recursive: true, force: true });
+	});
+
 	test("install-skills copies SKILL.md into home", async () => {
 		const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-skill-cli-"));
 		const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-home-cli-"));
@@ -512,6 +539,35 @@ describe("install scripts", () => {
 
 	afterEach(() => {
 		fs.rmSync(tmpHome, { recursive: true, force: true });
+	});
+
+	test("install-skills.sh --uninstall removes skill files from HOME", () => {
+		// Install first
+		fs.mkdirSync(path.join(tmpHome, ".claude"), { recursive: true });
+		fs.mkdirSync(path.join(tmpHome, ".codex"), { recursive: true });
+
+		const installResult = Bun.spawnSync(["bash", path.join(repoRoot, "scripts", "install-skills.sh")], {
+			cwd: repoRoot,
+			env: { ...process.env, HOME: tmpHome },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(installResult.exitCode).toBe(0);
+		expect(fs.existsSync(path.join(tmpHome, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(true);
+
+		// Uninstall
+		const result = Bun.spawnSync(["bash", path.join(repoRoot, "scripts", "install-skills.sh"), "--uninstall"], {
+			cwd: repoRoot,
+			env: { ...process.env, HOME: tmpHome },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(result.exitCode).toBe(0);
+		const stdout = result.stdout.toString();
+		expect(stdout).toContain("Uninstall");
+
+		expect(fs.existsSync(path.join(tmpHome, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(false);
+		expect(fs.existsSync(path.join(tmpHome, ".codex", "skills", "agent-memory", "SKILL.md"))).toBe(false);
 	});
 
 	test("install-skills.sh copies skill files into HOME", () => {

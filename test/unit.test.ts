@@ -48,6 +48,7 @@ import {
 	serializeScratchpad,
 	shortSessionId,
 	todayStr,
+	uninstallSkills,
 	yesterdayStr,
 } from "../src/core.js";
 
@@ -242,7 +243,9 @@ describe("installSkills", () => {
 		expect(report.ok).toBe(true);
 		expect(report.detected.length).toBe(0);
 		expect(report.installed.length).toBe(0);
-		expect(report.skipped.some((item) => item.label === "Claude Code skill" && item.reason === "not detected")).toBe(true);
+		expect(report.skipped.some((item) => item.label === "Claude Code skill" && item.reason === "not detected")).toBe(
+			true,
+		);
 		expect(report.skipped.some((item) => item.label === "Codex skill" && item.reason === "not detected")).toBe(true);
 	});
 
@@ -256,6 +259,83 @@ describe("installSkills", () => {
 		expect(report.installed.length).toBe(2);
 		expect(fs.existsSync(path.join(homeDir, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(true);
 		expect(fs.existsSync(path.join(homeDir, ".codex", "skills", "agent-memory", "SKILL.md"))).toBe(true);
+	});
+});
+
+// ==========================================================================
+// 1c. Skill uninstallation helpers
+// ==========================================================================
+
+describe("uninstallSkills", () => {
+	let homeDir: string;
+	let originalPath: string | undefined;
+	let originalPathExt: string | undefined;
+
+	beforeEach(() => {
+		originalPath = process.env.PATH;
+		originalPathExt = process.env.PATHEXT;
+		process.env.PATH = "";
+		process.env.PATHEXT = "";
+
+		homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-home-uninstall-"));
+		_setHomeDirForTest(homeDir);
+	});
+
+	afterEach(() => {
+		_setHomeDirForTest(null);
+		process.env.PATH = originalPath;
+		if (originalPathExt === undefined) {
+			delete process.env.PATHEXT;
+		} else {
+			process.env.PATHEXT = originalPathExt;
+		}
+		fs.rmSync(homeDir, { recursive: true, force: true });
+	});
+
+	test("removes installed skill files", () => {
+		// Set up installed skills
+		const claudeSkillDir = path.join(homeDir, ".claude", "skills", "agent-memory");
+		const codexSkillDir = path.join(homeDir, ".codex", "skills", "agent-memory");
+		fs.mkdirSync(claudeSkillDir, { recursive: true });
+		fs.mkdirSync(codexSkillDir, { recursive: true });
+		fs.writeFileSync(path.join(claudeSkillDir, "SKILL.md"), "# Claude", "utf-8");
+		fs.writeFileSync(path.join(codexSkillDir, "SKILL.md"), "# Codex", "utf-8");
+
+		const report = uninstallSkills();
+		expect(report.ok).toBe(true);
+		expect(report.removed.length).toBe(2);
+		expect(report.removed[0].label).toBe("Claude Code skill");
+		expect(report.removed[1].label).toBe("Codex skill");
+		expect(fs.existsSync(path.join(claudeSkillDir, "SKILL.md"))).toBe(false);
+		expect(fs.existsSync(path.join(codexSkillDir, "SKILL.md"))).toBe(false);
+	});
+
+	test("skips skills that are not installed", () => {
+		const report = uninstallSkills();
+		expect(report.ok).toBe(true);
+		expect(report.removed.length).toBe(0);
+		expect(report.skipped.length).toBe(4);
+		expect(report.skipped[0].reason).toBe("not installed");
+	});
+
+	test("cleans up empty agent-memory directory", () => {
+		const skillDir = path.join(homeDir, ".claude", "skills", "agent-memory");
+		fs.mkdirSync(skillDir, { recursive: true });
+		fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# Claude", "utf-8");
+
+		uninstallSkills();
+		expect(fs.existsSync(skillDir)).toBe(false);
+	});
+
+	test("preserves directory if other files remain", () => {
+		const skillDir = path.join(homeDir, ".claude", "skills", "agent-memory");
+		fs.mkdirSync(skillDir, { recursive: true });
+		fs.writeFileSync(path.join(skillDir, "SKILL.md"), "# Claude", "utf-8");
+		fs.writeFileSync(path.join(skillDir, "other.txt"), "keep me", "utf-8");
+
+		uninstallSkills();
+		expect(fs.existsSync(path.join(skillDir, "SKILL.md"))).toBe(false);
+		expect(fs.existsSync(path.join(skillDir, "other.txt"))).toBe(true);
 	});
 });
 
