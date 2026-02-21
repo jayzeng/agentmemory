@@ -46,6 +46,23 @@ Files: `MEMORY.md`, `SCRATCHPAD.md`, `daily/YYYY-MM-DD.md`
 - Unit tests use temp directories via `_setBaseDir()` — no real memory files.
 - Prefer behavior-focused assertions (file contents, cross-session recall). Keep timeouts generous for model latency.
 
+## Pre-Commit Checklist (Required)
+
+Before every `git add`, `commit`, and `push`, you **must** run and verify all pass:
+
+1. `bun test test/unit.test.ts` — unit tests
+2. `bun test test/cli.test.ts` — CLI tests
+3. `bun run lint` — Biome linting and formatting
+4. `bun run build` — TypeScript type-checking
+
+Do not commit or push if any of the above fail. Fix issues first.
+
+## Changelog (Required)
+
+- Maintain `CHANGELOG.md` at the project root.
+- For every version bump, add an entry documenting Added, Changed, Fixed, and Removed sections as applicable.
+- Review local + committed git changes (`git log`, `git diff`) to draft accurate changelog entries.
+
 ## Commit & Pull Request Guidelines
 
 - Use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`) and keep messages imperative.
