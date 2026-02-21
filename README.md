@@ -10,8 +10,8 @@ Long-term facts, daily logs, topic/event notes, and a scratchpad checklist store
 
 ```bash
 # Homebrew (macOS)
-brew tap jayzeng/agentmemory
-brew install agent-memory
+brew tap jayzeng/agentmemory https://github.com/jayzeng/agentmemory
+brew install jayzeng/agentmemory/agent-memory
 
 # Install the CLI globally
 npm install -g myagentmemory
