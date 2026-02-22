@@ -879,12 +879,6 @@ export function installSkills(): InstallSkillsReport {
 			destDir: path.join(homeDir, ".cursor", "skills", "agent-memory"),
 			homeMarker: path.join(homeDir, ".cursor"),
 		},
-		{
-			label: "Agent CLI skill",
-			srcDir: path.join(skillsDir, "agent"),
-			destDir: path.join(homeDir, ".agents", "skills", "agent-memory"),
-			homeMarker: path.join(homeDir, ".agents"),
-		},
 	];
 
 	const detected: Array<{ label: string; homeMarker: string }> = [];
@@ -955,7 +949,6 @@ export function uninstallSkills(): UninstallSkillsReport {
 		{ label: "Claude Code skill", destDir: path.join(homeDir, ".claude", "skills", "agent-memory") },
 		{ label: "Codex skill", destDir: path.join(homeDir, ".codex", "skills", "agent-memory") },
 		{ label: "Cursor skill", destDir: path.join(homeDir, ".cursor", "skills", "agent-memory") },
-		{ label: "Agent CLI skill", destDir: path.join(homeDir, ".agents", "skills", "agent-memory") },
 	];
 
 	const removed: Array<{ label: string; path: string }> = [];
