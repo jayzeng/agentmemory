@@ -1,5 +1,5 @@
 class AgentMemory < Formula
-  desc "Persistent memory for coding agents with qmd-powered semantic search"
+  desc "agentmemory CLI: persistent memory for coding agents with qmd semantic search"
   homepage "https://github.com/jayzeng/agentmemory"
   url "https://github.com/jayzeng/agentmemory/archive/refs/tags/v0.4.10.tar.gz"
   sha256 "2b8493e997e5f3617f81cb4162015d78bd573e7c1ff6361f7c22bf015db9f3ab"

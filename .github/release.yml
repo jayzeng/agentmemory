@@ -1,0 +1,39 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - internal
+    authors:
+      - dependabot[bot]
+      - github-actions[bot]
+  categories:
+    - title: Features
+      labels:
+        - feat
+        - feature
+        - enhancement
+    - title: Fixes
+      labels:
+        - fix
+        - bug
+    - title: Documentation
+      labels:
+        - docs
+    - title: Tests
+      labels:
+        - test
+        - tests
+    - title: Maintenance
+      labels:
+        - chore
+        - refactor
+        - build
+        - ci
+
+change-template: "- $TITLE by @$AUTHOR in #$NUMBER"
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  **Full Changelog**: https://github.com/jayzeng/agentmemory/compare/$PREVIOUS_TAG...$NEXT_TAG

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- GitHub release notes template at `.github/release.yml`
+- Repository social preview asset at `.github/assets/social-preview.png`
+
+### Changed
+- Improved discoverability metadata and SEO copy across repository docs and package metadata (`agentmemory`, `agent-memory`, `myagentmemory` aliases)
+- Fixed `package.json` repository, bugs, and homepage URLs to canonical repo `https://github.com/jayzeng/agentmemory`
+- Updated Homebrew formula description to include `agentmemory` naming
+
+### Fixed
+- Restored Agent CLI skill parity in installers by adding `.agents` target to `installSkills()`, `uninstallSkills()`, and `scripts/install-skills.sh`
+
 ## [0.4.9] - 2026-02-21
 
 ### Added

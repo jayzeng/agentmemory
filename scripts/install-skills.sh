@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install (or uninstall) agent-memory skills for Claude Code, Codex, and Cursor.
+# Install (or uninstall) agent-memory skills for Claude Code, Codex, Cursor, and Agent CLI.
 # Usage: bash scripts/install-skills.sh [--uninstall]
 
 set -euo pipefail
@@ -62,11 +62,13 @@ SKILL_DIRS=(
   "$HOME/.claude/skills/agent-memory"
   "$HOME/.codex/skills/agent-memory"
   "$HOME/.cursor/skills/agent-memory"
+  "$HOME/.agents/skills/agent-memory"
 )
 SKILL_LABELS=(
   "Claude Code skill"
   "Codex skill"
   "Cursor skill"
+  "Agent CLI skill"
 )
 
 if $UNINSTALL; then
@@ -81,6 +83,7 @@ else
   install_skill "Claude Code skill" "$PROJECT_DIR/skills/claude-code" "$HOME/.claude/skills/agent-memory" "$HOME/.claude" '[ -f "$HOME/.claude/settings.json" ] || [ -f "$HOME/.claude/settings.local.json" ] || command_exists claude'
   install_skill "Codex skill" "$PROJECT_DIR/skills/codex" "$HOME/.codex/skills/agent-memory" "$HOME/.codex" '[ -f "$HOME/.codex/config.toml" ] || command_exists codex'
   install_skill "Cursor skill" "$PROJECT_DIR/skills/cursor" "$HOME/.cursor/skills/agent-memory" "$HOME/.cursor"
+  install_skill "Agent CLI skill" "$PROJECT_DIR/skills/agent" "$HOME/.agents/skills/agent-memory" "$HOME/.agents"
   echo ""
   echo "Done."
 fi

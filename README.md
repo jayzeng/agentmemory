@@ -1,6 +1,18 @@
-# agent-memory
+# agent-memory (agentmemory)
 
-Persistent memory for coding agents — [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), Cursor, and Agent (Cursor CLI). Semantic search powered by [qmd](https://github.com/tobi/qmd).
+`agentmemory` is the canonical GitHub repository for the `agent-memory` CLI (`myagentmemory` on npm).
+
+Persistent memory for coding agents — [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), Cursor, and Agent (Cursor CLI). Local-first markdown memory with [qmd](https://github.com/tobi/qmd)-powered semantic search and automatic context injection.
+
+Search aliases:
+- `agentmemory` (GitHub repo + Homebrew tap)
+- `agent-memory` (CLI command/binary)
+- `myagentmemory` (npm package name)
+- `coding agent memory` / `AI coding memory`
+
+GitHub metadata assets:
+- Social preview image: `.github/assets/social-preview.png` (1280x640)
+- Release notes template: `.github/release.yml` (used by GitHub auto-generated release notes)
 
 Thanks to https://github.com/skyfallsin/pi-mem for inspiration.
 
