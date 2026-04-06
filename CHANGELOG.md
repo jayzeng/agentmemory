@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 - GitHub release notes template at `.github/release.yml`
 - Repository social preview asset at `.github/assets/social-preview.png`
+- GitHub Pages landing page at `docs/index.html` to promote installation and usage
+- GitHub Actions Pages deploy workflow at `.github/workflows/deploy-pages.yml`
 
 ### Changed
 - Improved discoverability metadata and SEO copy across repository docs and package metadata (`agentmemory`, `agent-memory`, `myagentmemory` aliases)

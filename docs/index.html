@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>agentmemory - Persistent Memory For Coding Agents</title>
+	<meta
+		name="description"
+		content="agentmemory adds persistent markdown memory, daily logs, scratchpad checklists, and qmd semantic search for Claude Code, OpenAI Codex, Cursor, and Agent CLI."
+	/>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+	<link
+		href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;800&family=DM+Mono:wght@400;500&display=swap"
+		rel="stylesheet"
+	/>
+	<style>
+		:root {
+			--bg: #f7f3ea;
+			--ink: #1f2430;
+			--muted: #5f6570;
+			--surface: #fffdf7;
+			--stroke: #d7cfbe;
+			--accent: #0d9b7a;
+			--accent-2: #ff7a45;
+			--card-shadow: 0 20px 45px -25px rgba(31, 36, 48, 0.35);
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			font-family: "Chivo", "Avenir Next", "Segoe UI", sans-serif;
+			background:
+				radial-gradient(1200px 500px at 10% -10%, #c6efe5 0%, transparent 55%),
+				radial-gradient(1000px 550px at 90% -20%, #ffd8c9 0%, transparent 50%),
+				var(--bg);
+			color: var(--ink);
+			line-height: 1.5;
+		}
+
+		.page {
+			max-width: 1080px;
+			margin: 0 auto;
+			padding: 28px 20px 80px;
+		}
+
+		.topbar {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+		}
+
+		.brand {
+			display: inline-flex;
+			align-items: center;
+			gap: 10px;
+			font-weight: 800;
+			font-size: 1.05rem;
+			letter-spacing: 0.02em;
+		}
+
+		.brand-badge {
+			width: 28px;
+			height: 28px;
+			border-radius: 8px;
+			background: linear-gradient(145deg, var(--accent), #12c79c);
+			box-shadow: 0 8px 20px -12px rgba(13, 155, 122, 0.8);
+		}
+
+		a {
+			color: inherit;
+			text-decoration-thickness: 0.08em;
+			text-underline-offset: 0.18em;
+		}
+
+		.nav {
+			display: inline-flex;
+			gap: 16px;
+			font-size: 0.92rem;
+		}
+
+		.hero {
+			margin-top: 38px;
+			padding: 36px;
+			background: var(--surface);
+			border: 1px solid var(--stroke);
+			border-radius: 24px;
+			box-shadow: var(--card-shadow);
+			position: relative;
+			overflow: hidden;
+		}
+
+		.hero::after {
+			content: "";
+			position: absolute;
+			width: 280px;
+			height: 280px;
+			right: -110px;
+			top: -120px;
+			background: radial-gradient(circle at center, rgba(13, 155, 122, 0.2), rgba(13, 155, 122, 0));
+			pointer-events: none;
+		}
+
+		.kicker {
+			font-size: 0.84rem;
+			font-weight: 600;
+			letter-spacing: 0.08em;
+			text-transform: uppercase;
+			color: var(--accent);
+			margin: 0 0 10px;
+		}
+
+		h1 {
+			font-size: clamp(2rem, 4.5vw, 3.4rem);
+			line-height: 1.03;
+			letter-spacing: -0.025em;
+			margin: 0;
+			max-width: 760px;
+		}
+
+		.hero p {
+			margin: 16px 0 0;
+			font-size: 1.08rem;
+			color: var(--muted);
+			max-width: 740px;
+		}
+
+		.cta-row {
+			margin-top: 22px;
+			display: flex;
+			flex-wrap: wrap;
+			gap: 12px;
+		}
+
+		.btn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			padding: 11px 16px;
+			border-radius: 10px;
+			font-weight: 700;
+			font-size: 0.93rem;
+			text-decoration: none;
+			border: 1px solid transparent;
+		}
+
+		.btn-primary {
+			background: linear-gradient(145deg, var(--accent), #12b68f);
+			color: #f7fffc;
+		}
+
+		.btn-secondary {
+			background: #fff;
+			border-color: var(--stroke);
+		}
+
+		.grid {
+			margin-top: 22px;
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 14px;
+		}
+
+		.card {
+			background: var(--surface);
+			border: 1px solid var(--stroke);
+			border-radius: 16px;
+			padding: 16px;
+			box-shadow: 0 10px 20px -15px rgba(31, 36, 48, 0.35);
+		}
+
+		.card h2 {
+			margin: 0 0 10px;
+			font-size: 1.02rem;
+		}
+
+		.card p {
+			margin: 0;
+			color: var(--muted);
+			font-size: 0.95rem;
+		}
+
+		.command {
+			margin-top: 12px;
+			background: #171b23;
+			border-radius: 12px;
+			padding: 10px 12px;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+		}
+
+		.command code {
+			color: #daf9f0;
+			font-family: "DM Mono", "SFMono-Regular", "Menlo", monospace;
+			font-size: 0.82rem;
+			overflow-x: auto;
+			white-space: nowrap;
+		}
+
+		.copy {
+			flex-shrink: 0;
+			border: 1px solid rgba(218, 249, 240, 0.4);
+			background: transparent;
+			color: #daf9f0;
+			border-radius: 7px;
+			padding: 5px 8px;
+			font-family: "DM Mono", "SFMono-Regular", "Menlo", monospace;
+			font-size: 0.72rem;
+			cursor: pointer;
+		}
+
+		.agent-row {
+			margin-top: 16px;
+			display: flex;
+			flex-wrap: wrap;
+			gap: 8px;
+		}
+
+		.agent-pill {
+			border: 1px solid var(--stroke);
+			background: #fff;
+			border-radius: 999px;
+			padding: 7px 10px;
+			font-size: 0.77rem;
+			font-weight: 600;
+		}
+
+		.steps {
+			margin-top: 22px;
+			background: linear-gradient(145deg, #fff9f2, #fff);
+			border: 1px solid #e5dac7;
+			border-radius: 16px;
+			padding: 18px;
+		}
+
+		.steps h2 {
+			margin: 0 0 10px;
+			font-size: 1.02rem;
+		}
+
+		ol {
+			margin: 0;
+			padding-left: 1.2rem;
+		}
+
+		li + li {
+			margin-top: 8px;
+		}
+
+		.footer {
+			margin-top: 22px;
+			font-size: 0.85rem;
+			color: var(--muted);
+		}
+
+		.reveal {
+			opacity: 0;
+			transform: translateY(14px);
+			transition: opacity 0.55s ease, transform 0.55s ease;
+		}
+
+		.reveal.in {
+			opacity: 1;
+			transform: translateY(0);
+		}
+
+		@media (max-width: 860px) {
+			.grid {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		@media (max-width: 640px) {
+			.page {
+				padding: 18px 14px 42px;
+			}
+
+			.topbar {
+				flex-direction: column;
+				align-items: flex-start;
+			}
+
+			.hero {
+				padding: 22px 18px;
+				border-radius: 16px;
+			}
+
+			.command code {
+				font-size: 0.75rem;
+			}
+		}
+	</style>
+</head>
+<body>
+	<main class="page">
+		<header class="topbar reveal">
+			<div class="brand">
+				<span class="brand-badge" aria-hidden="true"></span>
+				<span>agentmemory</span>
+			</div>
+			<nav class="nav">
+				<a href="https://github.com/jayzeng/agentmemory">GitHub</a>
+				<a href="https://github.com/jayzeng/agentmemory#installation">Install</a>
+				<a href="https://github.com/jayzeng/agentmemory#cli-commands">Commands</a>
+			</nav>
+		</header>
+
+		<section class="hero reveal">
+			<p class="kicker">Persistent memory extension for coding agents</p>
+			<h1>Stop losing context between sessions.</h1>
+			<p>
+				agentmemory gives your coding agent durable memory with local markdown files, daily logs, scratchpad
+				checklists, and qmd-powered semantic search.
+			</p>
+			<div class="cta-row">
+				<a class="btn btn-primary" href="https://github.com/jayzeng/agentmemory">Open Repository</a>
+				<a class="btn btn-secondary" href="https://github.com/jayzeng/agentmemory#installation">Quick Install</a>
+			</div>
+			<div class="agent-row" aria-label="Supported agents">
+				<span class="agent-pill">Claude Code</span>
+				<span class="agent-pill">OpenAI Codex</span>
+				<span class="agent-pill">Cursor</span>
+				<span class="agent-pill">Agent CLI</span>
+			</div>
+		</section>
+
+		<section class="grid">
+			<article class="card reveal">
+				<h2>Install from npm</h2>
+				<p>Use this when you want the latest CLI quickly on any platform.</p>
+				<div class="command">
+					<code id="cmd-npm">npm install -g myagentmemory</code>
+					<button class="copy" type="button" data-copy="cmd-npm">Copy</button>
+				</div>
+			</article>
+			<article class="card reveal">
+				<h2>Install from Homebrew</h2>
+				<p>Fast install path for macOS users.</p>
+				<div class="command">
+					<code id="cmd-brew">brew install jayzeng/agentmemory/agent-memory</code>
+					<button class="copy" type="button" data-copy="cmd-brew">Copy</button>
+				</div>
+			</article>
+			<article class="card reveal">
+				<h2>Initialize memory</h2>
+				<p>Create the memory directory and wire optional qmd integration.</p>
+				<div class="command">
+					<code id="cmd-init">agent-memory init</code>
+					<button class="copy" type="button" data-copy="cmd-init">Copy</button>
+				</div>
+			</article>
+			<article class="card reveal">
+				<h2>Install skill files</h2>
+				<p>Install extension prompts for Claude Code, Codex, Cursor, and Agent CLI.</p>
+				<div class="command">
+					<code id="cmd-skills">agent-memory install-skills</code>
+					<button class="copy" type="button" data-copy="cmd-skills">Copy</button>
+				</div>
+			</article>
+		</section>
+
+		<section class="steps reveal">
+			<h2>Three-minute setup</h2>
+			<ol>
+				<li>Install `agent-memory` from npm or Homebrew.</li>
+				<li>Run `agent-memory init` to create local memory storage.</li>
+				<li>Run `agent-memory install-skills` to enable prompt injection across agents.</li>
+			</ol>
+		</section>
+
+		<p class="footer reveal">
+			Source, docs, and issue tracker:
+			<a href="https://github.com/jayzeng/agentmemory">github.com/jayzeng/agentmemory</a>
+		</p>
+	</main>
+
+	<script>
+		(() => {
+			const io = new IntersectionObserver(
+				(entries) => {
+					for (const entry of entries) {
+						if (!entry.isIntersecting) continue;
+						entry.target.classList.add("in");
+						io.unobserve(entry.target);
+					}
+				},
+				{ threshold: 0.12 },
+			);
+
+			document.querySelectorAll(".reveal").forEach((el, idx) => {
+				el.style.transitionDelay = `${Math.min(idx * 55, 260)}ms`;
+				io.observe(el);
+			});
+
+			const copyButtons = document.querySelectorAll(".copy");
+			copyButtons.forEach((button) => {
+				button.addEventListener("click", async () => {
+					const id = button.getAttribute("data-copy");
+					const target = id ? document.getElementById(id) : null;
+					const text = target ? target.textContent ?? "" : "";
+					if (!text) return;
+					try {
+						await navigator.clipboard.writeText(text);
+						const prev = button.textContent;
+						button.textContent = "Copied";
+						setTimeout(() => {
+							button.textContent = prev;
+						}, 1200);
+					} catch {
+						button.textContent = "Failed";
+						setTimeout(() => {
+							button.textContent = "Copy";
+						}, 1200);
+					}
+				});
+			});
+		})();
+	</script>
+</body>
+</html>
