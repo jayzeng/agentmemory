@@ -330,6 +330,8 @@ describe("CLI subprocess", () => {
 		expect(out.directory).toBe(tmpDir);
 		expect(out.dailyLogs).toBe(0);
 		expect(out.topics).toBe(0);
+		// Live embeddings probe is opt-in (--probe), so it never runs here.
+		expect(out.qmd.embeddings).toBe("n/a");
 	});
 
 	test("write and read round-trip", async () => {
@@ -559,6 +561,8 @@ describe("CLI subprocess", () => {
 		fs.mkdirSync(path.join(projectDir, "skills", "claude-code"), { recursive: true });
 		fs.writeFileSync(path.join(projectDir, "skills", "claude-code", "SKILL.md"), "# Claude", "utf-8");
 		fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
+		// Detect via a marker file so the test does not depend on a `claude` binary being on PATH.
+		fs.writeFileSync(path.join(homeDir, ".claude", "settings.json"), "{}", "utf-8");
 
 		const result = Bun.spawnSync(
 			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "install-skills", "--json"],
@@ -759,6 +763,9 @@ describe("install scripts", () => {
 		// Install first
 		fs.mkdirSync(path.join(tmpHome, ".claude"), { recursive: true });
 		fs.mkdirSync(path.join(tmpHome, ".codex"), { recursive: true });
+		// Detect via marker files so the test does not depend on `claude`/`codex` binaries on PATH.
+		fs.writeFileSync(path.join(tmpHome, ".claude", "settings.json"), "{}", "utf-8");
+		fs.writeFileSync(path.join(tmpHome, ".codex", "config.toml"), "", "utf-8");
 
 		const installResult = Bun.spawnSync(["bash", path.join(repoRoot, "scripts", "install-skills.sh")], {
 			cwd: repoRoot,
@@ -789,6 +796,9 @@ describe("install scripts", () => {
 		fs.mkdirSync(path.join(tmpHome, ".codex"), { recursive: true });
 		fs.mkdirSync(path.join(tmpHome, ".cursor"), { recursive: true });
 		fs.mkdirSync(path.join(tmpHome, ".agents"), { recursive: true });
+		// Detect via marker files so the test does not depend on `claude`/`codex` binaries on PATH.
+		fs.writeFileSync(path.join(tmpHome, ".claude", "settings.json"), "{}", "utf-8");
+		fs.writeFileSync(path.join(tmpHome, ".codex", "config.toml"), "", "utf-8");
 
 		const result = Bun.spawnSync(["bash", path.join(repoRoot, "scripts", "install-skills.sh")], {
 			cwd: repoRoot,

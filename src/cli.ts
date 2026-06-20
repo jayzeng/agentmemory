@@ -43,6 +43,7 @@ import {
 	installSkills,
 	nowTimestamp,
 	parseScratchpad,
+	probeEmbeddings,
 	readFileSafe,
 	runQmdEmbedDetached,
 	runQmdSearch,
@@ -665,11 +666,18 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 	const qmdFound = await detectQmd();
 	let hasCollection = false;
 	let health = null;
+	let embeddings: "ready" | "missing" | "unknown" | "n/a" = "n/a";
 	if (qmdFound) {
 		hasCollection = await checkCollection();
 		if (hasCollection) {
 			await ensureQmdAvailableForSync();
 			health = await getQmdHealth();
+			// A live semantic probe confirms embeddings are actually usable, but
+			// it costs a real qmd query (and a possible model load), so it's
+			// opt-in — the cheap pending-embed count below covers the common case.
+			if (hasFlag(flags, "probe")) {
+				embeddings = await probeEmbeddings();
+			}
 		}
 	}
 
@@ -695,6 +703,7 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 					available: qmdFound,
 					collection: hasCollection ? getCollectionName() : null,
 					health,
+					embeddings,
 				},
 				embedMode,
 			},
@@ -725,6 +734,15 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 				`Collection '${getCollectionName()}': ${hasCollection ? "configured" : "not configured — run: agent-memory init"}`,
 			);
 			console.log(`Embed mode: ${embedMode}`);
+			if (hasCollection && embeddings !== "n/a") {
+				const embLabel =
+					embeddings === "ready"
+						? "ready"
+						: embeddings === "missing"
+							? "missing — run: agent-memory sync"
+							: "unknown (could not verify within probe timeout)";
+				console.log(`Embeddings (semantic/deep search): ${embLabel}`);
+			}
 			if (health) {
 				if (health.totalFiles !== null) console.log(`Files indexed: ${health.totalFiles}`);
 				if (health.vectorsEmbedded !== null) console.log(`Vectors embedded: ${health.vectorsEmbedded}`);
@@ -789,7 +807,7 @@ Commands:
   distil      Generate compact MEMORY.md index from daily logs + topics
   sync        Re-index and embed all files (requires qmd)
   init        Initialize memory directory and qmd collection
-  status      Show configuration and status
+  status      Show configuration and status (--probe for a live embeddings check)
 
 Global flags:
   --dir <path>   Override memory directory

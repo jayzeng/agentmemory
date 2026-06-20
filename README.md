@@ -1,25 +1,25 @@
-# agent-memory (agentmemory)
+# agent-memory
 
-`agentmemory` is the canonical GitHub repository for the `agent-memory` CLI (`myagentmemory` on npm).
+**Persistent memory for AI coding agents.** Give [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), [Cursor](https://cursor.com), and Agent (Cursor CLI) a memory that survives across sessions — long-term facts, daily logs, topic notes, and a scratchpad checklist, stored as plain markdown and searchable with [qmd](https://github.com/tobi/qmd)-powered semantic search.
 
-Persistent memory for coding agents — [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), Cursor, and Agent (Cursor CLI). Local-first markdown memory with [qmd](https://github.com/tobi/qmd)-powered semantic search and automatic context injection.
+[![npm version](https://img.shields.io/npm/v/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
+[![npm downloads](https://img.shields.io/npm/dm/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
+[![license](https://img.shields.io/npm/l/myagentmemory)](LICENSE)
+[![website](https://img.shields.io/badge/website-jayzeng.github.io%2Fagentmemory-0d9b7a)](https://jayzeng.github.io/agentmemory/)
 
-Project site (GitHub Pages): https://jayzeng.github.io/agentmemory/
+**[🌐 Website & quickstart →](https://jayzeng.github.io/agentmemory/)** · [Install](#installation) · [CLI commands](#cli-commands) · [How it works](#how-it-works)
 
-Search aliases:
-- `agentmemory` (GitHub repo + Homebrew tap)
-- `agent-memory` (CLI command/binary)
-- `myagentmemory` (npm package name)
-- `coding agent memory` / `AI coding memory`
+## Why agent-memory?
 
-GitHub metadata assets:
-- Social preview image: `.github/assets/social-preview.png` (1280x640)
-- Release notes template: `.github/release.yml` (used by GitHub auto-generated release notes)
-- Landing page source: `docs/index.html` (deployed by `.github/workflows/deploy-pages.yml`)
+Coding agents forget everything between sessions. `agent-memory` gives them a durable, local-first memory so they stop re-learning your stack, your preferences, and past decisions on every run.
 
-Thanks to https://github.com/skyfallsin/pi-mem for inspiration.
+- 🧠 **Memory that persists** — decisions, preferences, and project context carry across sessions instead of starting cold.
+- 📁 **Plain markdown, local-first** — every memory is a readable, git-friendly file on disk. No database, no cloud, no lock-in.
+- 🔍 **Semantic search** — optional [qmd](https://github.com/tobi/qmd) integration adds keyword, semantic, and hybrid search across all memory files.
+- ⚡ **Automatic context injection** — relevant past memories surface into each turn, no manual tool calls required.
+- 🤝 **One memory, every agent** — the same store is shared across Claude Code, Codex, Cursor, and Agent.
 
-Long-term facts, daily logs, topic/event notes, and a scratchpad checklist stored as plain markdown files. Optional qmd integration adds keyword, semantic, and hybrid search across all memory files, plus automatic selective injection of relevant past memories into every turn.
+> **Naming:** `agentmemory` is the GitHub repo (and Homebrew tap), `myagentmemory` is the npm package, and `agent-memory` is the installed CLI binary. Also known as *coding agent memory* or *AI coding memory*.
 
 ## Installation
 
@@ -48,11 +48,7 @@ agent-memory install-skills
 agent-memory uninstall-skills
 ```
 
-### Pi users
-
-If you're on Pi and prefer a native extension, use `pi-memory` (https://github.com/jayzeng/pi-memory) instead of installing this skill. The CLI + skill workflow here is the cross-platform alternative, and works fine on Pi without any extension.
-
-This installs:
+`install-skills` writes a SKILL.md into each agent's config directory:
 - `~/.claude/skills/agent-memory/SKILL.md` — Claude Code skill
 - `~/.codex/skills/agent-memory/SKILL.md` — Codex skill
 - `~/.cursor/skills/agent-memory/SKILL.md` — Cursor skill
@@ -61,6 +57,10 @@ This installs:
 - `%USERPROFILE%\.codex\skills\agent-memory\SKILL.md` — Codex skill (Windows)
 - `%USERPROFILE%\.cursor\skills\agent-memory\SKILL.md` — Cursor skill (Windows)
 - `%USERPROFILE%\.agents\skills\agent-memory\SKILL.md` — Agent CLI skill (Windows)
+
+### Pi users
+
+If you're on Pi and prefer a native extension, use `pi-memory` (https://github.com/jayzeng/pi-memory) instead of installing this skill. The CLI + skill workflow here is the cross-platform alternative, and works fine on Pi without any extension.
 
 ### Optional: Enable search with qmd
 
@@ -80,22 +80,21 @@ Without qmd, all core tools (write/read/scratchpad) work normally. Only `memory_
 ## Architecture
 
 ```
-  ┌──────────────┐
-  │  src/core.ts │  ← all logic (paths, truncation, scratchpad,
-  │              │    context builder, qmd, tool functions)
-  └──────┬───────┘
-         │
-    ┌────┴─────────────────┐
-    ▼                      ▼
-  ┌──────────┐   ┌──────────────┐
-  │ src/     │   │ skills/      │
-  │ cli.ts   │   │ ├─ claude-code/SKILL.md
-  │          │   │ ├─ codex/SKILL.md
-  │          │   │ ├─ cursor/SKILL.md
-  │          │   │ └─ agent/SKILL.md
-  └──────────┘   └──────────────┘
-   CLI binary     instruction files
-   `agent-memory` that invoke CLI
+  ┌───────────────┐
+  │  src/core.ts  │  ← all logic: paths, truncation, scratchpad,
+  └───────┬───────┘     context builder, qmd, tool functions
+          │
+     ┌────┴─────┐
+     ▼          ▼
+  ┌─────────┐   ┌─────────────────────────┐
+  │ src/    │   │ skills/                 │
+  │ cli.ts  │   │ ├─ claude-code/SKILL.md │
+  │         │   │ ├─ codex/SKILL.md       │
+  │         │   │ ├─ cursor/SKILL.md      │
+  │         │   │ └─ agent/SKILL.md       │
+  └─────────┘   └─────────────────────────┘
+   CLI binary    instruction files
+  `agent-memory`  that invoke the CLI
 ```
 
 The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY_DIR` env var or `--dir` flag.
@@ -130,14 +129,14 @@ If the first search doesn't find what you need, try rephrasing or switching mode
 
 ```
 ~/.agent-memory/
-  MEMORY.md              # Curated long-term memory
-  SCRATCHPAD.md           # Checklist of things to fix/remember
+  MEMORY.md                # Curated long-term memory
+  SCRATCHPAD.md            # Checklist of things to fix/remember
   daily/
-    2026-02-15.md         # Daily append-only log
+    2026-02-15.md          # Daily append-only log
     2026-02-14.md
     ...
   topics/
-    auth.md               # Topic/event log linked back to daily entries
+    auth.md                # Topic/event log linked back to daily entries
 ```
 
 ## Topic notes
@@ -165,7 +164,7 @@ Before every agent turn, the following are injected into the system prompt (in p
 
 Total injection is capped at 16K chars. When qmd is unavailable, step 3 is skipped and the rest works as before.
 
-For Claude Code, context is injected via the `!`agent-memory context`` syntax in the SKILL.md. For Codex, Cursor, and Agent, the agent runs `agent-memory context` at session start.
+For Claude Code, context is injected via the `!`agent-memory context --no-search`` syntax in the SKILL.md. For Codex, Cursor, and Agent, the agent runs `agent-memory context` at session start.
 
 ### Selective injection
 
@@ -233,7 +232,7 @@ agent-memory install-skills
 
 ```bash
 # Confirm package name is available
-npm view agent-memory
+npm view myagentmemory
 
 # Bump version (choose patch/minor/major)
 npm version patch
@@ -242,13 +241,23 @@ npm version patch
 npm publish --access public
 ```
 
+### Repository assets (maintainers)
+
+- **Social preview image:** `.github/assets/social-preview.png` (1280×640)
+- **Release notes template:** `.github/release.yml` (used by GitHub auto-generated release notes)
+- **Landing page source:** `docs/index.html` (deployed by `.github/workflows/deploy-pages.yml`)
+
+## Acknowledgments
+
+Inspired by [skyfallsin/pi-mem](https://github.com/skyfallsin/pi-mem). Semantic search is powered by [qmd](https://github.com/tobi/qmd).
+
 ## Changelog
 
-### 0.5.0
+### 0.4.12
 
 - **Removed pi extension**: Removed `index.ts` and all pi-specific code (`@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`, `@sinclair/typebox` peer dependencies).
 - **Standalone tool functions**: Extracted `memoryWrite()`, `memoryRead()`, `scratchpadAction()`, `memorySearch()` into `src/core.ts` as standalone functions usable without any framework.
-- **Renamed package**: `pi-memory` → `agent-memory`.
+- **Renamed package**: `pi-memory` → `myagentmemory` (npm); the CLI binary is `agent-memory`.
 - **Renamed env var**: `PI_MEMORY_QMD_UPDATE` → `AGENT_MEMORY_QMD_UPDATE` (old name still works as fallback).
 - **Default memory directory**: Now always `~/.agent-memory/`.
 - **Removed pi-specific tests**: Deleted `test/e2e.ts`, `test/eval-recall.ts`, `test/unit.ts`.

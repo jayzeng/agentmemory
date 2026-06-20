@@ -1146,12 +1146,13 @@ export function runQmdSearch(
 	mode: "keyword" | "semantic" | "deep",
 	query: string,
 	limit: number,
+	options: { signal?: AbortSignal } = {},
 ): Promise<{ results: QmdSearchResult[]; stderr: string }> {
 	const subcommand = mode === "keyword" ? "search" : mode === "semantic" ? "vsearch" : "query";
 	const args = [subcommand, "--json", "-c", QMD_COLLECTION_NAME, "-n", String(limit), query];
 
 	return new Promise((resolve, reject) => {
-		execFileFn("qmd", args, { timeout: 60_000 }, (err, stdout, stderr) => {
+		execFileFn("qmd", args, { timeout: 60_000, signal: options.signal }, (err, stdout, stderr) => {
 			if (err) {
 				reject(new Error(stderr?.trim() || err.message));
 				return;
@@ -1169,6 +1170,39 @@ export function runQmdSearch(
 			}
 		});
 	});
+}
+
+/**
+ * Best-effort check of whether vector embeddings are actually usable for
+ * semantic/deep search right now. Runs a tiny semantic probe and looks for
+ * qmd's "need embeddings" warning. Bounded by a short timeout because the very
+ * first semantic query can trigger a model download — returns "unknown" rather
+ * than blocking on it. "ready" means the probe ran without the warning; it does
+ * not prove the index has content.
+ */
+export async function probeEmbeddings(): Promise<"ready" | "missing" | "unknown"> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	// Abort the underlying qmd child when the timeout fires so it does not keep
+	// the event loop open until its own 60s timeout and hang the CLI.
+	const controller = new AbortController();
+	try {
+		const { stderr } = await Promise.race([
+			runQmdSearch("semantic", "memory", 1, { signal: controller.signal }),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					controller.abort();
+					reject(new Error("timeout"));
+				}, 4_000);
+			}),
+		]);
+		return /need embeddings/i.test(stderr ?? "") ? "missing" : "ready";
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (/need embeddings/i.test(msg)) return "missing";
+		return "unknown";
+	} finally {
+		clearTimeout(timer);
+	}
 }
 
 // ---------------------------------------------------------------------------
