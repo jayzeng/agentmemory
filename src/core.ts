@@ -1171,6 +1171,33 @@ export function runQmdSearch(
 	});
 }
 
+/**
+ * Best-effort check of whether vector embeddings are actually usable for
+ * semantic/deep search right now. Runs a tiny semantic probe and looks for
+ * qmd's "need embeddings" warning. Bounded by a short timeout because the very
+ * first semantic query can trigger a model download — returns "unknown" rather
+ * than blocking on it. "ready" means the probe ran without the warning; it does
+ * not prove the index has content.
+ */
+export async function probeEmbeddings(): Promise<"ready" | "missing" | "unknown"> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const { stderr } = await Promise.race([
+			runQmdSearch("semantic", "memory", 1),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error("timeout")), 4_000);
+			}),
+		]);
+		return /need embeddings/i.test(stderr ?? "") ? "missing" : "ready";
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (/need embeddings/i.test(msg)) return "missing";
+		return "unknown";
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Standalone tool functions
 // ---------------------------------------------------------------------------

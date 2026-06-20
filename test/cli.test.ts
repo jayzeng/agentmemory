@@ -330,6 +330,8 @@ describe("CLI subprocess", () => {
 		expect(out.directory).toBe(tmpDir);
 		expect(out.dailyLogs).toBe(0);
 		expect(out.topics).toBe(0);
+		// Live embeddings probe is opt-in (--probe), so it never runs here.
+		expect(out.qmd.embeddings).toBe("n/a");
 	});
 
 	test("write and read round-trip", async () => {
