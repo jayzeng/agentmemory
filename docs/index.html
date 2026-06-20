@@ -3,11 +3,54 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>agentmemory - Persistent Memory For Coding Agents</title>
+	<title>agentmemory — Persistent Memory for Coding Agents (Claude Code, Codex, Cursor)</title>
 	<meta
 		name="description"
-		content="agentmemory adds persistent markdown memory, daily logs, scratchpad checklists, and qmd semantic search for Claude Code, OpenAI Codex, Cursor, and Agent CLI."
+		content="agentmemory gives coding agents a durable, local-first memory: long-term facts, daily logs, topic notes, and a scratchpad checklist stored as plain markdown, with optional qmd semantic search. Works with Claude Code, OpenAI Codex, Cursor, and Agent CLI."
 	/>
+	<meta name="keywords" content="agent memory, coding agent memory, AI memory, Claude Code memory, Codex memory, Cursor memory, persistent memory, markdown memory, semantic search, qmd" />
+	<link rel="canonical" href="https://jayzeng.github.io/agentmemory/" />
+	<meta name="theme-color" content="#0d9b7a" />
+
+	<!-- Open Graph -->
+	<meta property="og:type" content="website" />
+	<meta property="og:site_name" content="agentmemory" />
+	<meta property="og:url" content="https://jayzeng.github.io/agentmemory/" />
+	<meta property="og:title" content="agentmemory — Persistent Memory for Coding Agents" />
+	<meta
+		property="og:description"
+		content="Durable, local-first memory for Claude Code, Codex, Cursor, and Agent CLI. Plain markdown you can read, edit, and commit — with optional qmd semantic search."
+	/>
+	<meta property="og:image" content="https://raw.githubusercontent.com/jayzeng/agentmemory/main/.github/assets/social-preview.png" />
+	<meta property="og:image:width" content="1280" />
+	<meta property="og:image:height" content="640" />
+
+	<!-- Twitter -->
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="agentmemory — Persistent Memory for Coding Agents" />
+	<meta
+		name="twitter:description"
+		content="Durable, local-first memory for Claude Code, Codex, Cursor, and Agent CLI. Plain markdown you can read, edit, and commit — with optional qmd semantic search."
+	/>
+	<meta name="twitter:image" content="https://raw.githubusercontent.com/jayzeng/agentmemory/main/.github/assets/social-preview.png" />
+
+	<!-- Structured data -->
+	<script type="application/ld+json">
+	{
+		"@context": "https://schema.org",
+		"@type": "SoftwareApplication",
+		"name": "agentmemory",
+		"alternateName": ["agent-memory", "myagentmemory"],
+		"applicationCategory": "DeveloperApplication",
+		"operatingSystem": "macOS, Linux, Windows",
+		"description": "Persistent, local-first memory for coding agents (Claude Code, OpenAI Codex, Cursor, Agent CLI). Long-term facts, daily logs, topic notes, and a scratchpad stored as plain markdown, with optional qmd semantic search.",
+		"url": "https://jayzeng.github.io/agentmemory/",
+		"downloadUrl": "https://www.npmjs.com/package/myagentmemory",
+		"codeRepository": "https://github.com/jayzeng/agentmemory",
+		"license": "https://opensource.org/licenses/MIT",
+		"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+	}
+	</script>
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 	<link
@@ -270,6 +313,114 @@
 			transform: translateY(0);
 		}
 
+		.hero-badges {
+			margin-top: 18px;
+			display: flex;
+			flex-wrap: wrap;
+			gap: 8px;
+		}
+
+		.hero-badges img {
+			height: 20px;
+		}
+
+		.section {
+			margin-top: 40px;
+		}
+
+		.section-head {
+			max-width: 720px;
+		}
+
+		.section-head h2 {
+			font-size: clamp(1.4rem, 2.6vw, 1.9rem);
+			letter-spacing: -0.02em;
+			margin: 0 0 8px;
+		}
+
+		.section-head p {
+			margin: 0;
+			color: var(--muted);
+			font-size: 1.02rem;
+		}
+
+		.why-grid {
+			margin-top: 18px;
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 14px;
+		}
+
+		.why-grid .card h3 {
+			margin: 0 0 8px;
+			font-size: 1rem;
+		}
+
+		.why-grid .card p {
+			margin: 0;
+			color: var(--muted);
+			font-size: 0.93rem;
+		}
+
+		.demo {
+			margin-top: 18px;
+			background: #171b23;
+			border-radius: 16px;
+			padding: 18px 20px;
+			box-shadow: var(--card-shadow);
+			overflow-x: auto;
+		}
+
+		.demo pre {
+			margin: 0;
+			font-family: "DM Mono", "SFMono-Regular", "Menlo", monospace;
+			font-size: 0.82rem;
+			line-height: 1.7;
+			color: #e7efea;
+		}
+
+		.demo .c-key { color: #7ee0c6; }
+		.demo .c-tag { color: #ff9d73; }
+		.demo .c-dim { color: #8a93a3; }
+
+		.compare {
+			margin-top: 18px;
+			background: var(--surface);
+			border: 1px solid var(--stroke);
+			border-radius: 16px;
+			padding: 6px 18px;
+		}
+
+		.compare table {
+			width: 100%;
+			border-collapse: collapse;
+			font-size: 0.92rem;
+		}
+
+		.compare th,
+		.compare td {
+			text-align: left;
+			padding: 12px 8px;
+			border-bottom: 1px solid var(--stroke);
+		}
+
+		.compare th {
+			color: var(--muted);
+			font-weight: 600;
+		}
+
+		.compare tr:last-child td {
+			border-bottom: none;
+		}
+
+		.compare .yes { color: var(--accent); font-weight: 700; }
+
+		@media (max-width: 860px) {
+			.why-grid {
+				grid-template-columns: 1fr;
+			}
+		}
+
 		@media (max-width: 860px) {
 			.grid {
 				grid-template-columns: 1fr;
@@ -312,21 +463,145 @@
 		</header>
 
 		<section class="hero reveal">
-			<p class="kicker">Persistent memory extension for coding agents</p>
+			<p class="kicker">Persistent memory for coding agents · CLI + skills</p>
 			<h1>Stop losing context between sessions.</h1>
 			<p>
-				agentmemory gives your coding agent durable memory with local markdown files, daily logs, scratchpad
-				checklists, and qmd-powered semantic search.
+				agentmemory gives your coding agent a durable, local-first memory — long-term facts, daily logs, topic
+				notes, and a scratchpad checklist, all stored as plain markdown you can read, edit, and commit. Optional
+				<a href="https://github.com/tobi/qmd">qmd</a> semantic search surfaces the right memory into every turn,
+				automatically.
 			</p>
 			<div class="cta-row">
-				<a class="btn btn-primary" href="https://github.com/jayzeng/agentmemory">Open Repository</a>
-				<a class="btn btn-secondary" href="https://github.com/jayzeng/agentmemory#installation">Quick Install</a>
+				<a class="btn btn-primary" href="https://github.com/jayzeng/agentmemory#installation">Get Started</a>
+				<a class="btn btn-secondary" href="https://github.com/jayzeng/agentmemory">View on GitHub</a>
+			</div>
+			<div class="hero-badges" aria-hidden="true">
+				<a href="https://www.npmjs.com/package/myagentmemory"><img src="https://img.shields.io/npm/v/myagentmemory?color=0d9b7a&logo=npm&label=npm" alt="npm version" /></a>
+				<a href="https://www.npmjs.com/package/myagentmemory"><img src="https://img.shields.io/npm/dm/myagentmemory?color=0d9b7a&logo=npm&label=downloads" alt="npm downloads" /></a>
+				<a href="https://github.com/jayzeng/agentmemory"><img src="https://img.shields.io/github/stars/jayzeng/agentmemory?color=0d9b7a&logo=github" alt="GitHub stars" /></a>
+				<img src="https://img.shields.io/npm/l/myagentmemory?color=0d9b7a" alt="MIT license" />
 			</div>
 			<div class="agent-row" aria-label="Supported agents">
 				<span class="agent-pill">Claude Code</span>
 				<span class="agent-pill">OpenAI Codex</span>
 				<span class="agent-pill">Cursor</span>
 				<span class="agent-pill">Agent CLI</span>
+			</div>
+		</section>
+
+		<section class="section reveal" aria-labelledby="why-title">
+			<div class="section-head">
+				<h2 id="why-title">Why agentmemory?</h2>
+				<p>
+					Coding agents start every session from zero. agentmemory is the memory layer that makes them
+					remember — without a database, a cloud account, or vendor lock-in.
+				</p>
+			</div>
+			<div class="why-grid">
+				<article class="card">
+					<h3>🧠 Memory that persists</h3>
+					<p>Decisions, preferences, and project context carry across sessions, so your agent stops re-learning your stack on every run.</p>
+				</article>
+				<article class="card">
+					<h3>📁 Plain markdown, local-first</h3>
+					<p>Every memory is a readable file on disk — diff it, edit it, commit it to git. No database, no cloud, no lock-in.</p>
+				</article>
+				<article class="card">
+					<h3>🔍 Semantic search</h3>
+					<p>Optional qmd integration adds keyword, semantic, and hybrid search across every memory file you've ever written.</p>
+				</article>
+				<article class="card">
+					<h3>⚡ Automatic context injection</h3>
+					<p>Relevant past memories surface into each turn on their own — no manual tool calls, no copy-pasting context.</p>
+				</article>
+				<article class="card">
+					<h3>🤝 One memory, every agent</h3>
+					<p>The same store is shared across Claude Code, Codex, Cursor, and Agent — switch tools without losing what they know.</p>
+				</article>
+				<article class="card">
+					<h3>⏱️ Zero-config setup</h3>
+					<p>Two commands: <code>init</code> and <code>install-skills</code>. Works the moment you install it, qmd or not.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="section reveal" aria-labelledby="diff-title">
+			<div class="section-head">
+				<h2 id="diff-title">How it's different</h2>
+				<p>Most memory tools are cloud services with their own SDK and storage. agentmemory is the opposite: files you own, on the agents you already use.</p>
+			</div>
+			<div class="compare">
+				<table>
+					<thead>
+						<tr>
+							<th>&nbsp;</th>
+							<th>agentmemory</th>
+							<th>Hosted memory SaaS</th>
+							<th>A single CLAUDE.md</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td>Storage</td>
+							<td><span class="yes">Local markdown files</span></td>
+							<td>Vendor cloud</td>
+							<td>One local file</td>
+						</tr>
+						<tr>
+							<td>Search</td>
+							<td><span class="yes">Keyword + semantic (qmd)</span></td>
+							<td>Vector DB</td>
+							<td>None</td>
+						</tr>
+						<tr>
+							<td>Auto context injection</td>
+							<td><span class="yes">Yes</span></td>
+							<td>Varies</td>
+							<td>Manual</td>
+						</tr>
+						<tr>
+							<td>Works across agents</td>
+							<td><span class="yes">Claude Code · Codex · Cursor · Agent</span></td>
+							<td>SDK per app</td>
+							<td>Per project</td>
+						</tr>
+						<tr>
+							<td>Account required</td>
+							<td><span class="yes">No</span></td>
+							<td>Yes</td>
+							<td>No</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section class="section reveal" aria-labelledby="demo-title">
+			<div class="section-head">
+				<h2 id="demo-title">See it in action</h2>
+				<p>Memory is just markdown. Here's what your agent reads back at the start of every session.</p>
+			</div>
+			<div class="demo">
+<pre><span class="c-dim"># ~/.agent-memory/MEMORY.md</span>
+
+<span class="c-key">## Stack</span>
+Postgres for all backend services. <span class="c-tag">#decision</span> <span class="c-tag">[[database-choice]]</span>
+URL-prefix API versioning (/v1/) to avoid CDN cache issues. <span class="c-tag">#lesson</span>
+
+<span class="c-key">## Preferences</span>
+Neovim + LazyVim. Conventional commits. Run tests before every push.
+
+<span class="c-dim"># Recall it later, in any agent:</span>
+<span class="c-key">$</span> agent-memory search --query <span class="c-tag">"how do we version the API"</span> --mode semantic
+<span class="c-dim">→ URL-prefix API versioning (/v1/) to avoid CDN cache issues.</span>
+</pre>
+			</div>
+		</section>
+
+		<section class="section reveal" aria-labelledby="install-title">
+			<div class="section-head">
+				<h2 id="install-title">Install in under a minute</h2>
+				<p>Grab the CLI, create your memory store, and wire it into every agent you use.</p>
 			</div>
 		</section>
 
@@ -357,7 +632,7 @@
 			</article>
 			<article class="card reveal">
 				<h2>Install skill files</h2>
-				<p>Install extension prompts for Claude Code, Codex, Cursor, and Agent CLI.</p>
+				<p>Wire memory into Claude Code, Codex, Cursor, and Agent CLI in one command.</p>
 				<div class="command">
 					<code id="cmd-skills">agent-memory install-skills</code>
 					<button class="copy" type="button" data-copy="cmd-skills">Copy</button>
@@ -366,7 +641,7 @@
 		</section>
 
 		<section class="steps reveal">
-			<h2>Three-minute setup</h2>
+			<h2>Setup in three steps</h2>
 			<ol>
 				<li>Install `agent-memory` from npm or Homebrew.</li>
 				<li>Run `agent-memory init` to create local memory storage.</li>
