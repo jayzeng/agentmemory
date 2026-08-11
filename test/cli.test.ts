@@ -376,6 +376,35 @@ describe("CLI subprocess", () => {
 		expect(readOut.content).toContain("Test content");
 	});
 
+	test("CLI write uses the core provenance and secret-safety boundary", () => {
+		const token = "sk-eval-DO-NOT-USE-1234567890abcdef";
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--dir",
+				tmpDir,
+				"--target",
+				"long_term",
+				"--content",
+				`Token: ${token}`,
+				"--source-uri",
+				"session://codex/session-1/turn/4",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const output = JSON.parse(result.stdout.toString());
+		expect(output.redacted).toBe(true);
+		const stored = fs.readFileSync(getMemoryFile(), "utf-8");
+		expect(stored).toContain("Source: session://codex/session-1/turn/4");
+		expect(stored).toContain("[REDACTED_SECRET]");
+		expect(stored).not.toContain(token);
+	});
+
 	test("write and read topic round-trip", async () => {
 		const writeResult = Bun.spawnSync(
 			[
@@ -485,6 +514,66 @@ describe("CLI subprocess", () => {
 		const listOut = JSON.parse(listResult.stdout.toString());
 		expect(listOut.count).toBe(1);
 		expect(listOut.items[0].text).toBe("Test task");
+	});
+
+	test("scratchpad add never echoes recognized secrets", () => {
+		const token = "sk-eval-DO-NOT-USE-1234567890abcdef";
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"scratchpad",
+				"add",
+				"--dir",
+				tmpDir,
+				"--text",
+				`Token ${token}`,
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		const stdout = result.stdout.toString();
+		expect(result.exitCode).toBe(0);
+		expect(stdout).toContain("[REDACTED_SECRET]");
+		expect(stdout).not.toContain(token);
+	});
+
+	test("scratchpad commands redact legacy secrets", () => {
+		const token = "sk-eval-DO-NOT-USE-1234567890abcdef";
+		fs.writeFileSync(
+			getScratchpadFile(),
+			`# Scratchpad\n\n<!-- 2026-01-02 12:00:00 [old] -->\n- [ ] Legacy token ${token}\n`,
+			"utf-8",
+		);
+		const listResult = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "scratchpad", "list", "--dir", tmpDir, "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		const listStdout = listResult.stdout.toString();
+		expect(listResult.exitCode).toBe(0);
+		expect(listStdout).toContain("[REDACTED_SECRET]");
+		expect(listStdout).not.toContain(token);
+
+		const addResult = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"scratchpad",
+				"add",
+				"--dir",
+				tmpDir,
+				"--text",
+				"Safe follow-up",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(addResult.exitCode).toBe(0);
+		const stored = fs.readFileSync(getScratchpadFile(), "utf-8");
+		expect(stored).toContain("[REDACTED_SECRET]");
+		expect(stored).not.toContain(token);
 	});
 
 	test("help shows usage", async () => {
@@ -832,6 +921,60 @@ describe("install scripts", () => {
 			const src = fs.readFileSync(c.src, "utf-8");
 			const dest = fs.readFileSync(c.dest, "utf-8");
 			expect(dest).toBe(src);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 10. npm package portability
+// ---------------------------------------------------------------------------
+
+describe("npm package portability", () => {
+	test("ships and runs a portable Node.js CLI instead of a native binary", () => {
+		const repoRoot = path.join(__dirname, "..");
+		const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf-8")) as {
+			version: string;
+			bin: Record<string, string>;
+		};
+		expect(packageJson.bin["agent-memory"]).toBe("./dist/cli.js");
+
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-npm-package-"));
+		try {
+			const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+			const packResult = Bun.spawnSync([npm, "pack", "--json", "--pack-destination", tempDir], {
+				cwd: repoRoot,
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			expect(packResult.exitCode).toBe(0);
+
+			const [pack] = JSON.parse(packResult.stdout.toString()) as Array<{
+				filename: string;
+				unpackedSize: number;
+				files: Array<{ path: string }>;
+			}>;
+			const packedPaths = pack.files.map((file) => file.path);
+			expect(packedPaths).toContain("dist/cli.js");
+			expect(packedPaths).not.toContain("dist/agent-memory");
+			expect(packedPaths).not.toContain("dist/agent-memory.exe");
+			expect(pack.unpackedSize).toBeLessThan(2_000_000);
+
+			const prefix = path.join(tempDir, "prefix");
+			const installResult = Bun.spawnSync(
+				[npm, "install", "--global", "--prefix", prefix, "--ignore-scripts", path.join(tempDir, pack.filename)],
+				{ stdout: "pipe", stderr: "pipe" },
+			);
+			expect(installResult.exitCode).toBe(0);
+
+			const executable =
+				process.platform === "win32"
+					? path.join(prefix, "agent-memory.cmd")
+					: path.join(prefix, "bin", "agent-memory");
+			const versionResult = Bun.spawnSync([executable, "version"], { stdout: "pipe", stderr: "pipe" });
+			expect(versionResult.exitCode).toBe(0);
+			expect(versionResult.stdout.toString().trim()).toBe(packageJson.version);
+		} finally {
+			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 });
