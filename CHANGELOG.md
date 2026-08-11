@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.13] - 2026-08-10
+
 ### Added
 - External-feedback evaluation dataset with deterministic capability probes, isolated multilingual qmd retrieval, and explicit qualitative boundaries
 - `eval:feedback` and `test:eval` commands for running and validating the feedback evaluation
