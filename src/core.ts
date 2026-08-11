@@ -152,6 +152,114 @@ function normalizeContent(content: string): string {
 	return content.trim();
 }
 
+const SECRET_PATTERNS: RegExp[] = [
+	/\bsk-[A-Za-z0-9_-]{16,}\b/g,
+	/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
+	/\bAKIA[0-9A-Z]{16}\b/g,
+	/\b(?:api[_-]?key|access[_-]?token|secret)\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{16,}["']?/gi,
+];
+
+/** Redact common credential shapes before content reaches disk or agent context. */
+export function redactSecrets(content: string): { content: string; redacted: boolean } {
+	let redactedContent = content;
+	for (const pattern of SECRET_PATTERNS) {
+		redactedContent = redactedContent.replace(pattern, "[REDACTED_SECRET]");
+	}
+	return { content: redactedContent, redacted: redactedContent !== content };
+}
+
+function isInactiveMemoryEntry(entry: string, now: Date): boolean {
+	const metadataHeader = entry.split(/\n\s*\n/, 1)[0];
+	if (/^\s*(?:[-*]\s*)?Trust:\s*untrusted\s*\.?\s*$/im.test(metadataHeader)) return true;
+	if (/^\s*(?:[-*]\s*)?Status:\s*(?:expired|superseded|revoked|retired)\s*\.?\s*$/im.test(metadataHeader)) {
+		return true;
+	}
+
+	const validUntil = metadataHeader.match(/^\s*(?:[-*]\s*)?Valid until:?\s+(\d{4}-\d{2}-\d{2})\s*\.?\s*$/im)?.[1];
+	if (validUntil && validUntil < now.toISOString().slice(0, 10)) return true;
+	return false;
+}
+
+function splitLogicalMemoryEntries(content: string): { entries: string[]; timestampDelimited: boolean } {
+	const normalized = content.replace(/^\uFEFF/, "");
+	const marker = /^<!--\s*(?:last updated:\s*)?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[[^\]]+\]\s*-->$/gm;
+	const starts = [...normalized.matchAll(marker)].map((match) => match.index ?? 0);
+	if (starts.length === 0) {
+		return { entries: normalized.split(/\n\s*\n/), timestampDelimited: false };
+	}
+
+	const entries: string[] = [];
+	const preamble = normalized.slice(0, starts[0]).trim();
+	if (preamble) entries.push(preamble);
+	for (let i = 0; i < starts.length; i++) {
+		entries.push(normalized.slice(starts[i], starts[i + 1] ?? normalized.length).trim());
+	}
+	return { entries, timestampDelimited: true };
+}
+
+function isUnmarkedInactiveHeader(entry: string, now: Date): boolean {
+	if (!isInactiveMemoryEntry(entry, now)) return false;
+	return entry.split("\n").every((line) => {
+		const trimmed = line.trim();
+		return (
+			!trimmed ||
+			/^#{1,6}\s+/.test(trimmed) ||
+			/^<!--.*-->$/.test(trimmed) ||
+			/^(?:[-*]\s*)?(?:Trust:|Status:|Valid until:?\s|Source:)/i.test(trimmed)
+		);
+	});
+}
+
+/** Apply trust, lifecycle, and secret policy to complete logical write entries. */
+export function filterMemoryForContext(content: string, now = new Date()): string {
+	const { entries, timestampDelimited } = splitLogicalMemoryEntries(content);
+	const activeEntries: string[] = [];
+	for (const entry of entries) {
+		const inactive = isInactiveMemoryEntry(entry, now);
+		if (!timestampDelimited && isUnmarkedInactiveHeader(entry, now)) {
+			// Without write markers there is no reliable boundary after a metadata-only
+			// header. Fail closed instead of treating the following body paragraphs as
+			// independent trusted entries.
+			break;
+		}
+		if (!inactive) activeEntries.push(entry);
+	}
+	return redactSecrets(activeEntries.join("\n\n")).content.trim();
+}
+
+function sanitizeSourceUri(sourceUri?: string): string | undefined {
+	if (!sourceUri?.trim()) return undefined;
+	const singleLine = [...sourceUri]
+		.map((char) => {
+			const code = char.charCodeAt(0);
+			return code <= 31 || code === 127 ? " " : char;
+		})
+		.join("")
+		.trim()
+		.slice(0, 2_048);
+	return redactSecrets(singleLine).content;
+}
+
+function escapeEntryMarkers(content: string): string {
+	return content.replace(
+		/^<!--\s*(?:last updated:\s*)?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[[^\]]+\]\s*-->$/gm,
+		(line) => line.replace("<!--", "&lt;!--"),
+	);
+}
+
+function formatStoredEntry(
+	content: string,
+	metadata: string,
+	sourceUri?: string,
+): { entry: string; redacted: boolean } {
+	const safeContent = redactSecrets(escapeEntryMarkers(content));
+	const source = sanitizeSourceUri(sourceUri);
+	return {
+		entry: `${metadata}\n${safeContent.content}${source ? `\nSource: ${source}` : ""}`,
+		redacted: safeContent.redacted || (!!sourceUri && source !== sourceUri.trim()),
+	};
+}
+
 export function truncateLines(lines: string[], maxLines: number, mode: TruncateMode) {
 	if (maxLines <= 0 || lines.length <= maxLines) {
 		return { lines, truncated: false };
@@ -328,7 +436,7 @@ export function buildMemoryContext(searchResults?: string): string {
 	if (scratchpad?.trim()) {
 		const openItems = parseScratchpad(scratchpad).filter((i) => !i.done);
 		if (openItems.length > 0) {
-			const serialized = serializeScratchpad(openItems);
+			const serialized = filterMemoryForContext(serializeScratchpad(openItems));
 			const section = formatContextSection(
 				"## SCRATCHPAD.md (working context)",
 				serialized,
@@ -347,21 +455,23 @@ export function buildMemoryContext(searchResults?: string): string {
 	const yesterday = yesterdayStr();
 
 	const todayContent = readFileSafe(dailyPath(today));
-	if (todayContent?.trim()) {
+	const safeTodayContent = todayContent ? filterMemoryForContext(todayContent) : "";
+	if (safeTodayContent) {
 		const section = formatContextSection(
 			`## Daily log: ${today} (today)`,
-			todayContent,
-			"end",
+			safeTodayContent,
+			"middle",
 			CONTEXT_DAILY_MAX_LINES,
 			CONTEXT_DAILY_MAX_CHARS,
 		);
 		if (section) sections.push(section);
 	}
 
-	if (searchResults?.trim()) {
+	const safeSearchResults = searchResults ? filterMemoryForContext(searchResults) : "";
+	if (safeSearchResults) {
 		const section = formatContextSection(
 			"## Relevant memories (auto-retrieved)",
-			searchResults,
+			safeSearchResults,
 			"start",
 			CONTEXT_SEARCH_MAX_LINES,
 			CONTEXT_SEARCH_MAX_CHARS,
@@ -370,10 +480,11 @@ export function buildMemoryContext(searchResults?: string): string {
 	}
 
 	const longTerm = readFileSafe(MEMORY_FILE);
-	if (longTerm?.trim()) {
+	const safeLongTerm = longTerm ? filterMemoryForContext(longTerm) : "";
+	if (safeLongTerm) {
 		const section = formatContextSection(
 			"## MEMORY.md (long-term)",
-			longTerm,
+			safeLongTerm,
 			"middle",
 			CONTEXT_LONG_TERM_MAX_LINES,
 			CONTEXT_LONG_TERM_MAX_CHARS,
@@ -382,10 +493,11 @@ export function buildMemoryContext(searchResults?: string): string {
 	}
 
 	const yesterdayContent = readFileSafe(dailyPath(yesterday));
-	if (yesterdayContent?.trim()) {
+	const safeYesterdayContent = yesterdayContent ? filterMemoryForContext(yesterdayContent) : "";
+	if (safeYesterdayContent) {
 		const section = formatContextSection(
 			`## Daily log: ${yesterday} (yesterday)`,
-			yesterdayContent,
+			safeYesterdayContent,
 			"end",
 			CONTEXT_DAILY_MAX_LINES,
 			CONTEXT_DAILY_MAX_CHARS,
@@ -399,15 +511,8 @@ export function buildMemoryContext(searchResults?: string): string {
 
 	const context = `# Memory\n\n${sections.join("\n\n---\n\n")}`;
 	if (context.length > CONTEXT_MAX_CHARS) {
-		const result = buildPreview(context, {
-			maxLines: Number.POSITIVE_INFINITY,
-			maxChars: CONTEXT_MAX_CHARS,
-			mode: "start",
-		});
-		const note = result.truncated
-			? `\n\n[truncated overall context: showing ${result.previewChars}/${result.totalChars} chars]`
-			: "";
-		return `${result.preview}${note}`;
+		const note = "\n\n[truncated overall context to 16000 chars]";
+		return context.slice(0, CONTEXT_MAX_CHARS - note.length).trimEnd() + note;
 	}
 
 	return context;
@@ -430,10 +535,11 @@ function buildTopicsContextSection(): string | null {
 	for (const file of topicFiles) {
 		const slug = file.replace(/\.md$/, "");
 		const content = readFileSafe(path.join(TOPICS_DIR, file));
-		if (!content?.trim()) continue;
-		const titleMatch = content.match(/^# Topic:\s*(.+)$/m);
+		const safeContent = content ? filterMemoryForContext(content) : "";
+		if (!safeContent) continue;
+		const titleMatch = safeContent.match(/^# Topic:\s*(.+)$/m);
 		const title = titleMatch?.[1]?.trim() || slug;
-		entries.push(...parseTopicEntries(title, slug, content));
+		entries.push(...parseTopicEntries(title, slug, safeContent));
 	}
 
 	if (entries.length === 0) return null;
@@ -1056,9 +1162,61 @@ export async function getQmdHealth(): Promise<QmdHealthInfo | null> {
 	});
 }
 
+function resolveCaseInsensitivePath(root: string, relativePath: string): string | null {
+	let current = root;
+	for (const segment of relativePath.split(/[/\\]+/).filter(Boolean)) {
+		if (segment === "." || segment === "..") return null;
+		let children: string[];
+		try {
+			children = fs.readdirSync(current);
+		} catch {
+			return null;
+		}
+		const child =
+			children.find((name) => name === segment) ??
+			children.find((name) => name.toLowerCase() === segment.toLowerCase());
+		if (!child) return null;
+		current = path.join(current, child);
+	}
+	return current;
+}
+
+function resolveQmdSourcePath(filePath: string): string | null {
+	const qmdUri = filePath.match(/^qmd:\/\/([^/]+)\/?(.*)$/i);
+	let relativePath = qmdUri ? qmdUri[2] : filePath;
+	if (relativePath.toLowerCase().startsWith(`${QMD_COLLECTION_NAME.toLowerCase()}/`)) {
+		relativePath = relativePath.slice(QMD_COLLECTION_NAME.length + 1);
+	}
+
+	const root = path.resolve(MEMORY_DIR);
+	if (path.isAbsolute(relativePath)) {
+		const candidate = path.resolve(relativePath);
+		if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) return null;
+		return fs.existsSync(candidate) ? candidate : null;
+	}
+	return resolveCaseInsensitivePath(root, relativePath.replace(/^\/+/, ""));
+}
+
+function qmdResultPassesSourcePolicy(filePath: string | undefined, snippet: string): boolean {
+	if (!filePath) return false;
+	const sourcePath = resolveQmdSourcePath(filePath);
+	if (!sourcePath) return false;
+	const source = readFileSafe(sourcePath);
+	if (!source) return false;
+
+	const activeSource = filterMemoryForContext(source);
+	const snippetLines = snippet
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length >= 8);
+	return snippetLines.length > 0 && snippetLines.every((line) => activeSource.includes(line));
+}
+
 /** Search for memories relevant to the user's prompt. Returns formatted markdown or empty string on error. */
 export async function searchRelevantMemories(prompt: string): Promise<string> {
 	if (!qmdAvailable || !prompt.trim()) return "";
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const controller = new AbortController();
 
 	// Sanitize: strip control chars, limit to 200 chars for the search query
 	const sanitized = prompt
@@ -1073,19 +1231,25 @@ export async function searchRelevantMemories(prompt: string): Promise<string> {
 		if (!hasCollection) return "";
 
 		const results = await Promise.race([
-			runQmdSearch("keyword", sanitized, 3),
-			new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3_000)),
+			runQmdSearch("keyword", sanitized, 3, { signal: controller.signal }),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					controller.abort();
+					reject(new Error("timeout"));
+				}, 3_000);
+			}),
 		]);
 
 		if (!results || results.results.length === 0) return "";
 
 		const snippets = results.results
 			.map((r) => {
-				const text = getQmdResultText(r);
-				if (!text.trim()) return null;
+				const text = filterMemoryForContext(getQmdResultText(r));
+				if (!text) return null;
 				const filePath = getQmdResultPath(r);
+				if (!qmdResultPassesSourcePolicy(filePath, text)) return null;
 				const filePart = filePath ? `_${filePath}_` : "";
-				return filePart ? `${filePart}\n${text.trim()}` : text.trim();
+				return filePart ? `${filePart}\n${text}` : text;
 			})
 			.filter(Boolean);
 
@@ -1093,12 +1257,15 @@ export async function searchRelevantMemories(prompt: string): Promise<string> {
 		return snippets.join("\n\n---\n\n");
 	} catch {
 		return "";
+	} finally {
+		clearTimeout(timer);
 	}
 }
 
 export interface QmdSearchResult {
 	path?: string;
 	file?: string;
+	context?: string;
 	score?: number;
 	content?: string;
 	chunk?: string;
@@ -1112,7 +1279,20 @@ export function getQmdResultPath(r: QmdSearchResult): string | undefined {
 }
 
 export function getQmdResultText(r: QmdSearchResult): string {
-	return r.content ?? r.chunk ?? r.snippet ?? "";
+	const text = r.content ?? r.chunk ?? r.snippet ?? "";
+	const folderContext = r.context?.trim();
+	let normalized = text.trimStart();
+	if (folderContext) {
+		const prefix = `Folder Context: ${folderContext}`;
+		if (normalized.startsWith(prefix)) {
+			const remainder = normalized.slice(prefix.length);
+			if (/^(?:\r?\n){2}/.test(remainder)) {
+				normalized = remainder.replace(/^(?:\r?\n){2}/, "");
+			}
+		}
+	}
+
+	return normalized.replace(/^@@ -\d+(?:,\d+)?(?: \+\d+(?:,\d+)?)? @@ \(\d+ before, \d+ after\)(?:\r?\n){1,2}/, "");
 }
 
 function stripAnsi(text: string): string {
@@ -1222,6 +1402,7 @@ export async function memoryWrite(params: {
 	sessionId?: string;
 	topic?: string;
 	date?: string;
+	sourceUri?: string;
 }): Promise<ToolResult> {
 	ensureDirs();
 	const target = params.target ?? "daily";
@@ -1232,18 +1413,19 @@ export async function memoryWrite(params: {
 	if (target === "daily") {
 		const filePath = dailyPath(todayStr());
 		const existing = readFileSafe(filePath) ?? "";
-		const existingPreview = buildPreview(existing, {
+		const safeExisting = redactSecrets(existing).content;
+		const existingPreview = buildPreview(safeExisting, {
 			maxLines: RESPONSE_PREVIEW_MAX_LINES,
 			maxChars: RESPONSE_PREVIEW_MAX_CHARS,
 			mode: "end",
 		});
 		const existingSnippet = existingPreview.preview
-			? `\n\n${formatPreviewBlock("Existing daily log preview", existing, "end")}`
+			? `\n\n${formatPreviewBlock("Existing daily log preview", safeExisting, "end")}`
 			: "\n\nDaily log was empty.";
 
 		const separator = existing.trim() ? "\n\n" : "";
-		const stamped = `<!-- ${ts} [${sid}] -->\n${content}`;
-		fs.writeFileSync(filePath, existing + separator + stamped, "utf-8");
+		const stored = formatStoredEntry(content, `<!-- ${ts} [${sid}] -->`, params.sourceUri);
+		fs.writeFileSync(filePath, existing + separator + stored.entry, "utf-8");
 		await ensureQmdAvailableForUpdate();
 		scheduleQmdUpdate();
 		return {
@@ -1254,6 +1436,8 @@ export async function memoryWrite(params: {
 				mode: "append",
 				sessionId: sid,
 				timestamp: ts,
+				sourceUri: sanitizeSourceUri(params.sourceUri),
+				redacted: stored.redacted,
 				qmdUpdateMode: getQmdUpdateMode(),
 				existingPreview,
 			},
@@ -1271,21 +1455,26 @@ export async function memoryWrite(params: {
 		}
 		const filePath = topicPath(slug);
 		const existing = readFileSafe(filePath) ?? "";
-		const existingPreview = buildPreview(existing, {
+		const safeExisting = redactSecrets(existing).content;
+		const existingPreview = buildPreview(safeExisting, {
 			maxLines: RESPONSE_PREVIEW_MAX_LINES,
 			maxChars: RESPONSE_PREVIEW_MAX_CHARS,
 			mode: "end",
 		});
 		const existingSnippet = existingPreview.preview
-			? `\n\n${formatPreviewBlock("Existing topic preview", existing, "end")}`
+			? `\n\n${formatPreviewBlock("Existing topic preview", safeExisting, "end")}`
 			: "\n\nTopic file was empty.";
 
 		const linkDate = params.date?.trim() || todayStr();
 		const header = `# Topic: ${topic}\n\n<!-- created: ${ts} [${sid}] -->\n`;
 		const separator = existing.trim() ? "\n\n" : "";
 		const base = existing.trim() ? existing : header.trimEnd();
-		const stamped = `<!-- ${ts} [${sid}] -->\n${content.trim()}\nDaily: [[${linkDate}]]`;
-		fs.writeFileSync(filePath, `${base}${separator}${stamped}`, "utf-8");
+		const stored = formatStoredEntry(
+			`${content.trim()}\nDaily: [[${linkDate}]]`,
+			`<!-- ${ts} [${sid}] -->`,
+			params.sourceUri,
+		);
+		fs.writeFileSync(filePath, `${base}${separator}${stored.entry}`, "utf-8");
 		await ensureQmdAvailableForUpdate();
 		scheduleQmdUpdate();
 		return {
@@ -1299,6 +1488,8 @@ export async function memoryWrite(params: {
 				topic,
 				slug,
 				date: linkDate,
+				sourceUri: sanitizeSourceUri(params.sourceUri),
+				redacted: stored.redacted,
 				qmdUpdateMode: getQmdUpdateMode(),
 				existingPreview,
 			},
@@ -1308,18 +1499,19 @@ export async function memoryWrite(params: {
 	// long_term
 	const memFile = getMemoryFile();
 	const existing = readFileSafe(memFile) ?? "";
-	const existingPreview = buildPreview(existing, {
+	const safeExisting = redactSecrets(existing).content;
+	const existingPreview = buildPreview(safeExisting, {
 		maxLines: RESPONSE_PREVIEW_MAX_LINES,
 		maxChars: RESPONSE_PREVIEW_MAX_CHARS,
 		mode: "middle",
 	});
 	const existingSnippet = existingPreview.preview
-		? `\n\n${formatPreviewBlock("Existing MEMORY.md preview", existing, "middle")}`
+		? `\n\n${formatPreviewBlock("Existing MEMORY.md preview", safeExisting, "middle")}`
 		: "\n\nMEMORY.md was empty.";
 
 	if (mode === "overwrite") {
-		const stamped = `<!-- last updated: ${ts} [${sid}] -->\n${content}`;
-		fs.writeFileSync(memFile, stamped, "utf-8");
+		const stored = formatStoredEntry(content, `<!-- last updated: ${ts} [${sid}] -->`, params.sourceUri);
+		fs.writeFileSync(memFile, stored.entry, "utf-8");
 		await ensureQmdAvailableForUpdate();
 		scheduleQmdUpdate();
 		return {
@@ -1330,6 +1522,8 @@ export async function memoryWrite(params: {
 				mode: "overwrite",
 				sessionId: sid,
 				timestamp: ts,
+				sourceUri: sanitizeSourceUri(params.sourceUri),
+				redacted: stored.redacted,
 				qmdUpdateMode: getQmdUpdateMode(),
 				existingPreview,
 			},
@@ -1338,8 +1532,8 @@ export async function memoryWrite(params: {
 
 	// append (default)
 	const separator = existing.trim() ? "\n\n" : "";
-	const stamped = `<!-- ${ts} [${sid}] -->\n${content}`;
-	fs.writeFileSync(memFile, existing + separator + stamped, "utf-8");
+	const stored = formatStoredEntry(content, `<!-- ${ts} [${sid}] -->`, params.sourceUri);
+	fs.writeFileSync(memFile, existing + separator + stored.entry, "utf-8");
 	await ensureQmdAvailableForUpdate();
 	scheduleQmdUpdate();
 	return {
@@ -1350,6 +1544,8 @@ export async function memoryWrite(params: {
 			mode: "append",
 			sessionId: sid,
 			timestamp: ts,
+			sourceUri: sanitizeSourceUri(params.sourceUri),
+			redacted: stored.redacted,
 			qmdUpdateMode: getQmdUpdateMode(),
 			existingPreview,
 		},
@@ -1368,7 +1564,11 @@ export async function scratchpadAction(params: {
 	const spFile = getScratchpadFile();
 
 	const existing = readFileSafe(spFile) ?? "";
-	let items = parseScratchpad(existing);
+	let items = parseScratchpad(existing).map((item) => ({
+		...item,
+		text: redactSecrets(item.text).content,
+		meta: redactSecrets(item.meta).content,
+	}));
 
 	if (action === "list") {
 		if (items.length === 0) {
@@ -1394,7 +1594,8 @@ export async function scratchpadAction(params: {
 		if (!text) {
 			return { text: "Error: 'text' is required for add.", details: {} };
 		}
-		items.push({ done: false, text, meta: `<!-- ${ts} [${sid}] -->` });
+		const safeText = redactSecrets(text).content;
+		items.push({ done: false, text: safeText, meta: `<!-- ${ts} [${sid}] -->` });
 		const serialized = serializeScratchpad(items);
 		const preview = buildPreview(serialized, {
 			maxLines: RESPONSE_PREVIEW_MAX_LINES,
@@ -1405,7 +1606,7 @@ export async function scratchpadAction(params: {
 		await ensureQmdAvailableForUpdate();
 		scheduleQmdUpdate();
 		return {
-			text: `Added: - [ ] ${text}\n\n${formatPreviewBlock("Scratchpad preview", serialized, "start")}`,
+			text: `Added: - [ ] ${safeText}\n\n${formatPreviewBlock("Scratchpad preview", serialized, "start")}`,
 			details: {
 				action,
 				sessionId: sid,
@@ -1905,7 +2106,9 @@ export async function distilMemories(params?: { dryRun?: boolean; sessionId?: st
 		const date = file.replace(/\.md$/, "");
 		const content = readFileSafe(path.join(DAILY_DIR, file));
 		if (!content?.trim()) continue;
-		allEntries.push(...parseDailyEntries(date, content));
+		const safeContent = filterMemoryForContext(content);
+		if (!safeContent) continue;
+		allEntries.push(...parseDailyEntries(date, safeContent));
 	}
 	const topicEntriesByTopic = new Map<string, TopicEntry[]>();
 	let totalTopicEntries = 0;
@@ -1913,9 +2116,11 @@ export async function distilMemories(params?: { dryRun?: boolean; sessionId?: st
 		const slug = file.replace(/\.md$/, "");
 		const content = readFileSafe(path.join(TOPICS_DIR, file));
 		if (!content?.trim()) continue;
-		const titleMatch = content.match(/^# Topic:\s*(.+)$/m);
+		const safeContent = filterMemoryForContext(content);
+		if (!safeContent) continue;
+		const titleMatch = safeContent.match(/^# Topic:\s*(.+)$/m);
 		const title = titleMatch?.[1]?.trim() || slug;
-		const entries = parseTopicEntries(title, slug, content);
+		const entries = parseTopicEntries(title, slug, safeContent);
 		if (entries.length === 0) continue;
 		totalTopicEntries += entries.length;
 		allEntries.push(...entries);
@@ -1963,7 +2168,8 @@ export async function distilMemories(params?: { dryRun?: boolean; sessionId?: st
 	let pinnedSection = "";
 	const existingMemory = readFileSafe(MEMORY_FILE);
 	if (existingMemory) {
-		const pinnedMatch = existingMemory.match(/## Pinned\n([\s\S]*?)(?=\n## |\n# |$)/);
+		const safeExistingMemory = filterMemoryForContext(existingMemory);
+		const pinnedMatch = safeExistingMemory.match(/## Pinned\n([\s\S]*?)(?=\n## |\n# |$)/);
 		if (pinnedMatch) {
 			pinnedSection = pinnedMatch[1].trim();
 		}

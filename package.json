@@ -11,9 +11,12 @@
 		}
 	},
 	"bin": {
-		"agent-memory": "./dist/agent-memory"
+		"agent-memory": "./dist/cli.js"
 	},
 	"type": "module",
+	"engines": {
+		"node": ">=20"
+	},
 	"keywords": [
 		"agentmemory",
 		"agent-memory",
@@ -49,7 +52,10 @@
 		"src",
 		"skills",
 		"scripts",
-		"dist",
+		"dist/cli.d.ts",
+		"dist/cli.js",
+		"dist/core.d.ts",
+		"dist/core.js",
 		"README.md",
 		"LICENSE"
 	],
@@ -58,18 +64,22 @@
 	},
 	"scripts": {
 		"postinstall": "node scripts/postinstall.cjs",
-		"build": "tsc -p tsconfig.json --noEmit",
+		"build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.eval.json --noEmit",
+		"build:eval": "tsc -p tsconfig.eval.json --noEmit",
 		"build:lib": "tsc -p tsconfig.build.json",
 		"build:cli": "bun build src/cli.ts --compile --outfile dist/agent-memory --define __VERSION__=\"'$(node -p \"require('./package.json').version\")'\"",
-		"prepack": "npm run build:lib && bun run build:cli",
+		"eval:feedback": "bun eval/run.ts",
+		"prepack": "npm run build:lib",
 		"lint": "biome check .",
 		"test": "bun test test/unit.test.ts",
 		"test:unit": "bun test test/unit.test.ts",
 		"test:cli": "bun test test/cli.test.ts",
+		"test:eval": "bun test test/eval.test.ts",
 		"install-skills": "bash scripts/install-skills.sh"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.0",
+		"@types/bun": "^1.3.14",
 		"@types/node": "^25.3.0",
 		"tsx": "^4.0.0",
 		"typescript": "^5.9.3"

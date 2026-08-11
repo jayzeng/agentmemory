@@ -41,10 +41,12 @@ import {
 	getScratchpadFile,
 	getTopicsDir,
 	installSkills,
+	memoryWrite,
 	nowTimestamp,
 	parseScratchpad,
 	probeEmbeddings,
 	readFileSafe,
+	redactSecrets,
 	runQmdEmbedDetached,
 	runQmdSearch,
 	runQmdSync,
@@ -60,7 +62,19 @@ import {
 } from "./core.js";
 
 declare const __VERSION__: string;
-const VERSION = typeof __VERSION__ !== "undefined" ? __VERSION__ : "dev";
+
+function readPackageVersion(): string {
+	try {
+		const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf-8")) as {
+			version?: unknown;
+		};
+		return typeof packageJson.version === "string" ? packageJson.version : "dev";
+	} catch {
+		return "dev";
+	}
+}
+
+const VERSION = typeof __VERSION__ !== "undefined" ? __VERSION__ : readPackageVersion();
 
 // ---------------------------------------------------------------------------
 // Arg parsing (no external deps)
@@ -141,9 +155,11 @@ function exitError(message: string, json: boolean): never {
 async function cmdContext(flags: Record<string, string | boolean>) {
 	const json = hasFlag(flags, "json");
 	const noSearch = hasFlag(flags, "no-search");
+	const query = getFlag(flags, "query") ?? "";
 
 	ensureDirs();
-	const searchResults = noSearch ? "" : await searchRelevantMemories("");
+	if (!noSearch && query) await ensureQmdAvailableForSync();
+	const searchResults = noSearch ? "" : await searchRelevantMemories(query);
 	const context = buildMemoryContext(searchResults);
 
 	if (json) {
@@ -162,82 +178,29 @@ async function cmdWrite(flags: Record<string, string | boolean>) {
 	const mode = getFlag(flags, "mode") ?? "append";
 	const topic = getFlag(flags, "topic");
 	const date = getFlag(flags, "date");
+	const sourceUri = getFlag(flags, "source-uri");
 
 	if (!["long_term", "daily", "topic"].includes(target)) {
 		exitError("--target must be 'long_term', 'daily', or 'topic' (default: daily)", json);
+	}
+	if (!["append", "overwrite"].includes(mode)) {
+		exitError("--mode must be 'append' or 'overwrite'", json);
 	}
 	if (!content) {
 		exitError("--content is required", json);
 	}
 
-	ensureDirs();
-	const ts = nowTimestamp();
-	const sid = "cli";
-
-	if (target === "daily") {
-		const filePath = dailyPath(todayStr());
-		const existing = readFileSafe(filePath) ?? "";
-		const separator = existing.trim() ? "\n\n" : "";
-		const stamped = `<!-- ${ts} [${sid}] -->\n${content}`;
-		fs.writeFileSync(filePath, existing + separator + stamped, "utf-8");
-		await ensureQmdAvailableForUpdate();
-		scheduleQmdUpdate();
-		output(
-			json
-				? { ok: true, path: filePath, target, mode: "append", timestamp: ts }
-				: `Appended to daily log: ${filePath}`,
-			json,
-		);
-		return;
-	}
-
-	if (target === "topic") {
-		if (!topic) {
-			exitError("--topic is required when --target is 'topic'", json);
-		}
-		const slug = slugifyTopic(topic);
-		if (!slug) {
-			exitError("--topic must include at least one letter or number", json);
-		}
-		const filePath = topicPath(slug);
-		const existing = readFileSafe(filePath) ?? "";
-		const linkDate = date?.trim() || todayStr();
-		const header = `# Topic: ${topic}\n\n<!-- created: ${ts} [${sid}] -->\n`;
-		const separator = existing.trim() ? "\n\n" : "";
-		const base = existing.trim() ? existing : header.trimEnd();
-		const stamped = `<!-- ${ts} [${sid}] -->\n${content.trim()}\nDaily: [[${linkDate}]]`;
-		fs.writeFileSync(filePath, `${base}${separator}${stamped}`, "utf-8");
-		await ensureQmdAvailableForUpdate();
-		scheduleQmdUpdate();
-		output(
-			json
-				? { ok: true, path: filePath, target, mode: "append", timestamp: ts, topic, slug, date: linkDate }
-				: `Appended to topic: ${filePath}`,
-			json,
-		);
-		return;
-	}
-
-	// long_term
-	const memFile = getMemoryFile();
-	const existing = readFileSafe(memFile) ?? "";
-
-	if (mode === "overwrite") {
-		const stamped = `<!-- last updated: ${ts} [${sid}] -->\n${content}`;
-		fs.writeFileSync(memFile, stamped, "utf-8");
-	} else {
-		const separator = existing.trim() ? "\n\n" : "";
-		const stamped = `<!-- ${ts} [${sid}] -->\n${content}`;
-		fs.writeFileSync(memFile, existing + separator + stamped, "utf-8");
-	}
-	await ensureQmdAvailableForUpdate();
-	scheduleQmdUpdate();
-	output(
-		json
-			? { ok: true, path: memFile, target, mode, timestamp: ts }
-			: `${mode === "overwrite" ? "Overwrote" : "Appended to"} MEMORY.md`,
-		json,
-	);
+	const result = await memoryWrite({
+		target: target as "long_term" | "daily" | "topic",
+		content,
+		mode: mode as "append" | "overwrite",
+		sessionId: "cli",
+		topic,
+		date,
+		sourceUri,
+	});
+	if (result.isError) exitError(result.text.replace(/^Error:\s*/, ""), json);
+	output(json ? { ok: true, ...result.details } : result.text.split("\n\n", 1)[0], json);
 }
 
 async function cmdRead(flags: Record<string, string | boolean>) {
@@ -350,7 +313,11 @@ async function cmdScratchpad(flags: Record<string, string | boolean>, positional
 	ensureDirs();
 	const spFile = getScratchpadFile();
 	const existing = readFileSafe(spFile) ?? "";
-	let items = parseScratchpad(existing);
+	let items = parseScratchpad(existing).map((item) => ({
+		...item,
+		text: redactSecrets(item.text).content,
+		meta: redactSecrets(item.meta).content,
+	}));
 
 	if (action === "list") {
 		if (items.length === 0) {
@@ -375,11 +342,12 @@ async function cmdScratchpad(flags: Record<string, string | boolean>, positional
 	if (action === "add") {
 		if (!text) exitError("--text is required for add", json);
 		const ts = nowTimestamp();
-		items.push({ done: false, text: text!, meta: `<!-- ${ts} [cli] -->` });
+		const safeText = redactSecrets(text!).content;
+		items.push({ done: false, text: safeText, meta: `<!-- ${ts} [cli] -->` });
 		fs.writeFileSync(spFile, serializeScratchpad(items), "utf-8");
 		await ensureQmdAvailableForUpdate();
 		scheduleQmdUpdate();
-		output(json ? { ok: true, action, text } : `Added: - [ ] ${text}`, json);
+		output(json ? { ok: true, action, text: safeText } : `Added: - [ ] ${safeText}`, json);
 		return;
 	}
 
@@ -799,8 +767,8 @@ Commands:
   version     Show binary version
   install-skills  Install (or --uninstall) bundled skills
   uninstall-skills  Uninstall bundled skills
-  context     Build & print context injection string
-  write       Write to memory files (default: daily)
+  context     Build context; optionally retrieve memories with --query
+  write       Write to memory files (default: daily; optional --source-uri)
   read        Read memory files
   scratchpad  Manage checklist items
   search      Search across memory files (requires qmd)
@@ -816,7 +784,7 @@ Global flags:
 Examples:
   agent-memory init
   agent-memory write --content "Fixed auth bug in login flow"
-  agent-memory write --target long_term --content "User prefers dark mode"
+  agent-memory write --target long_term --content "User prefers dark mode" --source-uri "session://agent/turn/12"
   agent-memory write --target topic --topic "auth" --content "Rolled JWT refresh to edge"
   agent-memory read --target long_term
   agent-memory read --target daily --date 2026-02-15
@@ -828,7 +796,7 @@ Examples:
   agent-memory scratchpad done --text "PR #42"
   agent-memory search --query "database choice" --mode keyword
   agent-memory distil --dry-run
-  agent-memory context --no-search
+  agent-memory context --query "database choice"
   agent-memory sync
   agent-memory status --json`);
 }

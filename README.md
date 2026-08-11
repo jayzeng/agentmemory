@@ -7,19 +7,23 @@
 [![license](https://img.shields.io/npm/l/myagentmemory)](LICENSE)
 [![website](https://img.shields.io/badge/website-jayzeng.github.io%2Fagentmemory-0d9b7a)](https://jayzeng.github.io/agentmemory/)
 
-**[🌐 Website & quickstart →](https://jayzeng.github.io/agentmemory/)** · [Install](#installation) · [CLI commands](#cli-commands) · [How it works](#how-it-works)
+[Website and quickstart](https://jayzeng.github.io/agentmemory/) · [Install](#installation) · [CLI commands](#cli-commands) · [How it works](#how-it-works)
 
 ## Why agent-memory?
 
 Coding agents forget everything between sessions. `agent-memory` gives them a durable, local-first memory so they stop re-learning your stack, your preferences, and past decisions on every run.
 
-- 🧠 **Memory that persists** — decisions, preferences, and project context carry across sessions instead of starting cold.
-- 📁 **Plain markdown, local-first** — every memory is a readable, git-friendly file on disk. No database, no cloud, no lock-in.
-- 🔍 **Semantic search** — optional [qmd](https://github.com/tobi/qmd) integration adds keyword, semantic, and hybrid search across all memory files.
-- ⚡ **Automatic context injection** — relevant past memories surface into each turn, no manual tool calls required.
-- 🤝 **One memory, every agent** — the same store is shared across Claude Code, Codex, Cursor, and Agent.
+- **Persistent project memory** — decisions, preferences, and project context carry across sessions instead of starting cold.
+- **Plain Markdown, local-first** — every memory is a readable, git-friendly file on disk. No database, cloud service, or lock-in.
+- **Optional semantic search** — [qmd](https://github.com/tobi/qmd) adds keyword, semantic, and hybrid search across memory files.
+- **Explicit retrieval** — skills load base context at session start and search for related memories when a task needs them.
+- **Shared across agents** — Claude Code, Codex, Cursor, and Agent can use the same store.
 
 > **Naming:** `agentmemory` is the GitHub repo (and Homebrew tap), `myagentmemory` is the npm package, and `agent-memory` is the installed CLI binary. Also known as *coding agent memory* or *AI coding memory*.
+
+### Product boundary
+
+AgentMemory is a local Markdown store with a CLI, optional qmd search, and agent skills. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
 
 ## Installation
 
@@ -28,7 +32,7 @@ Coding agents forget everything between sessions. `agent-memory` gives them a du
 brew tap jayzeng/agentmemory https://github.com/jayzeng/agentmemory
 brew install jayzeng/agentmemory/agent-memory
 
-# Install the CLI globally
+# Install the portable CLI globally (Node.js 20+; macOS, Linux, or Windows)
 npm install -g myagentmemory
 
 # If you hit SSL errors due to corporate MITM/inspection, try:
@@ -47,6 +51,8 @@ agent-memory install-skills
 # Uninstall skill files
 agent-memory uninstall-skills
 ```
+
+The npm package installs a platform-neutral Node.js executable. The optional Homebrew and `build:cli` paths use a native binary built for the current platform.
 
 `install-skills` writes a SKILL.md into each agent's config directory:
 - `~/.claude/skills/agent-memory/SKILL.md` — Claude Code skill
@@ -93,7 +99,7 @@ Without qmd, all core tools (write/read/scratchpad) work normally. Only `memory_
   │         │   │ ├─ cursor/SKILL.md      │
   │         │   │ └─ agent/SKILL.md       │
   └─────────┘   └─────────────────────────┘
-   CLI binary    instruction files
+   CLI command    instruction files
   `agent-memory`  that invoke the CLI
 ```
 
@@ -103,8 +109,8 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 
 | Command | Purpose |
 |---------|---------|
-| `agent-memory context [--no-search]` | Build & print context injection string to stdout |
-| `agent-memory write --target <long_term\|daily\|topic> --content <text> [--mode append\|overwrite] [--topic <name>] [--date YYYY-MM-DD]` | Write to memory files |
+| `agent-memory context [--query <text>] [--no-search]` | Build context and optionally include qmd matches for a query |
+| `agent-memory write --target <long_term\|daily\|topic> --content <text> [--mode append\|overwrite] [--source-uri <uri>] [--topic <name>] [--date YYYY-MM-DD]` | Write to memory files with optional provenance |
 | `agent-memory read --target <long_term\|scratchpad\|daily\|list\|topic\|topics> [--date YYYY-MM-DD] [--topic <name>]` | Read memory files |
 | `agent-memory scratchpad <add\|done\|undo\|clear_done\|list> [--text <text>]` | Manage checklist |
 | `agent-memory search --query <text> [--mode keyword\|semantic\|deep] [--limit N]` | Search via qmd |
@@ -153,24 +159,30 @@ agent-memory read --target topics
 
 ### Context injection
 
-Before every agent turn, the following are injected into the system prompt (in priority order):
+The context builder emits the following sections in priority order. Installed skills load base context at session start; callers can optionally supply `--query` to add relevant qmd results:
 
 1. **Open scratchpad items** (up to 2K chars)
 2. **Recent topic entries** (up to 2K chars) — most recent topic notes with backlinks
-3. **Today's daily log** (up to 3K chars, tail)
+3. **Today's daily log** (up to 3K chars, head + tail)
 4. **Relevant memories via qmd search** (up to 2.5K chars) — searches using the user's current prompt to surface related past context
 5. **MEMORY.md** (up to 4K chars, middle-truncated)
 6. **Yesterday's daily log** (up to 3K chars, tail — lowest priority, trimmed first)
 
-Total injection is capped at 16K chars. When qmd is unavailable, step 3 is skipped and the rest works as before.
+Total output, including headings and truncation notices, is hard-capped at 16,000 characters. Explicitly untrusted, expired, superseded, revoked, or retired blocks are excluded; legacy secret-like values are redacted before injection. When qmd is unavailable, the relevant-memory step is skipped and the rest still works.
 
-For Claude Code, context is injected via the `!`agent-memory context --no-search`` syntax in the SKILL.md. For Codex, Cursor, and Agent, the agent runs `agent-memory context` at session start.
+Claude Code loads base context through the skill's shell injection. Codex, Cursor, and Agent run the same base command at session start. The bundled skills use explicit search when a task relates to prior work; they make no host-level guarantee of automatic retrieval.
 
 ### Selective injection
 
-When qmd is available, the system automatically searches memory using the user's prompt on demand (CLI). The top 3 keyword results are injected alongside the standard context.
+When qmd is available and `context --query` is supplied, the CLI sanitizes the query, limits it to 200 characters, and includes the top three keyword results with the standard context. Programmatic integrations should spawn the CLI with an argument array so query text is not evaluated by a shell.
 
 The search has a 3-second timeout and fails silently. If qmd is down or the query returns nothing, injection falls back to the standard behavior.
+
+### Provenance, temporal state, and secret screening
+
+`write --source-uri <uri>` stores an addressable `Source:` line with the entry. Plain-Markdown compatibility is retained: complete write entries containing standalone header metadata lines such as `Trust: untrusted`, `Status: expired`, `Status: superseded`, `Status: revoked`, or `Status: retired` are kept on disk but omitted from direct, distilled, and auto-retrieved agent context. A standalone past `Valid until: YYYY-MM-DD` line is also honored. These phrases inside ordinary prose are not treated as metadata.
+
+Writes screen a bounded set of high-confidence credential shapes and replace matching values with `[REDACTED_SECRET]` before persistence. Context rendering applies the same screening to legacy files. This is defense in depth, not a secrets vault; avoid passing real credentials in command arguments or memory content.
 
 ### Tags and links
 
@@ -206,6 +218,14 @@ These are content conventions, not enforced metadata. qmd's full-text indexing m
 # Unit tests (no LLM, no qmd — fast, deterministic)
 bun test test/unit.test.ts
 bun test test/cli.test.ts
+
+# External-feedback dataset and deterministic capability probes
+bun run build:eval
+bun run test:eval
+bun run eval:feedback
+
+# Optional: add isolated live qmd multilingual retrieval probes
+bun run eval:feedback --live-qmd
 ```
 
 ### Test levels
@@ -214,6 +234,7 @@ bun test test/cli.test.ts
 |-------|------|-------------|---------------|
 | Unit | `test/unit.test.ts` | None | Utilities, scratchpad parsing, context builder, qmd helpers, tool functions |
 | CLI | `test/cli.test.ts` | None | CLI commands, subprocess integration |
+| Feedback eval | `test/eval.test.ts`, `eval/` | qmd optional | External feedback, capability gaps, multilingual retrieval, and qualitative boundaries |
 
 ## Development
 
