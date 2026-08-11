@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Made the Homebrew update workflow match formula fields regardless of indentation and fail when expected fields are missing
+
 ## [0.4.13] - 2026-08-10
 
 ### Added

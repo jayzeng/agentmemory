@@ -70,9 +70,20 @@ jobs:
           version = "${{ steps.meta.outputs.version }}"
           path = Path("Formula/agent-memory.rb")
           text = path.read_text()
-          text = re.sub(r'^\\turl ".*"$', f'\\turl "{url}"', text, flags=re.M)
-          text = re.sub(r'^\\tsha256 ".*"$', f'\\tsha256 "{sha}"', text, flags=re.M)
-          text = re.sub(r'^\\tversion ".*"$', f'\\tversion "{version}"', text, flags=re.M)
+
+          def replace_field(content, field, value):
+              pattern = re.compile(rf'^(\s*){re.escape(field)}\s+".*"$', re.M)
+              updated, count = pattern.subn(
+                  lambda match: f'{match.group(1)}{field} "{value}"',
+                  content,
+              )
+              if count != 1:
+                  raise RuntimeError(f"Expected exactly one {field} field, found {count}")
+              return updated
+
+          text = replace_field(text, "url", url)
+          text = replace_field(text, "sha256", sha)
+          text = replace_field(text, "version", version)
           path.write_text(text)
           PY
 
