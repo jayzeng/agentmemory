@@ -3,23 +3,23 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>agentmemory — Persistent Memory for Coding Agents (Claude Code, Codex, Cursor)</title>
+	<title>AgentMemory — User-Owned Memory That Survives Coding Agents</title>
 	<meta
 		name="description"
-		content="agentmemory gives coding agents a durable, local-first memory: long-term facts, daily logs, topic notes, and a scratchpad checklist stored as plain markdown, with optional qmd semantic search. Works with Claude Code, OpenAI Codex, Cursor, and Agent CLI."
+		content="AgentMemory is a local, user-owned state layer for coding agents. Keep scratch work, daily evidence, topic notes, and durable decisions as plain Markdown, with optional qmd retrieval."
 	/>
-	<meta name="keywords" content="agent memory, coding agent memory, AI memory, Claude Code memory, Codex memory, Cursor memory, persistent memory, markdown memory, semantic search, qmd" />
+	<meta name="keywords" content="agent memory, coding agent memory, AI memory, Claude Code memory, Codex memory, Cursor memory, persistent memory, state management, markdown memory, semantic search, qmd" />
 	<link rel="canonical" href="https://jayzeng.github.io/agentmemory/" />
 	<meta name="theme-color" content="#0d9b7a" />
 
 	<!-- Open Graph -->
 	<meta property="og:type" content="website" />
-	<meta property="og:site_name" content="agentmemory" />
+	<meta property="og:site_name" content="AgentMemory" />
 	<meta property="og:url" content="https://jayzeng.github.io/agentmemory/" />
-	<meta property="og:title" content="agentmemory — Persistent Memory for Coding Agents" />
+	<meta property="og:title" content="AgentMemory — Memory That Survives the Agent" />
 	<meta
 		property="og:description"
-		content="Durable, local-first memory for Claude Code, Codex, Cursor, and Agent CLI. Plain markdown you can read, edit, and commit — with optional qmd semantic search."
+		content="A local, user-owned state layer for Claude Code, Codex, Cursor, and Agent CLI. Plain Markdown with explicit lifetimes and optional retrieval."
 	/>
 	<meta property="og:image" content="https://raw.githubusercontent.com/jayzeng/agentmemory/main/.github/assets/social-preview.png" />
 	<meta property="og:image:width" content="1280" />
@@ -27,10 +27,10 @@
 
 	<!-- Twitter -->
 	<meta name="twitter:card" content="summary_large_image" />
-	<meta name="twitter:title" content="agentmemory — Persistent Memory for Coding Agents" />
+	<meta name="twitter:title" content="AgentMemory — Memory That Survives the Agent" />
 	<meta
 		name="twitter:description"
-		content="Durable, local-first memory for Claude Code, Codex, Cursor, and Agent CLI. Plain markdown you can read, edit, and commit — with optional qmd semantic search."
+		content="A local, user-owned state layer for coding agents, built from lessons across 1,000+ sessions."
 	/>
 	<meta name="twitter:image" content="https://raw.githubusercontent.com/jayzeng/agentmemory/main/.github/assets/social-preview.png" />
 
@@ -39,15 +39,25 @@
 	{
 		"@context": "https://schema.org",
 		"@type": "SoftwareApplication",
-		"name": "agentmemory",
-		"alternateName": ["agent-memory", "myagentmemory"],
+		"name": "AgentMemory",
+		"alternateName": ["agentmemory", "agent-memory", "myagentmemory"],
 		"applicationCategory": "DeveloperApplication",
 		"operatingSystem": "macOS, Linux, Windows",
-		"description": "Persistent, local-first memory for coding agents (Claude Code, OpenAI Codex, Cursor, Agent CLI). Long-term facts, daily logs, topic notes, and a scratchpad stored as plain markdown, with optional qmd semantic search.",
+		"description": "A local, user-owned state layer for coding agents. Scratch work, daily evidence, topic notes, and durable decisions remain plain Markdown, with optional qmd retrieval.",
 		"url": "https://jayzeng.github.io/agentmemory/",
 		"downloadUrl": "https://www.npmjs.com/package/myagentmemory",
 		"codeRepository": "https://github.com/jayzeng/agentmemory",
 		"license": "https://opensource.org/licenses/MIT",
+		"subjectOf": {
+			"@type": "Article",
+			"headline": "What 1000+ coding agent sessions taught me about LLM memory.",
+			"url": "https://www.jayzeng.com/writing/agentmemory-field-report/",
+			"author": {
+				"@type": "Person",
+				"name": "Jay Zeng",
+				"url": "https://www.jayzeng.com/"
+			}
+		},
 		"offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 	}
 	</script>
@@ -209,6 +219,7 @@
 		}
 
 		.card {
+			min-width: 0;
 			background: var(--surface);
 			border: 1px solid var(--stroke);
 			border-radius: 16px;
@@ -239,6 +250,7 @@
 		}
 
 		.command code {
+			min-width: 0;
 			color: #daf9f0;
 			font-family: "DM Mono", "SFMono-Regular", "Menlo", monospace;
 			font-size: 0.82rem;
@@ -344,6 +356,98 @@
 			font-size: 1.02rem;
 		}
 
+		.field-report {
+			margin-top: 22px;
+			padding: 26px;
+			background: linear-gradient(145deg, #effbf7, #fffdf7);
+			border: 1px solid #b9ddd3;
+			border-radius: 18px;
+			box-shadow: 0 14px 30px -24px rgba(13, 155, 122, 0.55);
+		}
+
+		.field-report h2 {
+			margin: 0;
+			font-size: clamp(1.35rem, 2.6vw, 1.9rem);
+			letter-spacing: -0.02em;
+		}
+
+		.field-report > p:not(.kicker):not(.lifecycle-note) {
+			max-width: 760px;
+			margin: 10px 0 0;
+			color: var(--muted);
+		}
+
+		.field-report blockquote {
+			margin: 16px 0 0;
+			padding-left: 16px;
+			border-left: 3px solid var(--accent);
+			font-size: 1.04rem;
+			font-weight: 600;
+		}
+
+		.field-report-link {
+			display: inline-block;
+			margin-top: 14px;
+			color: #08765f;
+			font-weight: 700;
+		}
+
+		.lifecycle-flow {
+			margin-top: 22px;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.35fr) auto minmax(0, 1fr);
+			gap: 10px;
+			align-items: stretch;
+		}
+
+		.lifecycle-node {
+			min-width: 0;
+			padding: 14px;
+			background: rgba(255, 255, 255, 0.88);
+			border: 1px solid var(--stroke);
+			border-radius: 12px;
+		}
+
+		.lifecycle-node strong {
+			display: block;
+			font-size: 0.86rem;
+		}
+
+		.lifecycle-node p {
+			margin: 5px 0 0;
+			color: var(--muted);
+			font-size: 0.8rem;
+		}
+
+		.lifecycle-destinations {
+			margin-top: 8px;
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 6px;
+		}
+
+		.lifecycle-destinations span {
+			padding: 5px 7px;
+			background: #f7f3ea;
+			border-radius: 7px;
+			font-family: "DM Mono", "SFMono-Regular", "Menlo", monospace;
+			font-size: 0.68rem;
+			text-align: center;
+		}
+
+		.lifecycle-arrow {
+			align-self: center;
+			color: var(--accent);
+			font-size: 1.2rem;
+			font-weight: 800;
+		}
+
+		.lifecycle-note {
+			margin: 12px 0 0;
+			color: var(--muted);
+			font-size: 0.82rem;
+		}
+
 		.why-grid {
 			margin-top: 18px;
 			display: grid;
@@ -389,10 +493,12 @@
 			border: 1px solid var(--stroke);
 			border-radius: 16px;
 			padding: 6px 18px;
+			overflow-x: auto;
 		}
 
 		.compare table {
 			width: 100%;
+			min-width: 680px;
 			border-collapse: collapse;
 			font-size: 0.92rem;
 		}
@@ -416,6 +522,15 @@
 		.compare .yes { color: var(--accent); font-weight: 700; }
 
 		@media (max-width: 860px) {
+			.lifecycle-flow {
+				grid-template-columns: 1fr;
+			}
+
+			.lifecycle-arrow {
+				justify-self: center;
+				transform: rotate(90deg);
+			}
+
 			.why-grid {
 				grid-template-columns: 1fr;
 			}
@@ -457,23 +572,23 @@
 			</div>
 			<nav class="nav">
 				<a href="https://github.com/jayzeng/agentmemory">GitHub</a>
+				<a href="https://www.jayzeng.com/writing/agentmemory-field-report/">Field report</a>
 				<a href="https://github.com/jayzeng/agentmemory#installation">Install</a>
 				<a href="https://github.com/jayzeng/agentmemory#cli-commands">Commands</a>
 			</nav>
 		</header>
 
 		<section class="hero reveal">
-			<p class="kicker">Persistent memory for coding agents · CLI + skills</p>
-			<h1>Stop losing context between sessions.</h1>
+			<p class="kicker">Built from lessons across 1,000+ coding-agent sessions</p>
+			<h1>Memory that survives the agent.</h1>
 			<p>
-				agentmemory gives your coding agent a durable, local-first memory — long-term facts, daily logs, topic
-				notes, and a scratchpad checklist, all stored as plain markdown you can read, edit, and commit. Optional
-				<a href="https://github.com/tobi/qmd">qmd</a> semantic search surfaces the right memory into every turn,
-				automatically.
+				AgentMemory is a local, user-owned state layer for coding agents. Keep scratch work, daily evidence,
+				topic notes, and durable decisions as plain Markdown, then retrieve what matters with optional
+				<a href="https://github.com/tobi/qmd">qmd</a> search.
 			</p>
 			<div class="cta-row">
 				<a class="btn btn-primary" href="https://github.com/jayzeng/agentmemory#installation">Get Started</a>
-				<a class="btn btn-secondary" href="https://github.com/jayzeng/agentmemory">View on GitHub</a>
+				<a class="btn btn-secondary" href="https://www.jayzeng.com/writing/agentmemory-field-report/">Read the field report</a>
 			</div>
 			<div class="hero-badges">
 				<a href="https://www.npmjs.com/package/myagentmemory"><img src="https://img.shields.io/npm/v/myagentmemory?color=0d9b7a&logo=npm&label=npm" alt="npm version" /></a>
@@ -489,86 +604,131 @@
 			</div>
 		</section>
 
+		<section class="field-report reveal" aria-labelledby="field-report-title">
+			<p class="kicker">The systems argument behind AgentMemory</p>
+			<h2 id="field-report-title">A transcript is not memory.</h2>
+			<p>
+				More than 1,000 sessions across Claude Code, Codex, Cursor, Pi, and OpenCode led to one conclusion:
+				continuity requires judgment, not merely more stored activity.
+			</p>
+			<blockquote>A session records what the agent did. Memory is a judgment about what the next agent should know.</blockquote>
+			<a class="field-report-link" href="https://www.jayzeng.com/writing/agentmemory-field-report/">Read the full field report →</a>
+
+			<div class="lifecycle-flow" aria-label="Agent memory state lifecycle">
+				<div class="lifecycle-node">
+					<strong>Evidence</strong>
+					<p>Sessions, feedback, source material, and observed facts</p>
+				</div>
+				<span class="lifecycle-arrow" aria-hidden="true">→</span>
+				<div class="lifecycle-node">
+					<strong>Judgment</strong>
+					<p>Extract, qualify, or discard what might matter later</p>
+				</div>
+				<span class="lifecycle-arrow" aria-hidden="true">→</span>
+				<div class="lifecycle-node">
+					<strong>Memory destinations</strong>
+					<div class="lifecycle-destinations">
+						<span>Scratch</span>
+						<span>Daily</span>
+						<span>Topic</span>
+						<span>Durable</span>
+					</div>
+				</div>
+				<span class="lifecycle-arrow" aria-hidden="true">→</span>
+				<div class="lifecycle-node">
+					<strong>Use and maintain</strong>
+					<p>Retrieve, supersede, invalidate, or forget</p>
+				</div>
+			</div>
+			<p class="lifecycle-note">These are destinations for different needs, not a mandatory ladder. Evidence can also be discarded.</p>
+		</section>
+
 		<section class="section reveal" aria-labelledby="why-title">
 			<div class="section-head">
-				<h2 id="why-title">Why agentmemory?</h2>
+				<h2 id="why-title">Why AgentMemory?</h2>
 				<p>
-					Coding agents start every session from zero. agentmemory is the memory layer that makes them
-					remember — without a database, a cloud account, or vendor lock-in.
+					Coding-agent sessions preserve activity. AgentMemory gives the state worth carrying forward explicit
+					lifetimes and a user-controlled home.
 				</p>
 			</div>
 			<div class="why-grid">
 				<article class="card">
-					<h3>🧠 Memory that persists</h3>
-					<p>Decisions, preferences, and project context carry across sessions, so your agent stops re-learning your stack on every run.</p>
+					<h3>🧭 Different lifetimes and scopes</h3>
+					<p>Route short-lived follow-ups, chronological evidence, continuing topics, and durable decisions to the right destination.</p>
 				</article>
 				<article class="card">
-					<h3>📁 Plain markdown, local-first</h3>
-					<p>Every memory is a readable file on disk — diff it, edit it, commit it to git. No database, no cloud, no lock-in.</p>
+					<h3>🧠 Curated continuity</h3>
+					<p>Retain judgments that should affect future work instead of warehousing every transcript and abandoned path.</p>
 				</article>
 				<article class="card">
-					<h3>🔍 Semantic search</h3>
-					<p>Optional qmd integration adds keyword, semantic, and hybrid search across every memory file you've ever written.</p>
+					<h3>📁 Plain Markdown, local-first</h3>
+					<p>Read, edit, diff, back up, or delete every memory. No database, cloud service, or vendor lock-in.</p>
 				</article>
 				<article class="card">
-					<h3>⚡ Automatic context injection</h3>
-					<p>Relevant past memories surface into each turn on their own — no manual tool calls, no copy-pasting context.</p>
+					<h3>🔍 Explicit, optional retrieval</h3>
+					<p>Skills load base context at session start and search related memory when a task needs it; qmd remains optional.</p>
 				</article>
 				<article class="card">
 					<h3>🤝 One memory, every agent</h3>
-					<p>The same store is shared across Claude Code, Codex, Cursor, and Agent — switch tools without losing what they know.</p>
+					<p>The same store works across Claude Code, Codex, Cursor, and Agent even as models and harnesses change.</p>
 				</article>
 				<article class="card">
-					<h3>⏱️ Zero-config setup</h3>
-					<p>Two commands: <code>init</code> and <code>install-skills</code>. Works the moment you install it, qmd or not.</p>
+					<h3>🛠️ Inspectable and correctable</h3>
+					<p>Provenance, temporal status, secret screening, supersession, and forgetting help keep memory aligned with reality.</p>
 				</article>
 			</div>
 		</section>
 
 		<section class="section reveal" aria-labelledby="diff-title">
 			<div class="section-head">
-				<h2 id="diff-title">How it's different</h2>
-				<p>Most memory tools are cloud services with their own SDK and storage. agentmemory is the opposite: files you own, on the agents you already use.</p>
+				<h2 id="diff-title">Mutable state needs a different home.</h2>
+				<p>Project instruction files are right for stable policy. AgentMemory carries the changing facts, decisions, and follow-ups that should shape future work.</p>
 			</div>
 			<div class="compare">
 				<table>
 					<thead>
 						<tr>
 							<th>&nbsp;</th>
-							<th>agentmemory</th>
-							<th>Hosted memory SaaS</th>
-							<th>A single CLAUDE.md</th>
+							<th>AgentMemory</th>
+							<th>Hosted memory service</th>
+							<th>Project instructions</th>
 						</tr>
 					</thead>
 					<tbody>
 						<tr>
-							<td>Storage</td>
-							<td><span class="yes">Local markdown files</span></td>
-							<td>Vendor cloud</td>
-							<td>One local file</td>
+							<td>Purpose</td>
+							<td><span class="yes">Mutable accumulated state</span></td>
+							<td>Managed application memory</td>
+							<td>Stable project policy</td>
 						</tr>
 						<tr>
-							<td>Search</td>
-							<td><span class="yes">Keyword + semantic (qmd)</span></td>
-							<td>Vector DB</td>
-							<td>None</td>
+							<td>Source of truth</td>
+							<td><span class="yes">Local Markdown files</span></td>
+							<td>Vendor-managed storage</td>
+							<td>Repository file</td>
 						</tr>
 						<tr>
-							<td>Auto context injection</td>
-							<td><span class="yes">Yes</span></td>
-							<td>Varies</td>
-							<td>Manual</td>
+							<td>Lifetimes and scopes</td>
+							<td><span class="yes">Scratch · daily · topic · durable</span></td>
+							<td>Product-specific</td>
+							<td>One policy scope</td>
 						</tr>
 						<tr>
-							<td>Works across agents</td>
+							<td>Context delivery</td>
+							<td><span class="yes">Session start + explicit search</span></td>
+							<td>Product-specific</td>
+							<td>Host-loaded policy</td>
+						</tr>
+						<tr>
+							<td>Portability</td>
 							<td><span class="yes">Claude Code · Codex · Cursor · Agent</span></td>
-							<td>SDK per app</td>
-							<td>Per project</td>
+							<td>Integration-dependent</td>
+							<td>Repository-scoped</td>
 						</tr>
 						<tr>
 							<td>Account required</td>
 							<td><span class="yes">No</span></td>
-							<td>Yes</td>
+							<td>Typically</td>
 							<td>No</td>
 						</tr>
 					</tbody>
@@ -632,7 +792,7 @@ Neovim + LazyVim. Conventional commits. Run tests before every push.
 			</article>
 			<article class="card reveal">
 				<h2>Install skill files</h2>
-				<p>Wire memory into Claude Code, Codex, Cursor, and Agent CLI in one command.</p>
+				<p>Wire memory workflows into Claude Code, Codex, Cursor, and Agent CLI in one command.</p>
 				<div class="command">
 					<code id="cmd-skills">agent-memory install-skills</code>
 					<button class="copy" type="button" data-copy="cmd-skills">Copy</button>
@@ -645,13 +805,14 @@ Neovim + LazyVim. Conventional commits. Run tests before every push.
 			<ol>
 				<li>Install `agent-memory` from npm or Homebrew.</li>
 				<li>Run `agent-memory init` to create local memory storage.</li>
-				<li>Run `agent-memory install-skills` to enable prompt injection across agents.</li>
+				<li>Run `agent-memory install-skills` to enable shared memory workflows across agents.</li>
 			</ol>
 		</section>
 
 		<p class="footer reveal">
 			Source, docs, and issue tracker:
 			<a href="https://github.com/jayzeng/agentmemory">github.com/jayzeng/agentmemory</a>
+			· <a href="https://www.jayzeng.com/writing/agentmemory-field-report/">Read the field report</a>
 		</p>
 	</main>
 

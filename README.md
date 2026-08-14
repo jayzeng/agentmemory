@@ -1,29 +1,32 @@
-# agent-memory
+# AgentMemory
 
-**Persistent memory for AI coding agents.** Give [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), [Cursor](https://cursor.com), and Agent (Cursor CLI) a memory that survives across sessions — long-term facts, daily logs, topic notes, and a scratchpad checklist, stored as plain markdown and searchable with [qmd](https://github.com/tobi/qmd)-powered semantic search.
+**Memory that survives the agent.** AgentMemory is a local, user-owned state layer for [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), [Cursor](https://cursor.com), and Agent (Cursor CLI). Keep scratch work, daily evidence, topic notes, and durable decisions as plain Markdown, then retrieve what matters with optional [qmd](https://github.com/tobi/qmd) search.
 
 [![npm version](https://img.shields.io/npm/v/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
 [![npm downloads](https://img.shields.io/npm/dm/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
 [![license](https://img.shields.io/npm/l/myagentmemory)](LICENSE)
 [![website](https://img.shields.io/badge/website-jayzeng.github.io%2Fagentmemory-0d9b7a)](https://jayzeng.github.io/agentmemory/)
 
-[Website and quickstart](https://jayzeng.github.io/agentmemory/) · [Install](#installation) · [CLI commands](#cli-commands) · [How it works](#how-it-works)
+[Website and quickstart](https://jayzeng.github.io/agentmemory/) · [Field report: lessons from 1,000+ coding-agent sessions](https://www.jayzeng.com/writing/agentmemory-field-report/) · [Install](#installation) · [CLI commands](#cli-commands) · [How it works](#how-it-works)
 
-## Why agent-memory?
+> **Field report:** “A session records what the agent did. Memory is a judgment about what the next agent should know.” Read [What 1000+ coding agent sessions taught me about LLM memory](https://www.jayzeng.com/writing/agentmemory-field-report/).
 
-Coding agents forget everything between sessions. `agent-memory` gives them a durable, local-first memory so they stop re-learning your stack, your preferences, and past decisions on every run.
+## Why AgentMemory?
 
-- **Persistent project memory** — decisions, preferences, and project context carry across sessions instead of starting cold.
-- **Plain Markdown, local-first** — every memory is a readable, git-friendly file on disk. No database, cloud service, or lock-in.
-- **Optional semantic search** — [qmd](https://github.com/tobi/qmd) adds keyword, semantic, and hybrid search across memory files.
-- **Explicit retrieval** — skills load base context at session start and search for related memories when a task needs them.
-- **Shared across agents** — Claude Code, Codex, Cursor, and Agent can use the same store.
+Coding-agent sessions preserve activity. They do not decide which facts, decisions, and follow-ups should remain useful tomorrow. AgentMemory gives that accumulated state explicit lifetimes, a user-controlled home, and a path back into future work.
+
+- **Different lifetimes and scopes** — route short-lived follow-ups, chronological evidence, continuing topics, and durable decisions to the right destination.
+- **Curated continuity** — retain judgments that should affect future work instead of warehousing every transcript and abandoned path.
+- **Plain Markdown, local-first** — read, edit, diff, back up, or delete every memory. No database, cloud service, or lock-in.
+- **Optional retrieval** — skills load base context at session start and search related memories explicitly when a task needs them; qmd adds keyword, semantic, and hybrid search.
+- **Shared across agents** — Claude Code, Codex, Cursor, and Agent can use the same store even as models and harnesses change.
+- **Correctable state** — provenance, temporal status, secret screening, supersession, and forgetting help keep retained memory aligned with reality.
 
 > **Naming:** `agentmemory` is the GitHub repo (and Homebrew tap), `myagentmemory` is the npm package, and `agent-memory` is the installed CLI binary. Also known as *coding agent memory* or *AI coding memory*.
 
 ### Product boundary
 
-AgentMemory is a local Markdown store with a CLI, optional qmd search, and agent skills. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
+AgentMemory is a local Markdown store with a CLI, optional qmd search, and agent skills. It does not automatically import every vendor transcript or silently decide what becomes durable. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
 
 ## Installation
 
@@ -83,7 +86,28 @@ qmd embed
 
 Without qmd, all core tools (write/read/scratchpad) work normally. Only `memory_search` and selective injection require qmd.
 
-## Architecture
+## Memory lifecycle
+
+AgentMemory implements a state lifecycle rather than a transcript archive. Scratch, daily, topic, and durable memory are destinations for different needs—not mandatory steps through which every entry must pass.
+
+```
+Session / external evidence
+             │
+             ▼
+   Extract, qualify, or discard
+             │
+             ├── Scratch  — short-lived follow-ups
+             ├── Daily    — chronological evidence
+             ├── Topic    — continuing threads
+             └── Durable  — curated facts and decisions
+                                      │
+                                      ▼
+                    Retrieve · supersede · invalidate · forget
+```
+
+The files are the current implementation of this lifecycle. The durable state remains useful even if the agent, model, harness, or optional retriever changes. The [field report](https://www.jayzeng.com/writing/agentmemory-field-report/) explains the evidence and design lessons behind it.
+
+## Repository architecture
 
 ```
   ┌───────────────┐
