@@ -95,6 +95,7 @@
 		"build:lib": "tsc -p tsconfig.build.json",
 		"build:cli": "bun build src/cli.ts --compile --outfile dist/agent-memory --define __VERSION__=\"'$(node -p \"require('./package.json').version\")'\"",
 		"eval:feedback": "bun eval/run.ts",
+		"prepare": "npm run build:lib",
 		"prepack": "npm run build:lib",
 		"lint": "biome check .",
 		"test": "bun test test/unit.test.ts",
