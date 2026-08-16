@@ -35,6 +35,7 @@ import {
 	extractLinks,
 	extractTags,
 	filterMemoryForContext,
+	getMemoryDir,
 	getQmdEmbedMode,
 	getTopicsDir,
 	installSkills,
@@ -1559,6 +1560,18 @@ describe("memoryWrite default target", () => {
 		const content = fs.readFileSync(path.join(tmpDir, "MEMORY.md"), "utf-8");
 		expect(content).toContain("Explicit long-term");
 		expect(result.details.target).toBe("long_term");
+	});
+
+	test("writes through an explicit directory without changing global core state", async () => {
+		const isolated = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-explicit-dir-"));
+		try {
+			const result = await memoryWrite({ directory: isolated, target: "long_term", content: "Scoped value" });
+			expect(result.isError).toBeUndefined();
+			expect(fs.readFileSync(path.join(isolated, "MEMORY.md"), "utf-8")).toContain("Scoped value");
+			expect(getMemoryDir()).toBe(tmpDir);
+		} finally {
+			fs.rmSync(isolated, { recursive: true, force: true });
+		}
 	});
 });
 

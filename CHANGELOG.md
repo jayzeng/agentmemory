@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Made the Homebrew update workflow match formula fields regardless of indentation and fail when expected fields are missing
 - Build public `dist` exports during commit-pinned Git dependency installation
+- Allow host adapters to write through the core memory contract to an explicit directory without mutating process-global core state
 
 ## [0.4.13] - 2026-08-10
 

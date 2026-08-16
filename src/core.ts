@@ -1396,6 +1396,7 @@ export interface ToolResult {
 }
 
 export async function memoryWrite(params: {
+	directory?: string;
 	target?: "long_term" | "daily" | "topic";
 	content: string;
 	mode?: "append" | "overwrite";
@@ -1404,14 +1405,22 @@ export async function memoryWrite(params: {
 	date?: string;
 	sourceUri?: string;
 }): Promise<ToolResult> {
-	ensureDirs();
+	const memoryDir = params.directory ? path.resolve(params.directory) : getMemoryDir();
+	fs.mkdirSync(memoryDir, { recursive: true });
+	fs.mkdirSync(path.join(memoryDir, "daily"), { recursive: true });
+	fs.mkdirSync(path.join(memoryDir, "topics"), { recursive: true });
+	const scheduleSearchRefresh = async () => {
+		if (path.resolve(getMemoryDir()) !== memoryDir) return;
+		await ensureQmdAvailableForUpdate();
+		scheduleQmdUpdate();
+	};
 	const target = params.target ?? "daily";
 	const { content, mode } = params;
 	const sid = shortSessionId(params.sessionId ?? "cli");
 	const ts = nowTimestamp();
 
 	if (target === "daily") {
-		const filePath = dailyPath(todayStr());
+		const filePath = path.join(memoryDir, "daily", `${params.date?.trim() || todayStr()}.md`);
 		const existing = readFileSafe(filePath) ?? "";
 		const safeExisting = redactSecrets(existing).content;
 		const existingPreview = buildPreview(safeExisting, {
@@ -1426,8 +1435,7 @@ export async function memoryWrite(params: {
 		const separator = existing.trim() ? "\n\n" : "";
 		const stored = formatStoredEntry(content, `<!-- ${ts} [${sid}] -->`, params.sourceUri);
 		fs.writeFileSync(filePath, existing + separator + stored.entry, "utf-8");
-		await ensureQmdAvailableForUpdate();
-		scheduleQmdUpdate();
+		await scheduleSearchRefresh();
 		return {
 			text: `Appended to daily log: ${filePath}${existingSnippet}`,
 			details: {
@@ -1453,7 +1461,7 @@ export async function memoryWrite(params: {
 		if (!slug) {
 			return { text: "Error: 'topic' must include at least one letter or number.", details: {}, isError: true };
 		}
-		const filePath = topicPath(slug);
+		const filePath = path.join(memoryDir, "topics", `${slug}.md`);
 		const existing = readFileSafe(filePath) ?? "";
 		const safeExisting = redactSecrets(existing).content;
 		const existingPreview = buildPreview(safeExisting, {
@@ -1475,8 +1483,7 @@ export async function memoryWrite(params: {
 			params.sourceUri,
 		);
 		fs.writeFileSync(filePath, `${base}${separator}${stored.entry}`, "utf-8");
-		await ensureQmdAvailableForUpdate();
-		scheduleQmdUpdate();
+		await scheduleSearchRefresh();
 		return {
 			text: `Appended to topic: ${filePath}${existingSnippet}`,
 			details: {
@@ -1497,7 +1504,7 @@ export async function memoryWrite(params: {
 	}
 
 	// long_term
-	const memFile = getMemoryFile();
+	const memFile = path.join(memoryDir, "MEMORY.md");
 	const existing = readFileSafe(memFile) ?? "";
 	const safeExisting = redactSecrets(existing).content;
 	const existingPreview = buildPreview(safeExisting, {
@@ -1512,8 +1519,7 @@ export async function memoryWrite(params: {
 	if (mode === "overwrite") {
 		const stored = formatStoredEntry(content, `<!-- last updated: ${ts} [${sid}] -->`, params.sourceUri);
 		fs.writeFileSync(memFile, stored.entry, "utf-8");
-		await ensureQmdAvailableForUpdate();
-		scheduleQmdUpdate();
+		await scheduleSearchRefresh();
 		return {
 			text: `Overwrote MEMORY.md${existingSnippet}`,
 			details: {
@@ -1534,8 +1540,7 @@ export async function memoryWrite(params: {
 	const separator = existing.trim() ? "\n\n" : "";
 	const stored = formatStoredEntry(content, `<!-- ${ts} [${sid}] -->`, params.sourceUri);
 	fs.writeFileSync(memFile, existing + separator + stored.entry, "utf-8");
-	await ensureQmdAvailableForUpdate();
-	scheduleQmdUpdate();
+	await scheduleSearchRefresh();
 	return {
 		text: `Appended to MEMORY.md${existingSnippet}`,
 		details: {
