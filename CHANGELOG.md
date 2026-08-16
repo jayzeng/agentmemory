@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Versioned public plugin-host types and manifest validation through the `myagentmemory/plugin-host` export
 - Fail-closed official-plugin bootstrap commands, signed Ed25519 release verification, bounded package validation, atomic install/upgrade/rollback, explicit uninstall, and deterministic regression coverage
+- Core-owned managed SessionStart hook installation for Claude Code, Codex, Cursor, and OpenCode
+- Bash, Zsh, Fish, and PowerShell completion generation and idempotent installation through public exports
 
 ### Changed
 - `agent-memory init`, `status`, and help now expose non-blocking optional-plugin discovery without affecting core memory behavior or opening a browser

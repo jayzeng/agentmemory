@@ -144,6 +144,9 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 | `agent-memory search --query <text> [--mode keyword\|semantic\|deep] [--limit N]` | Search via qmd |
 | `agent-memory install-skills` | Install bundled SKILL.md files into local agent directories |
 | `agent-memory uninstall-skills` | Uninstall bundled SKILL.md files from local agent directories |
+| `agent-memory completion [bash\|zsh\|fish\|powershell] [--stdout]` | Install or print shell completion |
+| `agent-memory install-hooks [--yes] [--only <agents>]` | Install managed session-start memory hooks |
+| `agent-memory uninstall-hooks [--only <agents>]` | Remove only hooks managed by AgentMemory |
 | `agent-memory init` | Create dirs, detect qmd, setup collection |
 | `agent-memory status` | Show config, qmd status, file counts |
 | `agent-memory plugin <list\|status\|install\|update\|uninstall\|manage>` | Discover and manage optional signed first-party plugins |

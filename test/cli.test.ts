@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-
+import { generateCompletion } from "../src/completions.js";
 import {
 	_clearUpdateTimer,
 	_resetBaseDir,
@@ -27,6 +27,7 @@ import {
 	serializeScratchpad,
 	todayStr,
 } from "../src/core.js";
+import { _setHookHomeDirForTest, installHooks, uninstallHooks } from "../src/hooks.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1036,7 +1037,52 @@ describe("install scripts", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 10. npm package portability
+// 10. Core-owned hooks and completion
+// ---------------------------------------------------------------------------
+
+describe("core-owned hooks and completion", () => {
+	test("completion advertises bootstrap commands without private implementation commands", () => {
+		const bash = generateCompletion("bash");
+		expect(bash).toContain("completion");
+		expect(bash).toContain("install-hooks");
+		expect(bash).toContain("list status install update uninstall manage");
+		expect(bash).not.toContain("recall learn eval");
+	});
+
+	test("managed Claude hook is idempotent and uninstall preserves unrelated hooks", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(
+				settingsPath,
+				JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo keep" }] }] } }),
+			);
+			expect(installHooks(new Set(["claude"])).results[0]?.installed).toBe(true);
+			expect(installHooks(new Set(["claude"])).results[0]?.reason).toBe("already installed");
+			expect(uninstallHooks(new Set(["claude"])).results[0]?.installed).toBe(true);
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			expect(settings.hooks.SessionStart[0].hooks[0].command).toBe("echo keep");
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("CLI prints shell completion without changing the user profile", () => {
+		const cli = path.join(__dirname, "..", "src", "cli.ts");
+		const result = Bun.spawnSync(["bun", "run", cli, "completion", "zsh", "--stdout"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toContain("#compdef agent-memory");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 11. npm package portability
 // ---------------------------------------------------------------------------
 
 describe("npm package portability", () => {

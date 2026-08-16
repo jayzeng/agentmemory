@@ -12,6 +12,9 @@
  *   search     — Search via qmd
  *   init       — Create dirs, detect qmd, setup collection
  *   status     — Show config, qmd status, file counts
+ *   completion — Install or print shell completion
+ *   install-hooks — Install managed session-start hooks
+ *   uninstall-hooks — Remove managed session-start hooks
  *   plugin     — Discover and bootstrap optional official plugins
  *
  * Global flags:
@@ -21,6 +24,8 @@
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
+
+import { type CompletionShell, detectCompletionShell, generateCompletion, installCompletion } from "./completions.js";
 
 import {
 	_setBaseDir,
@@ -62,6 +67,7 @@ import {
 	topicPath,
 	uninstallSkills,
 } from "./core.js";
+import { detectHookAgents, type HookAgentKey, installHooks, uninstallHooks } from "./hooks.js";
 import {
 	createDefaultPluginBootstrap,
 	PluginBootstrapFailure,
@@ -590,6 +596,90 @@ function cmdInstallSkills(flags: Record<string, string | boolean>) {
 	}
 }
 
+async function promptYesNo(question: string, defaultYes: boolean): Promise<boolean> {
+	const readline = await import("node:readline/promises");
+	const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+	try {
+		const answer = (await rl.question(`${question} ${defaultYes ? "[Y/n]" : "[y/N]"} `)).trim().toLowerCase();
+		if (!answer) return defaultYes;
+		return answer === "y" || answer === "yes";
+	} finally {
+		rl.close();
+	}
+}
+
+async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise<void> {
+	const json = hasFlag(flags, "json");
+	const requested = getFlag(flags, "only");
+	const requestedKeys = requested ? new Set(requested.split(",").map((value) => value.trim())) : null;
+	const { homeDir, targets } = detectHookAgents();
+	if (!homeDir) exitError("Home directory not found.", json);
+	const eligible = targets.filter(
+		(target) => target.supported && target.detected && (!requestedKeys || requestedKeys.has(target.key)),
+	);
+	const selected = new Set<HookAgentKey>();
+	const applyAll = hasFlag(flags, "yes") || hasFlag(flags, "all") || !process.stdin.isTTY;
+	for (const target of eligible) {
+		if (applyAll || (await promptYesNo(`Install SessionStart hook for ${target.label}?`, true)))
+			selected.add(target.key);
+	}
+	const report = installHooks(selected);
+	if (!report.ok) exitError(report.error ?? "install failed", json);
+	if (json) return output(report, true);
+	if (!report.results.length) return output("No eligible agents. Nothing to install.", false);
+	for (const result of report.results) {
+		console.log(
+			result.installed
+				? `Installed ${result.label} hook: ${result.path}`
+				: `Skipped ${result.label} (${result.reason ?? "unknown"})`,
+		);
+	}
+}
+
+function cmdUninstallHooks(flags: Record<string, string | boolean>): void {
+	const json = hasFlag(flags, "json");
+	const only = getFlag(flags, "only");
+	const agents = only ? new Set(only.split(",").map((value) => value.trim()) as HookAgentKey[]) : undefined;
+	const report = uninstallHooks(agents);
+	if (!report.ok) exitError(report.error ?? "uninstall failed", json);
+	if (json) {
+		output(report, true);
+		return;
+	}
+	for (const result of report.results) {
+		console.log(
+			result.installed
+				? `Uninstalled ${result.label}: ${result.path}`
+				: `Skipped ${result.label} (${result.reason ?? "unknown"})`,
+		);
+	}
+}
+
+function cmdCompletion(flags: Record<string, string | boolean>, positional: string[]): void {
+	const requestedShell = positional[0];
+	const shells: CompletionShell[] = ["bash", "zsh", "fish", "powershell"];
+	if (requestedShell && !shells.includes(requestedShell as CompletionShell))
+		exitError(
+			`Unsupported shell '${requestedShell}'. Choose bash, zsh, fish, or powershell.`,
+			hasFlag(flags, "json"),
+		);
+	const shell = (requestedShell as CompletionShell | undefined) ?? detectCompletionShell();
+	if (!shell)
+		exitError("Could not detect your shell. Specify bash, zsh, fish, or powershell.", hasFlag(flags, "json"));
+	if (hasFlag(flags, "stdout")) {
+		process.stdout.write(generateCompletion(shell));
+		return;
+	}
+	const result = installCompletion(shell);
+	if (hasFlag(flags, "json")) {
+		output(result, true);
+		return;
+	}
+	console.log(`Installed ${shell} completion: ${result.completionPath}`);
+	if (result.profilePath)
+		console.log(`${result.profileUpdated ? "Configured" : "Already configured"}: ${result.profilePath}`);
+}
+
 async function cmdSync(flags: Record<string, string | boolean>) {
 	const json = hasFlag(flags, "json");
 
@@ -1000,6 +1090,9 @@ Commands:
   sync        Re-index and embed all files (requires qmd)
   init        Initialize memory directory and qmd collection
   status      Show configuration and status (--probe for a live embeddings check)
+  completion  Install or print shell completion
+  install-hooks  Install managed SessionStart hooks
+  uninstall-hooks  Remove only managed SessionStart hooks
   plugin      Discover, install, update, or remove optional official plugins
 
 Global flags:
@@ -1024,6 +1117,8 @@ Examples:
   agent-memory context --query "database choice"
   agent-memory sync
   agent-memory status --json
+  agent-memory completion zsh
+  agent-memory install-hooks --yes
   agent-memory plugin status
   agent-memory plugin install`);
 }
@@ -1087,6 +1182,22 @@ async function main() {
 		case "status":
 			await cmdStatus(flags);
 			break;
+		case "completion":
+			cmdCompletion(flags, positional);
+			break;
+		case "install-hooks":
+			await cmdInstallHooks(flags);
+			break;
+		case "uninstall-hooks":
+			cmdUninstallHooks(flags);
+			break;
+		case "hook": {
+			if (positional[0] !== "session-start") exitError("hook requires 'session-start'", json);
+			const agent = getFlag(flags, "agent");
+			if (!agent) exitError("hook session-start requires --agent", json);
+			await cmdContext({ "no-search": true });
+			break;
+		}
 		case "plugin":
 			await cmdPlugin(flags, positional);
 			break;

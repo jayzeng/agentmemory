@@ -16,6 +16,14 @@
 		"./plugin-host": {
 			"types": "./dist/plugin-host.d.ts",
 			"default": "./dist/plugin-host.js"
+		},
+		"./completions": {
+			"types": "./dist/completions.d.ts",
+			"default": "./dist/completions.js"
+		},
+		"./hooks": {
+			"types": "./dist/hooks.d.ts",
+			"default": "./dist/hooks.js"
 		}
 	},
 	"bin": {
@@ -64,6 +72,12 @@
 		"dist/cli.js",
 		"dist/core.d.ts",
 		"dist/core.js",
+		"dist/cli-spec.d.ts",
+		"dist/cli-spec.js",
+		"dist/completions.d.ts",
+		"dist/completions.js",
+		"dist/hooks.d.ts",
+		"dist/hooks.js",
 		"dist/plugin-bootstrap.d.ts",
 		"dist/plugin-bootstrap.js",
 		"dist/plugin-host.d.ts",
