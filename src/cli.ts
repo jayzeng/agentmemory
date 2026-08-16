@@ -12,12 +12,14 @@
  *   search     — Search via qmd
  *   init       — Create dirs, detect qmd, setup collection
  *   status     — Show config, qmd status, file counts
+ *   plugin     — Discover and bootstrap optional official plugins
  *
  * Global flags:
  *   --dir <path>   Override memory directory
  *   --json         Machine-readable JSON output
  */
 
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 
 import {
@@ -60,6 +62,11 @@ import {
 	topicPath,
 	uninstallSkills,
 } from "./core.js";
+import {
+	createDefaultPluginBootstrap,
+	PluginBootstrapFailure,
+	type PluginBootstrapResultV1,
+} from "./plugin-bootstrap.js";
 
 declare const __VERSION__: string;
 
@@ -146,6 +153,81 @@ function exitError(message: string, json: boolean): never {
 		console.error(`Error: ${message}`);
 	}
 	process.exit(1);
+}
+
+function openExternalUrl(url: string): boolean {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol !== "https:") return false;
+	try {
+		const child =
+			process.platform === "darwin"
+				? spawn("open", [parsed.toString()], { detached: true, stdio: "ignore" })
+				: process.platform === "win32"
+					? spawn("explorer.exe", [parsed.toString()], { detached: true, stdio: "ignore" })
+					: spawn("xdg-open", [parsed.toString()], { detached: true, stdio: "ignore" });
+		child.unref();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allowBrowser: boolean): void {
+	if (json) {
+		output(result, true);
+	} else if (result.command === "plugin.list" && result.plugins) {
+		for (const plugin of result.plugins) {
+			const state = plugin.available ? "available" : plugin.installed ? plugin.entitlement : "not installed";
+			console.log(`${plugin.name}: ${state}`);
+		}
+		if (result.result === "not_installed") console.log("\nInstall or activate: agent-memory plugin install");
+	} else {
+		const version = result.bundle?.version ? ` ${result.bundle.version}` : "";
+		switch (result.result) {
+			case "installed":
+				console.log(`AgentMemory Pro${version} installed.`);
+				break;
+			case "upgraded":
+				console.log(`AgentMemory Pro upgraded to${version}.`);
+				break;
+			case "current":
+				console.log(result.bundle ? `AgentMemory Pro${version} is current.` : "AgentMemory Pro is not installed.");
+				break;
+			case "update_available":
+				console.log(`AgentMemory Pro${version} has an update available.`);
+				break;
+			case "uninstalled":
+				console.log("AgentMemory Pro executable components were removed. Memory and billing state were preserved.");
+				break;
+			case "not_installed":
+				console.log("AgentMemory Pro is not installed.");
+				console.log("Run: agent-memory plugin install");
+				break;
+			case "auth_required":
+				console.log("Sign in and choose a plan to continue.");
+				break;
+			case "renewal_required":
+				console.log("Renew AgentMemory Pro to continue using paid capabilities.");
+				break;
+			default:
+				console.log(result.error?.message ?? "AgentMemory Pro is currently unavailable.");
+		}
+	}
+
+	if (result.nextAction) {
+		if (allowBrowser && openExternalUrl(result.nextAction.url)) {
+			if (!json) console.log("Opened the AgentMemory account website.");
+		} else if (!json) {
+			console.log(`Open: ${result.nextAction.url}`);
+		}
+		if (!json && result.nextAction.userCode) console.log(`Code: ${result.nextAction.userCode}`);
+	}
+	if (!result.ok) process.exitCode = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -602,6 +684,18 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 			console.log(`  qmd not found — search features unavailable.`);
 			console.log(`  Install: bun install -g https://github.com/tobi/qmd`);
 		}
+		if (process.stdout.isTTY) {
+			try {
+				const plugin = await createDefaultPluginBootstrap(VERSION).list();
+				if (plugin.result === "not_installed") {
+					console.log("");
+					console.log("Optional: AgentMemory Pro adds session recall and a local Web Console.");
+					console.log("Run: agent-memory plugin install");
+				}
+			} catch {
+				// Commercial discovery must never make core initialization fail.
+			}
+		}
 	}
 }
 
@@ -650,6 +744,21 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 	}
 
 	const embedMode = getQmdEmbedMode();
+	let officialPlugin: { installed: boolean; result: string; entitlement: string } = {
+		installed: false,
+		result: "unavailable",
+		entitlement: "missing",
+	};
+	try {
+		const plugin = await createDefaultPluginBootstrap(VERSION).status();
+		officialPlugin = {
+			installed: Boolean(plugin.bundle),
+			result: plugin.result,
+			entitlement: plugin.entitlement.state,
+		};
+	} catch {
+		// Commercial status must never make core status fail.
+	}
 
 	if (json) {
 		output(
@@ -674,6 +783,7 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 					embeddings,
 				},
 				embedMode,
+				officialPlugin,
 			},
 			true,
 		);
@@ -723,6 +833,11 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 		} else {
 			console.log("qmd: not installed");
 		}
+		if (!officialPlugin.installed) {
+			console.log("");
+			console.log("Optional official plugins: not installed");
+			console.log("  run: agent-memory plugin install");
+		}
 	}
 }
 
@@ -753,6 +868,115 @@ async function cmdDistil(flags: Record<string, string | boolean>) {
 	}
 }
 
+function printPluginUsage(): void {
+	console.log(`agent-memory plugin — optional official plugins
+
+Usage:
+  agent-memory plugin [list]
+  agent-memory plugin status
+  agent-memory plugin install [--channel stable] [--no-browser]
+  agent-memory plugin update [--channel stable]
+  agent-memory plugin uninstall --yes
+  agent-memory plugin manage [--no-browser]
+
+The public core remains fully usable without AgentMemory Pro. Authentication and
+artifact downloads are unavailable until a production commercial service and
+release signing keys are configured.`);
+}
+
+function pluginCommandFailure(command: string, error: unknown): PluginBootstrapResultV1 {
+	return {
+		schemaVersion: 1,
+		command: `plugin.${command}`,
+		ok: false,
+		result: "unavailable",
+		bundle: null,
+		entitlement: {
+			plan: null,
+			state: "missing",
+			features: [],
+		},
+		nextAction: null,
+		error: {
+			code: error instanceof PluginBootstrapFailure ? error.code : "plugin_command_failed",
+			message: error instanceof Error ? error.message : String(error),
+			...(error instanceof PluginBootstrapFailure && error.retryable ? { retryable: true } : {}),
+		},
+	};
+}
+
+async function cmdPlugin(flags: Record<string, string | boolean>, positional: string[]): Promise<void> {
+	const json = hasFlag(flags, "json");
+	const subcommand = positional[0] ?? "list";
+	if (subcommand === "help" || hasFlag(flags, "help")) {
+		printPluginUsage();
+		return;
+	}
+	const channel = getFlag(flags, "channel") ?? "stable";
+	if (channel !== "stable") {
+		printPluginResult(
+			pluginCommandFailure(
+				subcommand,
+				new PluginBootstrapFailure("channel_invalid", "--channel supports only 'stable'"),
+			),
+			json,
+			false,
+		);
+		return;
+	}
+	const manager = createDefaultPluginBootstrap(VERSION);
+	const allowBrowser = !json && !hasFlag(flags, "no-browser") && Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
+	let result: PluginBootstrapResultV1;
+	try {
+		switch (subcommand) {
+			case "list":
+				result = await manager.list();
+				break;
+			case "status":
+				result = await manager.status(channel);
+				break;
+			case "install":
+				result = await manager.install({ channel, allowAuthentication: true });
+				break;
+			case "update":
+				result = await manager.update({ channel, allowAuthentication: false });
+				break;
+			case "uninstall":
+				if (!hasFlag(flags, "yes")) {
+					const status = await manager.status(channel);
+					result = {
+						...status,
+						command: "plugin.uninstall",
+						ok: false,
+						result: "unavailable",
+						error: {
+							code: "confirmation_required",
+							message: "Re-run with --yes to remove AgentMemory Pro executable components",
+						},
+					};
+					break;
+				}
+				result = await manager.uninstall();
+				break;
+			case "manage":
+				result = await manager.manage();
+				break;
+			default:
+				result = pluginCommandFailure(
+					subcommand,
+					new PluginBootstrapFailure(
+						"unknown_plugin_command",
+						`Unknown plugin command: ${subcommand}. Available bootstrap commands: list, status, install, update, uninstall, manage.`,
+					),
+				);
+		}
+	} catch (error) {
+		result = pluginCommandFailure(subcommand, error);
+	}
+	printPluginResult(result, json, allowBrowser && (subcommand === "install" || subcommand === "manage"));
+}
+
 // ---------------------------------------------------------------------------
 // Usage
 // ---------------------------------------------------------------------------
@@ -776,6 +1000,7 @@ Commands:
   sync        Re-index and embed all files (requires qmd)
   init        Initialize memory directory and qmd collection
   status      Show configuration and status (--probe for a live embeddings check)
+  plugin      Discover, install, update, or remove optional official plugins
 
 Global flags:
   --dir <path>   Override memory directory
@@ -798,7 +1023,9 @@ Examples:
   agent-memory distil --dry-run
   agent-memory context --query "database choice"
   agent-memory sync
-  agent-memory status --json`);
+  agent-memory status --json
+  agent-memory plugin status
+  agent-memory plugin install`);
 }
 
 // ---------------------------------------------------------------------------
@@ -820,7 +1047,7 @@ async function main() {
 		return;
 	}
 
-	if (!command || command === "help" || hasFlag(flags, "help")) {
+	if (!command || command === "help" || (hasFlag(flags, "help") && command !== "plugin")) {
 		printUsage();
 		return;
 	}
@@ -859,6 +1086,9 @@ async function main() {
 			break;
 		case "status":
 			await cmdStatus(flags);
+			break;
+		case "plugin":
+			await cmdPlugin(flags, positional);
 			break;
 		default:
 			exitError(`Unknown command: ${command}. Run 'agent-memory help' for usage.`, json);

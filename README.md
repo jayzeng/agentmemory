@@ -28,6 +28,10 @@ Coding-agent sessions preserve activity. They do not decide which facts, decisio
 
 AgentMemory is a local Markdown store with a CLI, optional qmd search, and agent skills. It does not automatically import every vendor transcript or silently decide what becomes durable. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
 
+### Optional official plugins
+
+The core can discover and host separately distributed, signed first-party plugins while remaining fully useful on its own. `agent-memory plugin list` and `plugin status` report local state. The idempotent `agent-memory plugin install` state machine verifies signed release metadata, validates bounded packages, and installs or upgrades atomically. Commercial authentication and downloads remain fail-closed until the production service and signing keys are configured. See the [official plugin bootstrap and host contract](docs/official-plugin-bootstrap.md).
+
 ## Installation
 
 ```bash
@@ -142,6 +146,7 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 | `agent-memory uninstall-skills` | Uninstall bundled SKILL.md files from local agent directories |
 | `agent-memory init` | Create dirs, detect qmd, setup collection |
 | `agent-memory status` | Show config, qmd status, file counts |
+| `agent-memory plugin <list\|status\|install\|update\|uninstall\|manage>` | Discover and manage optional signed first-party plugins |
 
 Global flags: `--dir <path>` (override directory), `--json` (machine output)
 
@@ -235,6 +240,7 @@ These are content conventions, not enforced metadata. qmd's full-text indexing m
 |----------|--------|---------|-------------|
 | `AGENT_MEMORY_DIR` | path | `~/.agent-memory` | Memory directory |
 | `AGENT_MEMORY_QMD_UPDATE` | `background`, `manual`, `off` | `background` | Controls automatic `qmd update` after writes |
+| `AGENT_MEMORY_PLUGIN_DIR` | path | `~/.agent-memory/system/plugins` | Machine-local official plugin installation root; independent of `AGENT_MEMORY_DIR` |
 
 ## Running tests
 

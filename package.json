@@ -8,6 +8,14 @@
 		".": {
 			"types": "./dist/core.d.ts",
 			"default": "./dist/core.js"
+		},
+		"./plugin-bootstrap": {
+			"types": "./dist/plugin-bootstrap.d.ts",
+			"default": "./dist/plugin-bootstrap.js"
+		},
+		"./plugin-host": {
+			"types": "./dist/plugin-host.d.ts",
+			"default": "./dist/plugin-host.js"
 		}
 	},
 	"bin": {
@@ -56,6 +64,10 @@
 		"dist/cli.js",
 		"dist/core.d.ts",
 		"dist/core.js",
+		"dist/plugin-bootstrap.d.ts",
+		"dist/plugin-bootstrap.js",
+		"dist/plugin-host.d.ts",
+		"dist/plugin-host.js",
 		"README.md",
 		"LICENSE"
 	],

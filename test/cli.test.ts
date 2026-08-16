@@ -585,6 +585,115 @@ describe("CLI subprocess", () => {
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory");
 		expect(out).toContain("Commands:");
+		expect(out).toContain("plugin");
+	});
+
+	test("plugin discovery is structured and does not expose install paths", () => {
+		const pluginDir = path.join(tmpDir, "plugin-install");
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "list", "--json"],
+			{
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const stdout = result.stdout.toString();
+		const out = JSON.parse(stdout);
+		expect(out.schemaVersion).toBe(1);
+		expect(out.command).toBe("plugin.list");
+		expect(out.result).toBe("not_installed");
+		expect(out.plugins.map((plugin: { id: string }) => plugin.id)).toEqual([
+			"agentmemory.session-intelligence",
+			"agentmemory.web-console",
+		]);
+		expect(stdout).not.toContain(pluginDir);
+	});
+
+	test("plugin install fails closed when the production service is not configured", () => {
+		const pluginDir = path.join(tmpDir, "plugin-install");
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "install", "--json"],
+			{
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(1);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.ok).toBe(false);
+		expect(out.result).toBe("unavailable");
+		expect(out.error.code).toBe("service_not_configured");
+		expect(fs.existsSync(pluginDir)).toBe(false);
+	});
+
+	test("plugin uninstall requires explicit confirmation", () => {
+		const pluginDir = path.join(tmpDir, "plugin-install");
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "uninstall", "--json"],
+			{
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(1);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.command).toBe("plugin.uninstall");
+		expect(out.error.code).toBe("confirmation_required");
+		expect(fs.existsSync(pluginDir)).toBe(false);
+	});
+
+	test("plugin errors retain the structured envelope for corrupt local state", () => {
+		const pluginDir = path.join(tmpDir, "plugin-install");
+		fs.mkdirSync(path.join(pluginDir, "receipts"), { recursive: true });
+		fs.writeFileSync(path.join(pluginDir, "receipts", "agentmemory.pro.json"), "not-json");
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "status", "--json"],
+			{
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(1);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.schemaVersion).toBe(1);
+		expect(out.command).toBe("plugin.status");
+		expect(out.error.code).toBe("receipt_invalid");
+	});
+
+	test("plugin option errors use the structured envelope", () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"plugin",
+				"install",
+				"--channel",
+				"nightly",
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(1);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.command).toBe("plugin.install");
+		expect(out.error.code).toBe("channel_invalid");
+	});
+
+	test("plugin help documents that commercial networking is not configured", () => {
+		const result = Bun.spawnSync(["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "--help"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(result.exitCode).toBe(0);
+		const out = result.stdout.toString();
+		expect(out).toContain("agent-memory plugin install");
+		expect(out).toContain("unavailable until a production commercial service");
 	});
 
 	test("unknown command exits with error", async () => {
@@ -614,6 +723,7 @@ describe("CLI subprocess", () => {
 		const out = JSON.parse(result.stdout.toString());
 		expect(out.embedMode).toBeDefined();
 		expect(["background", "manual", "off"]).toContain(out.embedMode);
+		expect(out.officialPlugin).toEqual({ installed: false, result: "not_installed", entitlement: "missing" });
 	});
 
 	test("install-skills --uninstall removes SKILL.md from home", async () => {

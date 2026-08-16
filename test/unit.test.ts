@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { generateKeyPairSync, sign } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -64,6 +65,27 @@ import {
 	uninstallSkills,
 	yesterdayStr,
 } from "../src/core.js";
+import {
+	Ed25519ReleaseVerifier,
+	encodePluginPackage,
+	FilePluginInstallStore,
+	OFFICIAL_BUNDLE_ID,
+	OFFICIAL_PLUGIN_IDS,
+	type PluginAccessDecisionV1,
+	type PluginBootstrapBackendV1,
+	PluginBootstrapV1,
+	type PluginNextActionV1,
+	releaseSigningPayload,
+	type SignedPluginReleaseV1,
+	sha256,
+	supportsVersionRange,
+} from "../src/plugin-bootstrap.js";
+import {
+	type AgentMemoryBundleManifestV1,
+	isSafeBundlePath,
+	type PluginEntitlementStatusV1,
+	validateBundleManifestV1,
+} from "../src/plugin-host.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -1859,5 +1881,289 @@ describe("distilMemories", () => {
 		const result = await distilMemories({ dryRun: true });
 		const lineCount = result.output.split("\n").length;
 		expect(lineCount).toBeLessThan(80);
+	});
+});
+
+// ==========================================================================
+// 14. Official plugin bootstrap and transactional installer
+// ==========================================================================
+
+const ACTIVE_PLUGIN_ENTITLEMENT: PluginEntitlementStatusV1 = {
+	plan: "pro",
+	state: "active",
+	features: ["session-intelligence", "web-console"],
+	expiresAt: "2027-08-16T00:00:00Z",
+	offlineUntil: "2026-09-15T00:00:00Z",
+};
+
+class FakePluginBackend implements PluginBootstrapBackendV1 {
+	entitlement: PluginEntitlementStatusV1 = structuredClone(ACTIVE_PLUGIN_ENTITLEMENT);
+	decision: PluginAccessDecisionV1 | null = null;
+	releases: SignedPluginReleaseV1[] = [];
+	artifacts = new Map<string, Uint8Array>();
+	downloads = 0;
+	managementAction: PluginNextActionV1 | null = {
+		kind: "manage",
+		url: "https://account.example.test/agentmemory",
+	};
+
+	async getLocalEntitlement(): Promise<PluginEntitlementStatusV1> {
+		return structuredClone(this.entitlement);
+	}
+
+	async resolveAccess(): Promise<PluginAccessDecisionV1> {
+		if (this.decision) return structuredClone(this.decision);
+		return {
+			kind: "granted",
+			entitlement: structuredClone(this.entitlement),
+			artifactGrant: "test-artifact-grant",
+		};
+	}
+
+	async listReleases(): Promise<SignedPluginReleaseV1[]> {
+		return structuredClone(this.releases);
+	}
+
+	async downloadArtifact(request: { release: SignedPluginReleaseV1 }): Promise<Uint8Array> {
+		this.downloads++;
+		const artifact = this.artifacts.get(request.release.packageSha256);
+		if (!artifact) throw new Error("missing test artifact");
+		return artifact.slice();
+	}
+
+	async getManagementAction(): Promise<PluginNextActionV1 | null> {
+		return this.managementAction ? structuredClone(this.managementAction) : null;
+	}
+}
+
+function testBundleManifest(version: string): AgentMemoryBundleManifestV1 {
+	return {
+		schemaVersion: 1,
+		id: OFFICIAL_BUNDLE_ID,
+		version,
+		channel: "stable",
+		core: ">=0.4.0 <1.0.0",
+		pluginApi: 1,
+		entrypoint: "bundle/index.js",
+		plugins: [...OFFICIAL_PLUGIN_IDS],
+	};
+}
+
+function signedTestRelease(
+	version: string,
+	privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"],
+): { release: SignedPluginReleaseV1; artifact: Uint8Array } {
+	const manifest = testBundleManifest(version);
+	const entrypoint = Buffer.from(`export const version = ${JSON.stringify(version)};\n`, "utf-8");
+	const artifact = encodePluginPackage({
+		schemaVersion: 1,
+		manifest,
+		files: [
+			{
+				path: manifest.entrypoint,
+				sha256: sha256(entrypoint),
+				contentBase64: entrypoint.toString("base64"),
+			},
+		],
+	});
+	const release: SignedPluginReleaseV1 = {
+		schemaVersion: 1,
+		manifest,
+		platform: "any",
+		architecture: "any",
+		packageSha256: sha256(artifact),
+		size: artifact.byteLength,
+		signature: { algorithm: "ed25519", keyId: "test-key", value: "pending" },
+	};
+	release.signature.value = sign(null, releaseSigningPayload(release), privateKey).toString("base64");
+	return { release, artifact };
+}
+
+describe("official plugin host contract", () => {
+	test("validates bundle identity, entrypoint, and plugin IDs", () => {
+		expect(() => validateBundleManifestV1(testBundleManifest("1.0.0"))).not.toThrow();
+		expect(isSafeBundlePath("bundle/index.js")).toBe(true);
+		expect(isSafeBundlePath("../index.js")).toBe(false);
+		expect(isSafeBundlePath("C:escape.js")).toBe(false);
+		expect(() => validateBundleManifestV1({ ...testBundleManifest("1.0.0"), entrypoint: "../index.js" })).toThrow(
+			"Invalid bundle entrypoint",
+		);
+	});
+
+	test("evaluates bounded semantic-version ranges", () => {
+		expect(supportsVersionRange(">=0.4.0 <1.0.0", "0.4.13")).toBe(true);
+		expect(supportsVersionRange(">=0.5.0 <1.0.0", "0.4.13")).toBe(false);
+		expect(supportsVersionRange("unsupported", "0.4.13")).toBe(false);
+	});
+});
+
+describe("official plugin bootstrap", () => {
+	let installRoot: string;
+	let backend: FakePluginBackend;
+	let privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
+	let verifier: Ed25519ReleaseVerifier;
+
+	beforeEach(() => {
+		installRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-plugin-bootstrap-"));
+		backend = new FakePluginBackend();
+		const keys = generateKeyPairSync("ed25519");
+		privateKey = keys.privateKey;
+		verifier = new Ed25519ReleaseVerifier({
+			"test-key": keys.publicKey.export({ format: "pem", type: "spki" }).toString(),
+		});
+	});
+
+	afterEach(() => {
+		fs.rmSync(installRoot, { recursive: true, force: true });
+	});
+
+	function bootstrap(healthCheck?: (directory: string, release: SignedPluginReleaseV1) => Promise<void>) {
+		return new PluginBootstrapV1({
+			coreVersion: "0.4.13",
+			backend,
+			verifier,
+			store: new FilePluginInstallStore(installRoot),
+			healthCheck,
+		});
+	}
+
+	function publish(version: string) {
+		const built = signedTestRelease(version, privateKey);
+		backend.releases.push(built.release);
+		backend.artifacts.set(built.release.packageSha256, built.artifact);
+		return built;
+	}
+
+	test("installs a signed compatible package and reports current on retry", async () => {
+		publish("1.0.0");
+		const manager = bootstrap();
+		const installed = await manager.install();
+		expect(installed.ok).toBe(true);
+		expect(installed.result).toBe("installed");
+		expect(installed.bundle?.version).toBe("1.0.0");
+		expect(backend.downloads).toBe(1);
+
+		const current = await manager.install();
+		expect(current.result).toBe("current");
+		expect(backend.downloads).toBe(1);
+	});
+
+	test("upgrades atomically and records the previous version", async () => {
+		publish("1.0.0");
+		const manager = bootstrap();
+		expect((await manager.install()).result).toBe("installed");
+		publish("1.1.0");
+
+		const upgraded = await manager.install();
+		expect(upgraded.result).toBe("upgraded");
+		expect(upgraded.bundle?.version).toBe("1.1.0");
+		expect(upgraded.bundle?.previousVersion).toBe("1.0.0");
+	});
+
+	test("keeps the previous receipt when an upgrade health check fails", async () => {
+		publish("1.0.0");
+		const initial = bootstrap();
+		expect((await initial.install()).result).toBe("installed");
+		publish("1.1.0");
+		const failing = bootstrap(async (_directory, release) => {
+			if (release.manifest.version === "1.1.0") throw new Error("synthetic health failure");
+		});
+
+		const result = await failing.install();
+		expect(result.ok).toBe(false);
+		expect(result.error?.code).toBe("plugin_install_failed");
+		const receipt = new FilePluginInstallStore(installRoot).readReceipt(OFFICIAL_BUNDLE_ID);
+		expect(receipt?.version).toBe("1.0.0");
+	});
+
+	test("rejects a release with an invalid signature before download", async () => {
+		const built = publish("1.0.0");
+		built.release.signature.value = Buffer.alloc(64, 1).toString("base64");
+		backend.releases = [built.release];
+
+		const result = await bootstrap().install();
+		expect(result.ok).toBe(false);
+		expect(result.error?.code).toBe("signature_invalid");
+		expect(backend.downloads).toBe(0);
+		expect(new FilePluginInstallStore(installRoot).readReceipt(OFFICIAL_BUNDLE_ID)).toBeNull();
+	});
+
+	test("ignores an unsigned higher version when a valid compatible release exists", async () => {
+		const valid = publish("1.0.0");
+		const invalid = signedTestRelease("2.0.0", privateKey);
+		invalid.release.signature.value = Buffer.alloc(64, 2).toString("base64");
+		backend.releases = [invalid.release, valid.release];
+		backend.artifacts.set(invalid.release.packageSha256, invalid.artifact);
+
+		const result = await bootstrap().install();
+		expect(result.ok).toBe(true);
+		expect(result.bundle?.version).toBe("1.0.0");
+		expect(backend.downloads).toBe(1);
+	});
+
+	test("returns an authentication action without changing disk", async () => {
+		backend.entitlement = { plan: null, state: "missing", features: [] };
+		backend.decision = {
+			kind: "auth_required",
+			entitlement: structuredClone(backend.entitlement),
+			nextAction: {
+				kind: "authenticate",
+				url: "https://account.example.test/device",
+				userCode: "TEST-CODE",
+			},
+		};
+
+		const result = await bootstrap().install();
+		expect(result.ok).toBe(false);
+		expect(result.result).toBe("auth_required");
+		expect(result.nextAction?.userCode).toBe("TEST-CODE");
+		expect(new FilePluginInstallStore(installRoot).readReceipt(OFFICIAL_BUNDLE_ID)).toBeNull();
+	});
+
+	test("rejects package path traversal and leaves no receipt", async () => {
+		const manifest = testBundleManifest("1.0.0");
+		const artifact = Buffer.from(
+			JSON.stringify({
+				schemaVersion: 1,
+				manifest,
+				files: [
+					{
+						path: "../escape.js",
+						sha256: sha256(Buffer.from("bad")),
+						contentBase64: Buffer.from("bad").toString("base64"),
+					},
+				],
+			}),
+		);
+		const release: SignedPluginReleaseV1 = {
+			schemaVersion: 1,
+			manifest,
+			platform: "any",
+			architecture: "any",
+			packageSha256: sha256(artifact),
+			size: artifact.byteLength,
+			signature: { algorithm: "ed25519", keyId: "test-key", value: "pending" },
+		};
+		release.signature.value = sign(null, releaseSigningPayload(release), privateKey).toString("base64");
+		backend.releases = [release];
+		backend.artifacts.set(release.packageSha256, artifact);
+
+		const result = await bootstrap().install();
+		expect(result.ok).toBe(false);
+		expect(result.error?.code).toBe("package_path_invalid");
+		expect(fs.existsSync(path.join(installRoot, "escape.js"))).toBe(false);
+	});
+
+	test("uninstall removes executable versions but preserves unrelated user data", async () => {
+		publish("1.0.0");
+		const manager = bootstrap();
+		expect((await manager.install()).result).toBe("installed");
+		const userData = path.join(installRoot, "user-data.txt");
+		fs.writeFileSync(userData, "keep");
+
+		const result = await manager.uninstall();
+		expect(result.result).toBe("uninstalled");
+		expect(fs.existsSync(userData)).toBe(true);
+		expect(new FilePluginInstallStore(installRoot).readReceipt(OFFICIAL_BUNDLE_ID)).toBeNull();
 	});
 });

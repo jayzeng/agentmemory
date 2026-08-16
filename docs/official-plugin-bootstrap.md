@@ -1,0 +1,306 @@
+# Official plugin bootstrap and host contract
+
+## Status
+
+Accepted design on 2026-08-16. Stage 2 is implemented in the public core: host types, local discovery, signed-release verification, bounded package validation, and transactional install/rollback are available. Production authentication, catalog, download, and signing-key configuration remain intentionally unavailable until the commercial service is implemented.
+
+The public `agentmemory` repository and `myagentmemory` npm package remain the MIT-licensed core. Official commercial implementations are built and distributed from the private `agent-memory-plugin` workspace. Pricing, the billing provider, the service hostname, device limits, offline-grace duration, and Enterprise contract terms are intentionally not decided here.
+
+## Decision
+
+The public core will provide a small bootstrap and host surface for signed first-party plugins. It will not contain paid implementations, browser assets, commercial entitlement logic, or a general third-party marketplace.
+
+The primary user command is:
+
+```bash
+agent-memory plugin install
+```
+
+`plugin install` is an idempotent reconcile operation:
+
+| Local state | Entitlement state | Result |
+| --- | --- | --- |
+| Plugin absent | Active or grace | Install the compatible signed bundle |
+| Plugin older than the selected release | Active or grace | Upgrade atomically |
+| Plugin current | Active or grace | Report that it is current |
+| Any | Missing | Start authentication and plan selection |
+| Any | Expired | Direct the user to renewal; leave core available |
+| Incompatible bundle | Any | Leave the current version untouched and explain the required core version |
+
+An absent plugin cannot validate a commercial license. The public bootstrap performs the initial authenticated entitlement lookup and artifact verification. After activation, the private runtime validates a signed local entitlement before any paid entry point runs.
+
+## Ownership boundary
+
+The public core owns:
+
+- CLI discovery and bootstrap commands;
+- an allowlisted control-plane client;
+- credential-store and signed-entitlement persistence abstractions;
+- signed catalog and artifact verification;
+- transactional install, upgrade, rollback, and uninstall;
+- a versioned, permission-checked plugin host API;
+- command dispatch to an activated official bundle;
+- helpful unavailable-command messages when an official capability is absent.
+
+The commercial distribution owns:
+
+- the proprietary plugin runtime and implementations;
+- Session Intelligence and Web Console assets;
+- entitlement interpretation beyond the public signed-claim format;
+- paid command, hook, worker, and web-server behavior;
+- the authenticated website, billing integration, entitlement ledger, and artifact service;
+- signed release production and commercial notices.
+
+Core memory operations must continue to work when the service is unreachable, a plugin is absent, an entitlement expires, or an upgrade fails.
+
+## Alternatives rejected for v1
+
+- **Put the bootstrap inside the commercial plugin:** impossible when the plugin is not installed and unable to repair a broken installation.
+- **Ship a separate permanent Pro CLI:** duplicates command parsing and core behavior and makes it unclear which `agent-memory` binary owns user data.
+- **Bundle paid code in the public package behind an entitlement flag:** exposes the paid implementation under the public artifact and license boundary.
+- **Open a checkout page from npm/Homebrew postinstall:** unreliable in non-interactive environments and surprising for users who requested only the core.
+- **Use a general remote marketplace immediately:** expands code-loading, sandbox, trust, dependency, and moderation scope before the first-party boundary is proven.
+- **Pass license keys as CLI arguments or environment values:** exposes reusable credentials through shell history, process inspection, CI logs, or inherited environments.
+
+## CLI contract
+
+### Bootstrap commands
+
+```text
+agent-memory plugin
+agent-memory plugin list
+agent-memory plugin status
+agent-memory plugin install [--channel stable] [--no-browser] [--yes]
+agent-memory plugin update [--channel stable]
+agent-memory plugin uninstall [--yes]
+agent-memory plugin manage [--no-browser]
+```
+
+- `plugin` with no subcommand prints a discovery summary and the next relevant command.
+- `list` reports known official plugins and whether each is installed and available. It does not download artifacts or inspect memory.
+- `status` is read-only. It reports the installed bundle, selected channel, compatibility, entitlement state, and update availability.
+- `install` authenticates when necessary, then installs, upgrades, or reports current state.
+- `update` requires an existing installation and never starts a new purchase implicitly.
+- `uninstall` removes executable plugin material, contributed skills, and managed hooks. It preserves core memory, private plugin-created user data, and the subscription.
+- `manage` opens or prints the authenticated account and billing URL.
+
+Installed plugins may contribute additional subcommands such as `plugin recall`. Bootstrap command names are reserved by the core and cannot be replaced by a plugin.
+
+The current private compatibility CLI uses `plugin install` and `plugin uninstall` for skill files only. During migration, those meanings move to `install-skills --plugin-only` and `uninstall-skills --plugin-only`; the bootstrap command names above become authoritative.
+
+### Discovery behavior
+
+After a successful interactive `agent-memory init`, the core may print one informational line:
+
+```text
+Optional: AgentMemory Pro adds session recall and a local Web Console.
+Run: agent-memory plugin install
+```
+
+Top-level help includes an `Optional official plugins` section. Human-readable `status` may include the same recommendation while no official plugin is installed. Routine `context`, `read`, `write`, `search`, and scratchpad commands never show commercial prompts.
+
+The core must not open a browser during package installation, `init`, `help`, `status`, or any normal memory operation. A browser may open only after an explicit `plugin install` or `plugin manage` invocation. `--no-browser`, non-interactive execution, and `--json` print the URL instead.
+
+### Machine-readable output
+
+Every bootstrap command supports `--json` and emits one JSON document with a versioned envelope:
+
+```json
+{
+  "schemaVersion": 1,
+  "command": "plugin.install",
+  "ok": true,
+  "result": "installed",
+  "bundle": {
+    "id": "agentmemory.pro",
+    "previousVersion": null,
+    "version": "1.0.0",
+    "channel": "stable"
+  },
+  "entitlement": {
+    "plan": "pro",
+    "state": "active",
+    "expiresAt": "2027-08-16T00:00:00Z",
+    "offlineUntil": "2026-09-15T00:00:00Z"
+  },
+  "nextAction": null
+}
+```
+
+`result` is one of `not_installed`, `installed`, `upgraded`, `current`, `update_available`, `uninstalled`, `auth_required`, `renewal_required`, or `unavailable`. Failures use `ok: false` plus a stable `error.code` and redacted `error.message`. Output must never contain access tokens, download credentials, signed entitlement contents, local memory paths, or URLs containing bearer credentials.
+
+## Authentication and purchase flow
+
+1. The bootstrap inspects the local install receipt and signed entitlement without loading plugin code.
+2. If no usable entitlement or account credential exists, it requests a short-lived device authorization.
+3. The CLI prints a verification URL and user code and, for an interactive request, attempts to open the URL.
+4. The website authenticates the user and offers AgentMemory Pro or an Enterprise contact/organization path.
+5. Successful payment or organization assignment updates the server-side entitlement ledger.
+6. The CLI polls within the server-provided interval and deadline. On success, it receives a signed entitlement and a short-lived artifact grant.
+7. Installation continues in the same command without asking the user to copy a license key.
+
+Canceling, timing out, or failing payment leaves the machine unchanged. Authentication credentials are never accepted through command-line arguments. The first release should use an operating-system credential store when available and an explicit, permission-restricted fallback when it is not. Credential persistence and fallback behavior must be disclosed before launch.
+
+An Enterprise administrator may pre-provision an organization entitlement or managed installation policy. Enterprise automation must accept a license-file path or managed credential reference, not a raw secret on the command line.
+
+## Control-plane boundary
+
+Endpoint names are illustrative until the service is selected, but the protocol responsibilities are fixed:
+
+- create and poll a device authorization;
+- read the authenticated principal's effective entitlement;
+- fetch a signed release catalog;
+- mint a short-lived artifact download grant;
+- return the account-management URL;
+- support Enterprise organization assignment without consumer checkout.
+
+The bootstrap may send only:
+
+- a random installation identifier;
+- core version, plugin-host API version, platform, and architecture;
+- requested bundle ID, installed bundle version, and release channel;
+- a pseudonymous license or organization identifier;
+- protocol nonces and authentication material required for the request.
+
+It must never send memory contents, search queries, session contents, working-directory names, repository names, filesystem paths, qmd data, or plugin-derived metrics. Product telemetry is not part of this protocol.
+
+Production builds use an allowlisted HTTPS origin. Development endpoint overrides must be explicit, must not silently affect production builds, and must never weaken TLS verification.
+
+## Signed entitlement contract
+
+The server issues a signed, versioned entitlement containing the minimum claims needed for offline activation:
+
+```json
+{
+  "schemaVersion": 1,
+  "licenseId": "lic_pseudonymous_id",
+  "plan": "pro",
+  "features": ["session-intelligence", "web-console"],
+  "channel": "stable",
+  "issuedAt": "2026-08-16T00:00:00Z",
+  "refreshAfter": "2026-08-23T00:00:00Z",
+  "expiresAt": "2027-08-16T00:00:00Z",
+  "offlineUntil": "2026-09-15T00:00:00Z"
+}
+```
+
+It contains no name, email address, billing details, memory identifier, or filesystem information. `active`, `grace`, and `expired` are derived locally from verified timestamps and policy; they are not trusted from an unsigned local setting. Enterprise may satisfy all `pro` feature requirements while adding organization-scoped policy claims.
+
+The exact signed-envelope format, key custody, rotation procedure, and grace duration remain launch decisions. Verification keys are pinned by the public core, support overlap during rotation, and never come from the downloaded artifact being verified.
+
+## Release catalog and artifact contract
+
+The signed catalog selects an artifact by bundle ID, channel, core compatibility, plugin-host API compatibility, platform, and architecture. Each release describes at least:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "agentmemory.pro",
+  "version": "1.0.0",
+  "channel": "stable",
+  "core": ">=0.5.0 <1.0.0",
+  "pluginApi": 1,
+  "platform": "any",
+  "architecture": "any",
+  "sha256": "hex-encoded archive digest",
+  "size": 123456,
+  "entrypoint": "bundle/index.js",
+  "plugins": ["agentmemory.session-intelligence", "agentmemory.web-console"]
+}
+```
+
+The archive contains compiled commercial code, plugin manifests, contributed skills, commercial license text, preserved public-core notices, and third-party notices. It must not depend on npm lifecycle scripts, download dependencies during activation, or include real credentials. Archive paths, symlinks, expanded size, file count, and permissions are validated before extraction.
+
+## Transactional installation
+
+The machine-wide user installation is independent of `AGENT_MEMORY_DIR`, which selects a memory store. The default install root is `~/.agent-memory/system/plugins`; the dedicated non-secret `AGENT_MEMORY_PLUGIN_DIR` setting may override it for managed deployment and tests.
+
+An install or upgrade must:
+
+1. acquire a bounded installation lock;
+2. inspect the current receipt without executing plugin code;
+3. authenticate and resolve a compatible signed catalog entry;
+4. download to a newly created staging directory;
+5. verify catalog signature, artifact digest, archive limits, manifest, and compatibility;
+6. extract without path traversal or link traversal;
+7. load only the declared entry point for a bounded health check;
+8. atomically switch the active-version receipt;
+9. install declared skills and hooks only after successful activation;
+10. preserve the previous known-good version for rollback and remove abandoned staging data.
+
+Failure before activation leaves the previous version active. Failure immediately after activation restores the previous receipt. Concurrent installers do not interleave. The core never invokes package-manager lifecycle scripts or elevates privileges.
+
+Uninstall removes executable versions, the active receipt, contributed skills, and managed hooks. It does not remove `MEMORY.md`, daily logs, topics, scratchpad items, source session logs, plugin-created review data, or billing state. A separate future purge command would require explicit scope and confirmation.
+
+## Plugin host API v1
+
+The implementation will expose equivalent TypeScript types from the public package. This document is authoritative until those types ship:
+
+```ts
+export interface AgentMemoryPluginBundleV1 {
+	apiVersion: 1;
+	manifest: AgentMemoryBundleManifestV1;
+	plugins: readonly AgentMemoryPluginV1[];
+}
+
+export interface AgentMemoryPluginV1 {
+	manifest: AgentMemoryPluginManifestV1;
+	activate(host: AgentMemoryPluginHostV1): Promise<void>;
+	healthCheck(host: AgentMemoryPluginHostV1): Promise<{ ok: boolean; message?: string }>;
+}
+
+export interface AgentMemoryPluginHostV1 {
+	apiVersion: 1;
+	coreVersion: string;
+	registerCommand(command: PluginCommandV1): void;
+	registerSessionStartHook(hook: PluginSessionStartHookV1): void;
+	getStateDirectory(): string;
+	getEntitlement(): Promise<PluginEntitlementStatusV1>;
+	redactSecrets(value: string): string;
+	writeMemory(request: PluginMemoryWriteV1): Promise<PluginMemoryWriteResultV1>;
+	correctMemory(request: PluginMemoryCorrectionV1): Promise<PluginMemoryCorrectionResultV1>;
+	scheduleSearchRefresh(reason: string): void;
+}
+```
+
+The final exported contract must define the referenced request, result, command, hook, manifest, entitlement-status, permission, cancellation, and structured-error types. The loader validates every bundled plugin first, then creates a host instance scoped to that plugin's manifest. Host methods enforce its declared permissions. Plugins receive only derived entitlement state and time bounds, never raw signed claims or commercial credentials. They also never receive unrestricted core internals, arbitrary command execution, or ambient access to another plugin's state directory.
+
+Activation order is: verify artifact, verify entitlement, validate every manifest, resolve required dependencies, create permission-scoped host adapters, activate plugins, then register commands and hooks. Registered-but-unavailable dependencies do not satisfy `requires`.
+
+## Runtime entitlement behavior
+
+Every paid command, compatibility alias, hook, worker start, Web Console launch, and paid API route checks entitlement before activation. A long-running process rechecks at a bounded interval and responds safely to expiration. Browser-session authorization remains separate from commercial entitlement and never contains subscription credentials.
+
+When entitlement is in grace, paid capabilities continue locally and status explains when grace ends. When expired or invalid, new paid work fails closed with a renewal action; core memory remains available and no user data is deleted.
+
+## Compatibility and updates
+
+- Core and bundle versions follow semantic versioning.
+- The integer plugin-host API changes only for incompatible host-contract revisions.
+- A bundle declares both a core range and a host API version.
+- `plugin install` and `plugin update` choose the newest compatible release in the selected channel, not merely the newest release.
+- Updates occur only after an explicit install/update command or a future separately approved policy. No background auto-download is part of v1.
+- A newer incompatible release is reported without replacing the current working version.
+
+## Security and release gates
+
+Before launch, automated tests must demonstrate:
+
+- public `myagentmemory` package contents contain no paid code, SPA assets, private source maps, commercial credentials, or private release configuration;
+- missing, active, grace, expired, malformed, wrong-audience, and wrong-signature entitlements fail as specified;
+- absent, current, outdated, interrupted, corrupt, incompatible, and concurrent installation paths are deterministic and recoverable;
+- archive traversal, symlink traversal, oversized archives, digest mismatch, unknown signing keys, and unauthorized commands fail closed;
+- all paid entry points enforce entitlement while every core memory operation remains available;
+- `--json` remains parseable and secret-free and non-interactive use never opens a browser;
+- install, update, rollback, and uninstall work on supported macOS, Linux, and Windows environments.
+
+## Deferred work
+
+This contract does not approve:
+
+- arbitrary third-party plugin loading or a public marketplace;
+- remote execution of plugin code;
+- silent or package-postinstall browser prompts;
+- background commercial telemetry or transmission of memory data;
+- pricing, seat counts, device limits, or a billing vendor;
+- Enterprise readiness claims before SSO, policy, retention, audit, DLP, and managed deployment are implemented and tested.

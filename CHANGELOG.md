@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Versioned public plugin-host types and manifest validation through the `myagentmemory/plugin-host` export
+- Fail-closed official-plugin bootstrap commands, signed Ed25519 release verification, bounded package validation, atomic install/upgrade/rollback, explicit uninstall, and deterministic regression coverage
+
+### Changed
+- `agent-memory init`, `status`, and help now expose non-blocking optional-plugin discovery without affecting core memory behavior or opening a browser
+
 ### Fixed
 - Made the Homebrew update workflow match formula fields regardless of indentation and fail when expected fields are missing
 
