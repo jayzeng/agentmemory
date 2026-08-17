@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted design on 2026-08-16. The public core now implements host types, temporary loopback activation, live catalog and artifact retrieval, Ed25519 release verification, bounded package validation, transactional install, bundle health checks, and paid-command dispatch. The temporary beta grants unlimited local use after email entry; durable authentication, payment, renewal, and account management remain deferred.
+Accepted design on 2026-08-16 and revised on 2026-08-17. The public core implements host types, loopback email activation, live catalog and artifact retrieval, Ed25519 release verification, bounded package validation, transactional install, bundle health checks, paid-command dispatch, and SessionStart hook dispatch. The free plan grants a configurable number of agent sessions per normalized email and UTC day; durable account authentication, payment, renewal, and account management remain deferred.
 
 The public `agentmemory` repository and `myagentmemory` npm package remain the free, MIT-licensed core. The public bootstrap client and host contracts are also MIT-licensed. Official commercial implementations and browser assets are built and distributed separately from the private `agent-memory-plugin` workspace under their own terms. Pricing, the billing provider, device limits, offline-grace duration, and Enterprise contract terms are intentionally not decided here. The temporary beta currently uses allowlisted `*.agentmemory.paperpilot.me` service origins; changing those origins is a public-client release change.
 
@@ -23,11 +23,11 @@ agent-memory plugin install
 | Plugin absent | Active or grace | Install the compatible signed bundle |
 | Plugin older than the selected release | Active or grace | Upgrade atomically |
 | Plugin current | Active or grace | Report that it is current |
-| Any | Missing | Start temporary loopback email activation in an interactive terminal |
+| Any | Missing | Start loopback email activation in an interactive terminal |
 | Any | Expired | Direct the user to renewal; leave core available |
 | Incompatible bundle | Any | Leave the current version untouched and explain the required core version |
 
-An absent plugin cannot activate itself. The public bootstrap performs temporary local activation, obtains a short-lived artifact grant, and verifies the release and artifact. After installation, the public host validates the local activation record and checks the required capability before every paid command. Signed long-lived entitlements will replace this temporary record when authentication and payment ship.
+An absent plugin cannot activate itself. The public bootstrap collects an email locally, obtains a server-issued usage credential and short-lived artifact grant, and verifies the release and artifact. The credential is persisted only after the service accepts activation. After installation, the public host reconstructs the free account-metered capability policy in core code and checks required capabilities before commands and hooks. Signed long-lived entitlements can extend this credential when authentication and payment ship.
 
 ## Ownership boundary
 
@@ -81,7 +81,7 @@ agent-memory plugin manage [--no-browser]
 - `status` is read-only. It reports the installed bundle, selected channel, compatibility, entitlement state, and update availability.
 - `install` authenticates when necessary, then installs, upgrades, or reports current state.
 - `update` requires an existing installation and never starts a new purchase implicitly.
-- `uninstall` removes executable plugin material and the active receipt. It preserves core memory, plugin state, and the temporary activation record.
+- `uninstall` removes executable plugin material and the active receipt. It preserves core memory, plugin state, and the permission-restricted activation credential.
 - `manage` remains unavailable until authenticated account and billing management exists.
 
 Installed plugins contribute top-level commands such as `recall`, `learn`, `worker`, and `web`. Bootstrap command names are reserved by the core and cannot be replaced by a plugin.
@@ -133,16 +133,17 @@ Every bootstrap command supports `--json` and emits one JSON document with a ver
 
 `result` is one of `not_installed`, `installed`, `upgraded`, `current`, `update_available`, `uninstalled`, `auth_required`, `renewal_required`, or `unavailable`. Failures use `ok: false` plus a stable `error.code` and redacted `error.message`. Output must never contain access tokens, download credentials, signed entitlement contents, local memory paths, or URLs containing bearer credentials.
 
-## Temporary activation flow
+## Free activation flow
 
 1. `agent-memory plugin install` starts an HTTP server bound to `127.0.0.1` on an ephemeral port.
 2. The CLI prints and opens a nonce-bearing local URL. The page accepts one email address with bounded input, an exact Host and nonce path, same-origin browser request validation, restrictive response headers, and a five-minute deadline.
-3. Submission writes a mode-0600 record under the plugin install root and returns a completion page.
-4. The waiting CLI sends the email plus core, installed-bundle, platform, architecture, release-channel, and consent-version fields to the private control plane. Its activation database stores none of the user's memory, sessions, queries, repository paths, IP address, or user-agent string, and deletes records after 365 days without activation.
-5. The CLI requests temporary unlimited capabilities and a short-lived object-bound artifact grant, verifies the Ed25519-signed release plus package digest and limits, imports it for health checks, then atomically activates the receipt.
-6. Installed paid commands reload the local entitlement and enforce their declared capability before execution.
+3. Submission returns a completion page but does not create a local credential yet.
+4. The waiting CLI sends the email plus core, installed-bundle, platform, architecture, release-channel, and consent-version fields to the private control plane. Its activation database stores none of the user's memory, session content, queries, repository paths, raw agent session identifiers, IP address, or user-agent string.
+5. The service normalizes the email, stores only a hash of a random usage credential, and returns the credential, a free account-metered entitlement, and a short-lived object-bound artifact grant. Only then does the CLI atomically write a mode-0600 activation record.
+6. The CLI verifies the Ed25519-signed release plus package digest and limits, imports it for health checks, and atomically activates the receipt.
+7. Each paid SessionStart hook reserves one opaque operation against the email's UTC-day allowance, commits after useful hook work, and releases on failure. Exhaustion skips paid hook work without affecting public-core context.
 
-This is explicitly temporary. Authentication, payment, renewal, account management, server-side entitlement state, and durable credential storage are not implemented yet.
+Email ownership is not verified in this free flow. Authentication, payment, renewal, account management, and signed paid entitlements are not implemented yet.
 
 ## Future authentication and purchase flow
 
@@ -160,13 +161,14 @@ An Enterprise administrator may pre-provision an organization entitlement or man
 
 ## Control-plane boundary
 
-The temporary service exposes:
+The service exposes:
 
-- `POST /v1/plugin/access` for unlimited temporary capability grants plus a short-lived artifact grant;
+- `POST /v1/plugin/access` for a free account-metered entitlement, a usage credential, and a short-lived artifact grant;
+- `POST /v1/plugin/sessions/reserve|commit|release` for atomic daily allowance enforcement;
 - `GET /v1/plugin/releases` for an Ed25519-signed release selected from the private R2 catalog;
 - `GET|HEAD /v1/artifacts/download` for the exact content-addressed object authorized by the bearer grant.
 
-The temporary access request contains the submitted email plus the bounded core, bundle, platform, architecture, release-channel, and consent-version fields described above. Its application payload contains no memory content, search query, session content, path, repository name, qmd data, IP address, user-agent string, or plugin-derived metric; the activation database stores neither IP addresses nor user-agent strings. Future authenticated service responsibilities include:
+The access request contains the submitted email plus the bounded core, bundle, platform, architecture, release-channel, and consent-version fields described above. Session metering sends only a random operation ID and bearer credential; D1 associates those values with a normalized email and UTC-day counter. Application payloads contain no memory content, search query, session content, path, repository name, raw agent session identifier, qmd data, IP address, or user-agent string. The activation database stores neither IP addresses nor user-agent strings. Future authenticated service responsibilities include:
 
 - create and poll a device authorization;
 - read the authenticated principal's effective entitlement;
@@ -181,9 +183,9 @@ The bootstrap may send only:
 - core version, plugin-host API version, platform, and architecture;
 - requested bundle ID, installed bundle version, and release channel;
 - a pseudonymous license or organization identifier;
-- protocol nonces and authentication material required for the request.
+- protocol nonces, opaque quota operation IDs, and authentication material required for the request.
 
-It must never send memory contents, search queries, session contents, working-directory names, repository names, filesystem paths, qmd data, or plugin-derived metrics. Product telemetry is not part of this protocol.
+It must never send memory contents, search queries, session contents, raw agent session identifiers, working-directory names, repository names, filesystem paths, or qmd data. The bounded allowance counter is authorization state, not general product telemetry.
 
 Production builds use an allowlisted HTTPS origin. Development endpoint overrides must be explicit, must not silently affect production builds, and must never weaken TLS verification.
 

@@ -17,7 +17,7 @@ export type PluginPlanV1 = "free" | "trial" | "pro" | "team" | "enterprise";
 export interface PluginCapabilityQuotaV1 {
 	limit: number;
 	window: "day";
-	scope: "device";
+	scope: "device" | "account";
 }
 
 export interface PluginCapabilityGrantV1 {
@@ -218,7 +218,7 @@ export function validatePluginEntitlementStatusV1(
 		if (grant.quota) {
 			if (!Number.isInteger(grant.quota.limit) || grant.quota.limit <= 0)
 				throw new Error(`Capability ${capability} has an invalid quota limit`);
-			if (grant.quota.window !== "day" || grant.quota.scope !== "device")
+			if (grant.quota.window !== "day" || !["device", "account"].includes(grant.quota.scope))
 				throw new Error(`Capability ${capability} has an invalid quota policy`);
 		}
 	}
