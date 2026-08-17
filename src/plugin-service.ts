@@ -94,13 +94,104 @@ function securityHeaders(contentType: string): Record<string, string> {
 	};
 }
 
+const ACTIVATION_PAGE_STYLES = `
+:root{color-scheme:light;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f4f7fb;font-synthesis:none}
+*{box-sizing:border-box}
+body{min-height:100vh;margin:0;padding:2rem 1.25rem;display:grid;place-items:center;background:radial-gradient(circle at 12% 0%,#e8f0ff 0,transparent 38rem),radial-gradient(circle at 100% 100%,#eef2ff 0,transparent 32rem),#f7f9fc}
+main{width:min(100%,34rem)}
+.skip-link{position:fixed;z-index:1;top:1rem;left:1rem;padding:.65rem .8rem;border-radius:.55rem;background:#172033;color:#fff;font-weight:700;transform:translateY(-200%)}
+.skip-link:focus{transform:translateY(0)}
+.brand{display:flex;align-items:center;gap:.75rem;margin:0 0 1.25rem .25rem;color:#33415c;font-size:.875rem;font-weight:700;letter-spacing:.01em}
+.mark{width:2.25rem;height:2.25rem;display:grid;place-items:center;border-radius:.7rem;background:linear-gradient(145deg,#172033,#3159b8);color:#fff;box-shadow:0 .5rem 1.25rem rgba(35,65,130,.2);font-size:1.05rem;letter-spacing:-.08em}
+.card{padding:clamp(1.5rem,5vw,2.5rem);border:1px solid rgba(205,216,231,.9);border-radius:1.5rem;background:rgba(255,255,255,.94);box-shadow:0 1.5rem 4rem rgba(32,51,84,.12),0 .125rem .375rem rgba(32,51,84,.06);backdrop-filter:blur(1rem)}
+.eyebrow{display:inline-flex;align-items:center;gap:.45rem;margin:0 0 1rem;padding:.42rem .7rem;border:1px solid #d9e4f7;border-radius:999px;background:#f3f7ff;color:#315798;font-size:.78rem;font-weight:750;letter-spacing:.03em;text-transform:uppercase}
+.eyebrow::before{content:"";width:.45rem;height:.45rem;border-radius:50%;background:#2b67d1;box-shadow:0 0 0 .22rem #dbe8ff}
+h1{margin:0;color:#141d2c;font-size:clamp(2rem,7vw,2.75rem);line-height:1.06;letter-spacing:-.045em;text-wrap:balance}
+.intro{margin:.9rem 0 1.75rem;color:#526176;font-size:1.05rem;line-height:1.55}
+form{display:grid;gap:.75rem}
+label{color:#29364a;font-size:.9rem;font-weight:700}
+input{width:100%;min-height:3.25rem;padding:.8rem 3.5rem .8rem 1rem;border:1px solid #bcc8d8;border-radius:.8rem;background:#fff;color:#172033;font:inherit;box-shadow:inset 0 1px 2px rgba(24,39,65,.04)}
+input::placeholder{color:#8a96a7}
+input:hover{border-color:#92a2b8}
+input:focus-visible{outline:0;border-color:#2b67d1;box-shadow:0 0 0 .25rem rgba(43,103,209,.15)}
+button{min-height:3.35rem;margin-top:.25rem;padding:.85rem 1rem;border:1px solid #172033;border-radius:.8rem;background:linear-gradient(180deg,#24334a,#172033);color:#fff;font:inherit;font-weight:750;cursor:pointer;box-shadow:0 .55rem 1.2rem rgba(23,32,51,.18);touch-action:manipulation;transition:transform .15s}
+button:hover{background:linear-gradient(180deg,#2d405c,#1d2a40);box-shadow:0 .7rem 1.4rem rgba(23,32,51,.23);transform:translateY(-1px)}
+button:active{transform:translateY(0)}
+button:focus-visible,summary:focus-visible{outline:.2rem solid rgba(43,103,209,.32);outline-offset:.18rem}
+.terminal-note{margin:.8rem 0 0;color:#6a7789;font-size:.85rem;text-align:center}
+.error{margin:0 0 1rem;padding:.8rem 1rem;border:1px solid #efb8bd;border-radius:.75rem;background:#fff3f4;color:#982631;font-size:.9rem;line-height:1.45}
+details{margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid #e2e8f0;color:#5b687a;font-size:.85rem;line-height:1.55}
+summary{color:#46566d;font-weight:700;cursor:pointer;list-style-position:outside;touch-action:manipulation}
+details p{margin:.8rem 0 0}
+.never-sent{padding:.75rem .85rem;border-radius:.65rem;background:#f5f7fa;color:#536176}
+.success{display:grid;place-items:center;width:3.5rem;height:3.5rem;margin-bottom:1.4rem;border-radius:1rem;background:#eaf7ef;color:#197542;font-size:1.65rem;font-weight:800;box-shadow:inset 0 0 0 1px #c9ead6}
+.completion .intro{margin-bottom:0}
+@media (max-width:30rem){body{padding:1rem}.brand{margin-left:.1rem}.card{border-radius:1.15rem}h1{font-size:2rem}}
+@media (prefers-reduced-motion:reduce){input,button{transition:none}}
+`;
+
 function activationPage(action: string, error?: string): string {
-	const errorHtml = error ? `<p class="error">${error}</p>` : "";
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Activate AgentMemory</title><style>body{font:16px system-ui;max-width:34rem;margin:10vh auto;padding:0 1.5rem;color:#18212b}form{display:grid;gap:1rem}input,button{font:inherit;padding:.8rem;border-radius:.5rem;border:1px solid #aab4bf}button{background:#18212b;color:#fff;cursor:pointer}.muted{color:#586574}.error{color:#a21d24}</style></head><body><h1>Activate AgentMemory</h1><p>Enter an email address to enable the free daily agent-session allowance on this device.</p>${errorHtml}<form method="post" action="${action}"><label>Email <input type="email" name="email" autocomplete="email" maxlength="254" required autofocus></label><button type="submit">Activate and return to terminal</button></form><p class="muted">The AgentMemory CLI sends your email plus core, bundle, platform, architecture, and release-channel metadata to the private activation service. D1 stores a daily count of opaque SessionStart operations for your normalized email. The request never includes memory, session content, queries, repository paths, raw agent session identifiers, IP addresses, or user-agent strings. Activation records expire after 365 days without use.</p></body></html>`;
+	const errorHtml = error ? `<p class="error" id="activation-error" role="alert">${error}</p>` : "";
+	const describedBy = error ? "activation-error terminal-note" : "terminal-note";
+	const autofocus = error ? " autofocus" : "";
+	return `<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="theme-color" content="#f4f7fb">
+	<title>Activate AgentMemory</title>
+	<style>${ACTIVATION_PAGE_STYLES}</style>
+</head>
+<body>
+	<a class="skip-link" href="#activation">Skip to Activation</a>
+	<main id="activation">
+		<div class="brand" translate="no"><span class="mark" aria-hidden="true">AM</span><span>AgentMemory</span></div>
+		<section class="card" aria-labelledby="activation-title">
+			<p class="eyebrow">Free daily allowance</p>
+			<h1 id="activation-title">Activate This Device</h1>
+			<p class="intro">Use your email to enable AgentMemory Pro for your local agent sessions.</p>
+			<form method="post" action="${action}">
+				<label for="email">Email address</label>
+				${errorHtml}
+				<input id="email" type="email" name="email" autocomplete="email" inputmode="email" spellcheck="false" placeholder="you@example.com…" maxlength="254" required${autofocus} aria-describedby="${describedBy}">
+				<button type="submit">Activate AgentMemory</button>
+			</form>
+			<p class="terminal-note" id="terminal-note">Your terminal will finish setup after activation.</p>
+			<details>
+				<summary>What’s shared during activation</summary>
+				<p>Your email identifies your free daily allowance. The CLI also sends core and bundle versions, platform, architecture, and release channel. The service stores a daily count of opaque session-start operations. Activation records expire after 365 days without use.</p>
+				<p class="never-sent"><strong>Never sent:</strong> The request never includes memory, session content, queries, repository paths, raw agent session identifiers, IP addresses, or user-agent strings.</p>
+			</details>
+		</section>
+	</main>
+</body>
+</html>`;
 }
 
 function completionPage(): string {
-	return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>AgentMemory activated</title></head><body><h1>Activation complete</h1><p>You can close this tab and return to the terminal.</p></body></html>';
+	return `<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="theme-color" content="#f4f7fb">
+	<title>AgentMemory activated</title>
+	<style>${ACTIVATION_PAGE_STYLES}</style>
+</head>
+<body>
+	<a class="skip-link" href="#completion">Skip to Activation Status</a>
+	<main id="completion">
+		<div class="brand" translate="no"><span class="mark" aria-hidden="true">AM</span><span>AgentMemory</span></div>
+		<section class="card completion" aria-labelledby="completion-title">
+			<div class="success" aria-hidden="true">✓</div>
+			<p class="eyebrow">Device activated</p>
+			<h1 id="completion-title">You’re All Set</h1>
+			<p class="intro">Return to your terminal to finish installing AgentMemory Pro. You can close this tab.</p>
+		</section>
+	</main>
+</body>
+</html>`;
 }
 
 function send(response: ServerResponse, status: number, body: string, contentType = "text/html; charset=utf-8"): void {

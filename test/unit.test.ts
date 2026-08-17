@@ -2311,10 +2311,16 @@ describe("temporary plugin activation and runtime", () => {
 			return true;
 		});
 		expect(page).toContain("Activate AgentMemory");
+		expect(page).toContain("Activate This Device");
+		expect(page).toContain("What’s shared during activation");
 		expect(page).toContain(
-			"sends your email plus core, bundle, platform, architecture, and release-channel metadata",
+			"The CLI also sends core and bundle versions, platform, architecture, and release channel",
 		);
-		expect(page).toContain("D1 stores a daily count of opaque SessionStart operations");
+		expect(page).toContain("Never sent:");
+		expect(page).toContain('autocomplete="email"');
+		expect(page).toContain('spellcheck="false"');
+		expect(page).toContain('href="#activation"');
+		expect(page).toContain("padding:.8rem 3.5rem .8rem 1rem");
 		expect(page).toContain(
 			"never includes memory, session content, queries, repository paths, raw agent session identifiers",
 		);
