@@ -24,7 +24,8 @@ All notable changes to this project will be documented in this file.
 - Sent an explicit, bounded Pro activation record to the private control plane with transparent browser disclosure; the payload excludes memory, sessions, queries, paths, IP addresses, and user-agent strings
 
 ### Fixed
-- Pin the npm release client to the tested 11.6.2 toolchain so package-portability verification remains stable before trusted publication
+- Pin the npm release client to the tested 11.6.2 toolchain so package-portability verification remains stable before publication
+- Normalize the CLI executable path so npm preserves the `agent-memory` binary during publication
 - Expose the real core memory directory to permission-checked first-party plugins so local interfaces do not confuse plugin operational state with user memory
 - Accepted same-origin loopback activation forms from browsers that omit `Origin` or serialize it as `null`, while preserving nonce/Host validation and rejecting cross-origin requests
 - Reload local entitlement state before every installed-plugin command and bound error responses from the plugin service

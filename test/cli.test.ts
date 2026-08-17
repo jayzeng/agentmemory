@@ -1115,7 +1115,7 @@ describe("npm package portability", () => {
 			version: string;
 			bin: Record<string, string>;
 		};
-		expect(packageJson.bin["agent-memory"]).toBe("./dist/cli.js");
+		expect(packageJson.bin["agent-memory"]).toBe("dist/cli.js");
 
 		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-npm-package-"));
 		try {
