@@ -73,6 +73,7 @@ import {
 	PluginBootstrapFailure,
 	type PluginBootstrapResultV1,
 } from "./plugin-bootstrap.js";
+import { InstalledPluginRuntimeV1 } from "./plugin-runtime.js";
 
 declare const __VERSION__: string;
 
@@ -183,6 +184,26 @@ function openExternalUrl(url: string): boolean {
 	}
 }
 
+function printProOverview(installed: boolean): void {
+	console.log("");
+	console.log("AgentMemory Pro includes:");
+	console.log("  Session Intelligence  Recall decisions and context across Pi, Codex, and Claude Code sessions.");
+	console.log("  Guided Learning       Turn repeated corrections into reviewable, reversible memory.");
+	console.log("  Local Web Console     Inspect memories, activity, health, and settings in your browser.");
+	console.log("");
+	console.log("Your session content stays on this device.");
+	console.log("");
+	if (installed) {
+		console.log("Try it:");
+		console.log('  agent-memory recall "what did we decide about authentication?"');
+		console.log("  agent-memory learn");
+		console.log("  agent-memory web");
+	} else {
+		console.log("Start your Pro beta:");
+		console.log("  agent-memory plugin install");
+	}
+}
+
 function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allowBrowser: boolean): void {
 	if (json) {
 		output(result, true);
@@ -191,18 +212,26 @@ function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allow
 			const state = plugin.available ? "available" : plugin.installed ? plugin.entitlement : "not installed";
 			console.log(`${plugin.name}: ${state}`);
 		}
-		if (result.result === "not_installed") console.log("\nInstall or activate: agent-memory plugin install");
+		printProOverview(Boolean(result.bundle));
 	} else {
 		const version = result.bundle?.version ? ` ${result.bundle.version}` : "";
+		let showOverview = false;
 		switch (result.result) {
 			case "installed":
 				console.log(`AgentMemory Pro${version} installed.`);
+				showOverview = true;
 				break;
 			case "upgraded":
 				console.log(`AgentMemory Pro upgraded to${version}.`);
+				showOverview = true;
 				break;
 			case "current":
-				console.log(result.bundle ? `AgentMemory Pro${version} is current.` : "AgentMemory Pro is not installed.");
+				console.log(
+					result.bundle
+						? `AgentMemory Pro${version} is installed and ready.`
+						: "AgentMemory Pro is not installed.",
+				);
+				showOverview = Boolean(result.bundle);
 				break;
 			case "update_available":
 				console.log(`AgentMemory Pro${version} has an update available.`);
@@ -215,7 +244,7 @@ function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allow
 				console.log("Run: agent-memory plugin install");
 				break;
 			case "auth_required":
-				console.log("Sign in and choose a plan to continue.");
+				console.log("Run this command in an interactive terminal to enter an email and activate temporary access.");
 				break;
 			case "renewal_required":
 				console.log("Renew AgentMemory Pro to continue using paid capabilities.");
@@ -223,6 +252,7 @@ function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allow
 			default:
 				console.log(result.error?.message ?? "AgentMemory Pro is currently unavailable.");
 		}
+		if (showOverview) printProOverview(true);
 	}
 
 	if (result.nextAction) {
@@ -969,9 +999,9 @@ Usage:
   agent-memory plugin uninstall --yes
   agent-memory plugin manage [--no-browser]
 
-The public core remains fully usable without AgentMemory Pro. Authentication and
-artifact downloads are unavailable until a production commercial service and
-release signing keys are configured.`);
+The public core remains fully usable without AgentMemory Pro. Interactive install
+opens a loopback website for temporary email activation and unlimited local use.
+Authentication and payment will be added later.`);
 }
 
 function pluginCommandFailure(command: string, error: unknown): PluginBootstrapResultV1 {
@@ -985,6 +1015,7 @@ function pluginCommandFailure(command: string, error: unknown): PluginBootstrapR
 			plan: null,
 			state: "missing",
 			features: [],
+			capabilities: {},
 		},
 		nextAction: null,
 		error: {
@@ -1014,8 +1045,8 @@ async function cmdPlugin(flags: Record<string, string | boolean>, positional: st
 		);
 		return;
 	}
-	const manager = createDefaultPluginBootstrap(VERSION);
 	const allowBrowser = !json && !hasFlag(flags, "no-browser") && Boolean(process.stdin.isTTY && process.stdout.isTTY);
+	const manager = createDefaultPluginBootstrap(VERSION);
 
 	let result: PluginBootstrapResultV1;
 	try {
@@ -1027,7 +1058,7 @@ async function cmdPlugin(flags: Record<string, string | boolean>, positional: st
 				result = await manager.status(channel);
 				break;
 			case "install":
-				result = await manager.install({ channel, allowAuthentication: true });
+				result = await manager.install({ channel, allowAuthentication: allowBrowser });
 				break;
 			case "update":
 				result = await manager.update({ channel, allowAuthentication: false });
@@ -1201,8 +1232,23 @@ async function main() {
 		case "plugin":
 			await cmdPlugin(flags, positional);
 			break;
-		default:
-			exitError(`Unknown command: ${command}. Run 'agent-memory help' for usage.`, json);
+		default: {
+			const controller = new AbortController();
+			const abort = () => controller.abort();
+			process.once("SIGINT", abort);
+			try {
+				const result = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).run(command, {
+					args: positional,
+					flags,
+					signal: controller.signal,
+				});
+				if (!result) exitError(`Unknown command: ${command}. Run 'agent-memory help' for usage.`, json);
+				if (!result.ok) exitError(result.error?.message ?? `Plugin command ${command} failed`, json);
+				output(result.data ?? { ok: true }, json);
+			} finally {
+				process.removeListener("SIGINT", abort);
+			}
+		}
 	}
 }
 
