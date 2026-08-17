@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.16] - 2026-08-17
+
+### Changed
+
 - Redesigned the loopback activation and completion pages with a focused responsive card layout, clearer activation copy, extension-safe email input spacing, accessible focus/error states, and progressive privacy disclosure.
 
 ## [0.4.15] - 2026-08-17
