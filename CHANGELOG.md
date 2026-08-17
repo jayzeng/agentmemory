@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.15] - 2026-08-17
+
+### Added
+- Account-scoped daily capability quotas and fail-closed SessionStart usage reservation, commit, and release contracts
+- Activation-v2 support for server-issued usage credentials and D1-backed free-session metering
+- Installed-plugin SessionStart hook dispatch while preserving public-core context when paid work is unavailable or exhausted
+
+### Changed
+- Replace temporary unlimited email activation with a configurable free daily agent-session allowance keyed by normalized email
+- Persist an activation credential only after the control plane accepts activation; reconstruct the free account-metered capability policy in trusted core code on every load
+- Disclose the bounded D1 usage count and opaque SessionStart operation IDs on the activation page
+
+### Fixed
+- Ignore legacy or malformed local activation records instead of treating them as active entitlements
+- Release a reserved free session when plugin SessionStart work fails and keep duplicate server operations idempotent
+
 ## [0.4.14] - 2026-08-17
 
 ### Added

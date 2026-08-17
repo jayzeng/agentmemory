@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,6 +11,7 @@ import {
 	PluginBootstrapFailure,
 	type PluginInstallReceiptV1,
 	type PluginInstallStoreV1,
+	type PluginSessionUsageDecisionV1,
 	type SignedPluginReleaseV1,
 } from "./plugin-bootstrap.js";
 import {
@@ -170,6 +172,34 @@ export class InstalledPluginRuntimeV1 {
 				},
 			};
 		return registered.command.run(context);
+	}
+
+	async runSessionStart(
+		context: Parameters<PluginSessionStartHookV1["run"]>[0],
+	): Promise<PluginSessionUsageDecisionV1 | null> {
+		if (!(await this.load()) || this.hooks.length === 0) return null;
+		const entitlement = await this.refreshEntitlement();
+		const eligible = this.hooks.filter((hook) => isPluginCapabilityEnabled(entitlement, hook.requiredCapability));
+		if (eligible.length === 0) return null;
+		const metered = eligible.some(
+			(hook) => entitlement.capabilities[hook.requiredCapability]?.quota?.scope === "account",
+		);
+		if (!metered) {
+			for (const hook of eligible) await hook.run(context);
+			return null;
+		}
+		if (!this.backend.reserveSession || !this.backend.commitSession || !this.backend.releaseSession)
+			throw new PluginBootstrapFailure("session_usage_unavailable", "Account session metering is unavailable");
+		const operationId = randomUUID();
+		const reservation = await this.backend.reserveSession(operationId);
+		if (!reservation.allowed) return reservation;
+		try {
+			for (const hook of eligible) await hook.run(context);
+			return await this.backend.commitSession(operationId);
+		} catch (error) {
+			await this.backend.releaseSession(operationId);
+			throw error;
+		}
 	}
 
 	private createHost(manifest: AgentMemoryPluginManifestV1): AgentMemoryPluginHostV1 {

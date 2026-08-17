@@ -1925,6 +1925,8 @@ class FakePluginBackend implements PluginBootstrapBackendV1 {
 	releases: SignedPluginReleaseV1[] = [];
 	artifacts = new Map<string, Uint8Array>();
 	downloads = 0;
+	sessionActions: Array<{ action: "reserve" | "commit" | "release"; operationId: string }> = [];
+	allowSession = true;
 	managementAction: PluginNextActionV1 | null = {
 		kind: "manage",
 		url: "https://account.example.test/agentmemory",
@@ -1952,6 +1954,45 @@ class FakePluginBackend implements PluginBootstrapBackendV1 {
 		const artifact = this.artifacts.get(request.release.packageSha256);
 		if (!artifact) throw new Error("missing test artifact");
 		return artifact.slice();
+	}
+
+	async reserveSession(operationId: string) {
+		this.sessionActions.push({ action: "reserve", operationId });
+		return {
+			allowed: this.allowSession,
+			state: this.allowSession ? ("reserved" as const) : ("exhausted" as const),
+			limit: 3,
+			used: this.allowSession ? 1 : 3,
+			remaining: this.allowSession ? 2 : 0,
+			resetAt: "2026-08-18T00:00:00.000Z",
+			idempotent: false,
+		};
+	}
+
+	async commitSession(operationId: string) {
+		this.sessionActions.push({ action: "commit", operationId });
+		return {
+			allowed: true,
+			state: "committed" as const,
+			limit: 3,
+			used: 1,
+			remaining: 2,
+			resetAt: "2026-08-18T00:00:00.000Z",
+			idempotent: false,
+		};
+	}
+
+	async releaseSession(operationId: string) {
+		this.sessionActions.push({ action: "release", operationId });
+		return {
+			allowed: false,
+			state: "released" as const,
+			limit: 3,
+			used: 0,
+			remaining: 3,
+			resetAt: "2026-08-18T00:00:00.000Z",
+			idempotent: false,
+		};
 	}
 
 	async getManagementAction(): Promise<PluginNextActionV1 | null> {
@@ -2269,12 +2310,15 @@ describe("temporary plugin activation and runtime", () => {
 			})();
 			return true;
 		});
-		expect(page).toContain("Activate AgentMemory Pro");
+		expect(page).toContain("Activate AgentMemory");
 		expect(page).toContain(
 			"sends your email plus core, bundle, platform, architecture, and release-channel metadata",
 		);
-		expect(page).toContain("never includes memory, session content, queries, repository paths, IP addresses");
-		expect(page).toContain("expires after 365 days without activation");
+		expect(page).toContain("D1 stores a daily count of opaque SessionStart operations");
+		expect(page).toContain(
+			"never includes memory, session content, queries, repository paths, raw agent session identifiers",
+		);
+		expect(page).toContain("expire after 365 days without use");
 		expect(email).toBe("beta@example.invalid");
 	});
 
@@ -2342,29 +2386,55 @@ describe("temporary plugin activation and runtime", () => {
 		expect(email).toBe("beta@example.invalid");
 	});
 
-	test("persists temporary activation locally and returns unlimited access", async () => {
+	test("persists a metered free activation only after the service grants access", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-activation-"));
 		try {
 			const entitlement: PluginEntitlementStatusV1 = {
-				plan: "pro",
+				plan: "free",
 				state: "active",
 				features: ["session-intelligence", "web-console"],
-				capabilities: { learning: { enabled: true }, "web-console": { enabled: true } },
+				capabilities: {
+					learning: { enabled: true },
+					"session-worker": { enabled: true, quota: { limit: 3, window: "day", scope: "account" } },
+					"web-console": { enabled: true },
+				},
 			};
 			let activations = 0;
 			let accessRequest: Record<string, unknown> | null = null;
 			const backend = new TemporaryPluginBackend({
 				root,
-				coreVersion: "0.4.14",
+				coreVersion: "0.4.15",
 				activate: async () => {
 					activations++;
 					return "beta@example.invalid";
 				},
-				fetch: (async (_input, init) => {
+				fetch: (async (input, init) => {
+					if (String(input).includes("/v1/plugin/sessions/"))
+						return new Response(
+							JSON.stringify({
+								decision: {
+									allowed: true,
+									state: "reserved",
+									limit: 3,
+									used: 1,
+									remaining: 2,
+									resetAt: "2026-08-18T00:00:00.000Z",
+									idempotent: false,
+								},
+							}),
+							{ headers: { "Content-Type": "application/json" } },
+						);
 					accessRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
-					return new Response(JSON.stringify({ entitlement, artifactGrant: "grant" }), {
-						headers: { "Content-Type": "application/json" },
-					});
+					return new Response(
+						JSON.stringify({
+							entitlement,
+							artifactGrant: "grant",
+							usageCredential: "am_activation_abcdefghijklmnopqrstuvwxyz0123456789ABCD",
+						}),
+						{
+							headers: { "Content-Type": "application/json" },
+						},
+					);
 				}) as typeof fetch,
 			});
 			const access = await backend.resolveAccess({
@@ -2383,12 +2453,13 @@ describe("temporary plugin activation and runtime", () => {
 				email: "beta@example.invalid",
 				bundleId: OFFICIAL_BUNDLE_ID,
 				installedVersion: null,
-				coreVersion: "0.4.14",
+				coreVersion: "0.4.15",
 				channel: "stable",
 				platform: process.platform,
 				architecture: process.arch,
-				consentVersion: "activation-v1",
+				consentVersion: "activation-v2",
 			});
+			expect(await backend.reserveSession("session-1")).toMatchObject({ allowed: true, limit: 3, remaining: 2 });
 			if (process.platform !== "win32") {
 				fs.chmodSync(record, 0o644);
 				expect((await backend.getLocalEntitlement()).state).toBe("missing");
@@ -2418,6 +2489,7 @@ describe("temporary plugin activation and runtime", () => {
 					allowAuthentication: true,
 				}),
 			).rejects.toMatchObject({ code: "service_response_too_large" });
+			expect(fs.existsSync(path.join(root, "credentials", "temporary-access.json"))).toBe(false);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
@@ -2455,6 +2527,51 @@ describe("temporary plugin activation and runtime", () => {
 			expect(await runtime.run("runtime-ping", context)).toEqual({ ok: true, data: { args: ["one"] } });
 			backend.entitlement.capabilities.learning.enabled = false;
 			expect((await runtime.run("runtime-ping", context))?.error?.code).toBe("plugin_capability_denied");
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("meters account-scoped SessionStart hooks and skips paid work when the daily allowance is exhausted", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-hook-"));
+		try {
+			const manifest: AgentMemoryBundleManifestV1 = {
+				...testBundleManifest("1.0.0"),
+				plugins: ["agentmemory.runtime-test"],
+			};
+			const source = Buffer.from(
+				`const manifest=${JSON.stringify(manifest)};export default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.runtime-test",name:"Runtime Test",version:"1.0.0",description:"Runtime test",engine:">=0.4.0",entitlement:"commercial",commands:[],permissions:[],capabilities:["session-worker"]},async activate(host){host.registerSessionStartHook({name:"runtime-start",requiredCapability:"session-worker",async run(){}})},async healthCheck(){return {ok:true}}}]};\n`,
+			);
+			const artifact = encodePluginPackage({
+				schemaVersion: 1,
+				manifest,
+				files: [{ path: manifest.entrypoint, sha256: sha256(source), contentBase64: source.toString("base64") }],
+			});
+			const release: SignedPluginReleaseV1 = {
+				schemaVersion: 1,
+				manifest,
+				platform: "any",
+				architecture: "any",
+				packageSha256: sha256(artifact),
+				size: artifact.byteLength,
+				signature: { algorithm: "ed25519", keyId: "test", value: Buffer.alloc(64).toString("base64") },
+			};
+			const store = new FilePluginInstallStore(root);
+			await store.install(artifact, release);
+			const backend = new FakePluginBackend();
+			backend.entitlement.capabilities["session-worker"] = {
+				enabled: true,
+				quota: { limit: 3, window: "day", scope: "account" },
+			};
+			const runtime = new InstalledPluginRuntimeV1({ coreVersion: "0.4.15", store, backend });
+			const context = { host: "codex", cwd: "/tmp/project", signal: new AbortController().signal };
+			expect(await runtime.runSessionStart(context)).toMatchObject({ allowed: true, state: "committed" });
+			expect(backend.sessionActions.map((item) => item.action)).toEqual(["reserve", "commit"]);
+			expect(backend.sessionActions[0].operationId).toBe(backend.sessionActions[1].operationId);
+
+			backend.allowSession = false;
+			expect(await runtime.runSessionStart(context)).toMatchObject({ allowed: false, state: "exhausted" });
+			expect(backend.sessionActions.map((item) => item.action)).toEqual(["reserve", "commit", "reserve"]);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}

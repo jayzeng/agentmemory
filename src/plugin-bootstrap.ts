@@ -39,6 +39,16 @@ export interface PluginNextActionV1 {
 	message?: string;
 }
 
+export interface PluginSessionUsageDecisionV1 {
+	allowed: boolean;
+	state: "reserved" | "committed" | "released" | "exhausted" | "missing";
+	limit: number;
+	used: number;
+	remaining: number;
+	resetAt: string;
+	idempotent: boolean;
+}
+
 export interface PluginInstallReceiptV1 {
 	schemaVersion: 1;
 	bundleId: string;
@@ -139,6 +149,9 @@ export interface PluginBootstrapBackendV1 {
 		artifactGrant: string;
 	}): Promise<SignedPluginReleaseV1[]>;
 	downloadArtifact(request: { release: SignedPluginReleaseV1; artifactGrant: string }): Promise<Uint8Array>;
+	reserveSession?(operationId: string): Promise<PluginSessionUsageDecisionV1>;
+	commitSession?(operationId: string): Promise<PluginSessionUsageDecisionV1>;
+	releaseSession?(operationId: string): Promise<PluginSessionUsageDecisionV1>;
 	getManagementAction(): Promise<PluginNextActionV1 | null>;
 }
 

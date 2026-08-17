@@ -244,7 +244,9 @@ function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allow
 				console.log("Run: agent-memory plugin install");
 				break;
 			case "auth_required":
-				console.log("Run this command in an interactive terminal to enter an email and activate temporary access.");
+				console.log(
+					"Run this command in an interactive terminal to enter an email and activate free daily access.",
+				);
 				break;
 			case "renewal_required":
 				console.log("Renew AgentMemory Pro to continue using paid capabilities.");
@@ -1000,8 +1002,8 @@ Usage:
   agent-memory plugin manage [--no-browser]
 
 The public core remains fully usable without AgentMemory Pro. Interactive install
-opens a loopback website for temporary email activation and unlimited local use.
-Authentication and payment will be added later.`);
+opens a loopback website for email activation and a configurable free daily
+agent-session allowance. Memory and session content stay on this device.`);
 }
 
 function pluginCommandFailure(command: string, error: unknown): PluginBootstrapResultV1 {
@@ -1227,6 +1229,17 @@ async function main() {
 			const agent = getFlag(flags, "agent");
 			if (!agent) exitError("hook session-start requires --agent", json);
 			await cmdContext({ "no-search": true });
+			try {
+				const decision = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).runSessionStart({
+					host: agent,
+					cwd: process.cwd(),
+					signal: new AbortController().signal,
+				});
+				if (decision?.state === "exhausted")
+					console.error(`AgentMemory free session allowance resets at ${decision.resetAt}`);
+			} catch {
+				// Paid SessionStart work must never make public-core context unavailable.
+			}
 			break;
 		}
 		case "plugin":

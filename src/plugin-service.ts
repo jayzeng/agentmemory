@@ -10,6 +10,7 @@ import {
 	type PluginBootstrapBackendV1,
 	PluginBootstrapFailure,
 	type PluginNextActionV1,
+	type PluginSessionUsageDecisionV1,
 	type SignedPluginReleaseV1,
 } from "./plugin-bootstrap.js";
 import { type PluginEntitlementStatusV1, validatePluginEntitlementStatusV1 } from "./plugin-host.js";
@@ -21,37 +22,22 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const EMAIL_MAX_BYTES = 254;
 const FORM_MAX_BYTES = 2_048;
 const SERVICE_JSON_MAX_BYTES = 1024 * 1024;
+const ACTIVATION_CREDENTIAL = /^am_activation_[A-Za-z0-9_-]{32,256}$/;
 
 const MISSING_ENTITLEMENT: PluginEntitlementStatusV1 = {
 	plan: null,
 	state: "missing",
 	features: [],
 	capabilities: {},
-	reason: "Enter an email address to activate temporary unlimited local use",
-};
-
-const TEMPORARY_ENTITLEMENT: PluginEntitlementStatusV1 = {
-	plan: "pro",
-	state: "active",
-	features: ["session-intelligence", "web-console"],
-	capabilities: Object.fromEntries(
-		[
-			"session-index",
-			"session-worker",
-			"learning",
-			"retrieval-evaluation",
-			"operational-metrics",
-			"web-console",
-			"memory-explorer",
-		].map((capability) => [capability, { enabled: true }]),
-	),
-	reason: "Temporary email activation grants unlimited local use",
+	reason: "Enter an email address to activate the free daily session allowance",
 };
 
 interface TemporaryActivationV1 {
-	schemaVersion: 1;
+	schemaVersion: 2;
 	email: string;
 	activatedAt: string;
+	usageCredential: string;
+	dailySessionLimit: number;
 }
 
 interface TemporaryPluginBackendOptions {
@@ -66,6 +52,27 @@ interface TemporaryPluginBackendOptions {
 
 function cloneEntitlement(value: PluginEntitlementStatusV1): PluginEntitlementStatusV1 {
 	return structuredClone(value);
+}
+
+function freeEntitlement(dailySessionLimit: number): PluginEntitlementStatusV1 {
+	return {
+		plan: "free",
+		state: "active",
+		features: ["session-intelligence", "web-console"],
+		capabilities: {
+			"session-index": { enabled: true },
+			"session-worker": {
+				enabled: true,
+				quota: { limit: dailySessionLimit, window: "day", scope: "account" },
+			},
+			learning: { enabled: true },
+			"retrieval-evaluation": { enabled: true },
+			"operational-metrics": { enabled: true },
+			"web-console": { enabled: true },
+			"memory-explorer": { enabled: true },
+		},
+		reason: `${dailySessionLimit} free agent sessions per UTC day`,
+	};
 }
 
 function isEmail(value: string): boolean {
@@ -89,7 +96,7 @@ function securityHeaders(contentType: string): Record<string, string> {
 
 function activationPage(action: string, error?: string): string {
 	const errorHtml = error ? `<p class="error">${error}</p>` : "";
-	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Activate AgentMemory Pro</title><style>body{font:16px system-ui;max-width:34rem;margin:10vh auto;padding:0 1.5rem;color:#18212b}form{display:grid;gap:1rem}input,button{font:inherit;padding:.8rem;border-radius:.5rem;border:1px solid #aab4bf}button{background:#18212b;color:#fff;cursor:pointer}.muted{color:#586574}.error{color:#a21d24}</style></head><body><h1>Activate AgentMemory Pro</h1><p>Enter an email address to enable temporary unlimited use on this device.</p>${errorHtml}<form method="post" action="${action}"><label>Email <input type="email" name="email" autocomplete="email" maxlength="254" required autofocus></label><button type="submit">Activate and return to terminal</button></form><p class="muted">The AgentMemory CLI sends your email plus core, bundle, platform, architecture, and release-channel metadata to the private activation service. The activation record never includes memory, session content, queries, repository paths, IP addresses, or user-agent strings, and expires after 365 days without activation.</p></body></html>`;
+	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Activate AgentMemory</title><style>body{font:16px system-ui;max-width:34rem;margin:10vh auto;padding:0 1.5rem;color:#18212b}form{display:grid;gap:1rem}input,button{font:inherit;padding:.8rem;border-radius:.5rem;border:1px solid #aab4bf}button{background:#18212b;color:#fff;cursor:pointer}.muted{color:#586574}.error{color:#a21d24}</style></head><body><h1>Activate AgentMemory</h1><p>Enter an email address to enable the free daily agent-session allowance on this device.</p>${errorHtml}<form method="post" action="${action}"><label>Email <input type="email" name="email" autocomplete="email" maxlength="254" required autofocus></label><button type="submit">Activate and return to terminal</button></form><p class="muted">The AgentMemory CLI sends your email plus core, bundle, platform, architecture, and release-channel metadata to the private activation service. D1 stores a daily count of opaque SessionStart operations for your normalized email. The request never includes memory, session content, queries, repository paths, raw agent session identifiers, IP addresses, or user-agent strings. Activation records expire after 365 days without use.</p></body></html>`;
 }
 
 function completionPage(): string {
@@ -294,7 +301,8 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 	}
 
 	async getLocalEntitlement(): Promise<PluginEntitlementStatusV1> {
-		return this.readActivation() ? cloneEntitlement(TEMPORARY_ENTITLEMENT) : cloneEntitlement(MISSING_ENTITLEMENT);
+		const activation = this.readActivation();
+		return activation ? freeEntitlement(activation.dailySessionLimit) : cloneEntitlement(MISSING_ENTITLEMENT);
 	}
 
 	async resolveAccess(request: {
@@ -303,8 +311,9 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 		channel: string;
 		allowAuthentication: boolean;
 	}): Promise<PluginAccessDecisionV1> {
-		let activation = this.readActivation();
-		if (!activation) {
+		const activation = this.readActivation();
+		let email = activation?.email;
+		if (!email) {
 			if (!request.allowAuthentication)
 				return {
 					kind: "auth_required",
@@ -315,32 +324,59 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 						message: "Run plugin install in an interactive terminal to enter an email address",
 					},
 				};
-			const email = await this.activate();
-			this.writeActivation(email);
-			activation = this.readActivation();
+			email = await this.activate();
 		}
-		if (!activation)
-			throw new PluginBootstrapFailure("activation_failed", "The local activation record could not be loaded");
 		const response = await this.request(`${this.apiOrigin}/v1/plugin/access`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
 				schemaVersion: 1,
-				email: activation.email,
+				email,
 				bundleId: request.bundleId,
 				installedVersion: request.installedVersion ?? null,
 				coreVersion: this.coreVersion,
 				channel: request.channel,
 				platform: process.platform,
 				architecture: process.arch,
-				consentVersion: "activation-v1",
+				consentVersion: "activation-v2",
 			}),
 		});
-		const value = (await readJson(response)) as { entitlement?: unknown; artifactGrant?: unknown };
+		const value = (await readJson(response)) as {
+			entitlement?: unknown;
+			artifactGrant?: unknown;
+			usageCredential?: unknown;
+		};
 		validatePluginEntitlementStatusV1(value.entitlement);
 		if (typeof value.artifactGrant !== "string" || !value.artifactGrant)
 			throw new PluginBootstrapFailure("service_response_invalid", "The access response omitted its artifact grant");
+		if (typeof value.usageCredential !== "string" || !ACTIVATION_CREDENTIAL.test(value.usageCredential))
+			throw new PluginBootstrapFailure(
+				"service_response_invalid",
+				"The access response omitted its usage credential",
+			);
+		const freeQuota = value.entitlement.capabilities["session-worker"]?.quota;
+		if (
+			value.entitlement.plan !== "free" ||
+			value.entitlement.state !== "active" ||
+			!freeQuota ||
+			freeQuota.scope !== "account" ||
+			freeQuota.window !== "day"
+		)
+			throw new PluginBootstrapFailure("service_response_invalid", "The free session policy is invalid");
+		this.writeActivation(email, value.usageCredential, freeQuota.limit);
 		return { kind: "granted", entitlement: value.entitlement, artifactGrant: value.artifactGrant };
+	}
+
+	async reserveSession(operationId: string): Promise<PluginSessionUsageDecisionV1> {
+		return this.sessionUsage("reserve", operationId);
+	}
+
+	async commitSession(operationId: string): Promise<PluginSessionUsageDecisionV1> {
+		return this.sessionUsage("commit", operationId);
+	}
+
+	async releaseSession(operationId: string): Promise<PluginSessionUsageDecisionV1> {
+		return this.sessionUsage("release", operationId);
 	}
 
 	async listReleases(request: {
@@ -395,16 +431,28 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 			if (!stat.isFile() || stat.isSymbolicLink() || (process.platform !== "win32" && (stat.mode & 0o077) !== 0))
 				return null;
 			const value = JSON.parse(fs.readFileSync(activationPath, "utf-8")) as TemporaryActivationV1;
-			return value.schemaVersion === 1 && isEmail(value.email) && Number.isFinite(Date.parse(value.activatedAt))
-				? value
-				: null;
+			if (
+				value.schemaVersion !== 2 ||
+				!isEmail(value.email) ||
+				!Number.isFinite(Date.parse(value.activatedAt)) ||
+				!ACTIVATION_CREDENTIAL.test(value.usageCredential) ||
+				!Number.isSafeInteger(value.dailySessionLimit) ||
+				value.dailySessionLimit <= 0 ||
+				value.dailySessionLimit > 10_000
+			)
+				return null;
+			return value;
 		} catch {
 			return null;
 		}
 	}
 
-	private writeActivation(email: string): void {
+	private writeActivation(email: string, usageCredential: string, dailySessionLimit: number): void {
 		if (!isEmail(email)) throw new PluginBootstrapFailure("email_invalid", "Enter a valid email address");
+		if (!ACTIVATION_CREDENTIAL.test(usageCredential))
+			throw new PluginBootstrapFailure("activation_failed", "The activation credential is invalid");
+		if (!Number.isSafeInteger(dailySessionLimit) || dailySessionLimit <= 0 || dailySessionLimit > 10_000)
+			throw new PluginBootstrapFailure("activation_failed", "The free session allowance is invalid");
 		const target = this.activationPath();
 		fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
 		const rootStat = fs.lstatSync(this.root);
@@ -418,10 +466,48 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 		const temporary = `${target}.tmp-${process.pid}-${randomUUID()}`;
 		fs.writeFileSync(
 			temporary,
-			`${JSON.stringify({ schemaVersion: 1, email, activatedAt: new Date().toISOString() }, null, 2)}\n`,
+			`${JSON.stringify(
+				{ schemaVersion: 2, email, activatedAt: new Date().toISOString(), usageCredential, dailySessionLimit },
+				null,
+				2,
+			)}\n`,
 			{ mode: 0o600, flag: "wx" },
 		);
 		fs.renameSync(temporary, target);
+	}
+
+	private async sessionUsage(
+		action: "reserve" | "commit" | "release",
+		operationId: string,
+	): Promise<PluginSessionUsageDecisionV1> {
+		const activation = this.readActivation();
+		if (!activation) throw new PluginBootstrapFailure("auth_required", "Run plugin install to activate AgentMemory");
+		const response = await this.request(`${this.apiOrigin}/v1/plugin/sessions/${action}`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${activation.usageCredential}`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ schemaVersion: 1, operationId }),
+		});
+		const value = (await readJson(response)) as { decision?: Partial<PluginSessionUsageDecisionV1> };
+		const decision = value.decision;
+		if (
+			!decision ||
+			typeof decision.allowed !== "boolean" ||
+			!["reserved", "committed", "released", "exhausted", "missing"].includes(String(decision.state)) ||
+			!Number.isSafeInteger(decision.limit) ||
+			Number(decision.limit) <= 0 ||
+			!Number.isSafeInteger(decision.used) ||
+			Number(decision.used) < 0 ||
+			!Number.isSafeInteger(decision.remaining) ||
+			Number(decision.remaining) < 0 ||
+			typeof decision.resetAt !== "string" ||
+			!Number.isFinite(Date.parse(decision.resetAt)) ||
+			typeof decision.idempotent !== "boolean"
+		)
+			throw new PluginBootstrapFailure("service_response_invalid", "The session usage response is invalid");
+		return decision as PluginSessionUsageDecisionV1;
 	}
 
 	private async request(url: string, init: RequestInit = {}): Promise<Response> {

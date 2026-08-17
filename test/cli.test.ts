@@ -629,7 +629,7 @@ describe("CLI subprocess", () => {
 		expect(stdout).toContain("agent-memory plugin install");
 	});
 
-	test("non-interactive plugin install requires temporary email activation without touching disk", () => {
+	test("non-interactive plugin install requires email activation without touching disk", () => {
 		const pluginDir = path.join(tmpDir, "plugin-install");
 		const result = Bun.spawnSync(
 			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "install", "--json"],
@@ -704,7 +704,7 @@ describe("CLI subprocess", () => {
 		expect(out.error.code).toBe("channel_invalid");
 	});
 
-	test("plugin help documents temporary activation", () => {
+	test("plugin help documents the free daily allowance", () => {
 		const result = Bun.spawnSync(["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "--help"], {
 			stdout: "pipe",
 			stderr: "pipe",
@@ -712,7 +712,7 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory plugin install");
-		expect(out).toContain("temporary email activation");
+		expect(out).toContain("free daily");
 	});
 
 	test("unknown command exits with error", async () => {
