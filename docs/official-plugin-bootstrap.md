@@ -120,6 +120,10 @@ Every bootstrap command supports `--json` and emits one JSON document with a ver
   "entitlement": {
     "plan": "pro",
     "state": "active",
+    "capabilities": {
+      "learning": { "enabled": true },
+      "web-console": { "enabled": true }
+    },
     "expiresAt": "2027-08-16T00:00:00Z",
     "offlineUntil": "2026-09-15T00:00:00Z"
   },
@@ -176,6 +180,10 @@ The server issues a signed, versioned entitlement containing the minimum claims 
   "licenseId": "lic_pseudonymous_id",
   "plan": "pro",
   "features": ["session-intelligence", "web-console"],
+  "capabilities": {
+    "learning": { "enabled": true },
+    "web-console": { "enabled": true }
+  },
   "channel": "stable",
   "issuedAt": "2026-08-16T00:00:00Z",
   "refreshAfter": "2026-08-23T00:00:00Z",
@@ -184,7 +192,9 @@ The server issues a signed, versioned entitlement containing the minimum claims 
 }
 ```
 
-It contains no name, email address, billing details, memory identifier, or filesystem information. `active`, `grace`, and `expired` are derived locally from verified timestamps and policy; they are not trusted from an unsigned local setting. Enterprise may satisfy all `pro` feature requirements while adding organization-scoped policy claims.
+It contains no name, email address, billing details, memory identifier, or filesystem information. Plan identifiers (`free`, `trial`, `pro`, `team`, or `enterprise`) are commercial policy; `active`, `grace`, `missing`, and `expired` are separate locally derived verification states and are never inferred from the plan name. Enterprise may satisfy all `pro` capability requirements while adding organization-scoped policy claims.
+
+Capabilities authorize individual commands, hooks, workers, and local API routes. A capability may carry a positive device-local daily quota. The signed policy configures the limit, while usage remains in a crash-safe local ledger; quota accounting does not add product telemetry to the bootstrap protocol. A plan never implicitly enables a capability, and an active entitlement with a disabled or absent capability fails closed for that operation.
 
 The exact signed-envelope format, key custody, rotation procedure, and grace duration remain launch decisions. Verification keys are pinned by the public core, support overlap during rotation, and never come from the downloaded artifact being verified.
 
@@ -263,13 +273,13 @@ export interface AgentMemoryPluginHostV1 {
 }
 ```
 
-The final exported contract must define the referenced request, result, command, hook, manifest, entitlement-status, permission, cancellation, and structured-error types. The loader validates every bundled plugin first, then creates a host instance scoped to that plugin's manifest. Host methods enforce its declared permissions. Plugins receive only derived entitlement state and time bounds, never raw signed claims or commercial credentials. They also never receive unrestricted core internals, arbitrary command execution, or ambient access to another plugin's state directory.
+The final exported contract must define the referenced request, result, command, hook, manifest, entitlement-status, permission, cancellation, and structured-error types. Commercial manifests are plan-neutral: they declare `entitlement: "commercial"`, their provided capabilities, and the `requiredCapability` for each guarded command or hook. The loader validates every bundled plugin first, then creates a host instance scoped to that plugin's manifest. Host methods enforce its declared permissions. Plugins receive only derived entitlement state, capability grants, quota policy, and time bounds, never raw signed claims or commercial credentials. They also never receive unrestricted core internals, arbitrary command execution, or ambient access to another plugin's state directory.
 
 Activation order is: verify artifact, verify entitlement, validate every manifest, resolve required dependencies, create permission-scoped host adapters, activate plugins, then register commands and hooks. Registered-but-unavailable dependencies do not satisfy `requires`.
 
 ## Runtime entitlement behavior
 
-Every paid command, compatibility alias, hook, worker start, Web Console launch, and paid API route checks entitlement before activation. A long-running process rechecks at a bounded interval and responds safely to expiration. Browser-session authorization remains separate from commercial entitlement and never contains subscription credentials.
+Every commercial command, compatibility alias, hook, worker start, Web Console launch, and commercial API route checks both entitlement state and its exact required capability before activation. A long-running process rechecks at a bounded interval and responds safely to expiration or capability removal. Browser-session authorization remains separate from commercial entitlement and never contains subscription credentials.
 
 When entitlement is in grace, paid capabilities continue locally and status explains when grace ends. When expired or invalid, new paid work fails closed with a renewal action; core memory remains available and no user data is deleted.
 

@@ -83,9 +83,13 @@ import {
 } from "../src/plugin-bootstrap.js";
 import {
 	type AgentMemoryBundleManifestV1,
+	type AgentMemoryPluginManifestV1,
+	isPluginCapabilityEnabled,
 	isSafeBundlePath,
 	type PluginEntitlementStatusV1,
 	validateBundleManifestV1,
+	validatePluginEntitlementStatusV1,
+	validatePluginManifestV1,
 } from "../src/plugin-host.js";
 
 // ---------------------------------------------------------------------------
@@ -1905,6 +1909,10 @@ const ACTIVE_PLUGIN_ENTITLEMENT: PluginEntitlementStatusV1 = {
 	plan: "pro",
 	state: "active",
 	features: ["session-intelligence", "web-console"],
+	capabilities: {
+		learning: { enabled: true, quota: { limit: 3, window: "day", scope: "device" } },
+		"web-console": { enabled: true },
+	},
 	expiresAt: "2027-08-16T00:00:00Z",
 	offlineUntil: "2026-09-15T00:00:00Z",
 };
@@ -1993,6 +2001,56 @@ function signedTestRelease(
 }
 
 describe("official plugin host contract", () => {
+	test("keeps commercial plans separate from locally derived entitlement state", () => {
+		const freeEntitlement: PluginEntitlementStatusV1 = {
+			plan: "free",
+			state: "active",
+			features: ["session-intelligence"],
+			capabilities: {
+				learning: { enabled: true, quota: { limit: 3, window: "day", scope: "device" } },
+				"web-console": { enabled: false },
+			},
+		};
+
+		expect(isPluginCapabilityEnabled(freeEntitlement, "learning")).toBe(true);
+		expect(isPluginCapabilityEnabled(freeEntitlement, "web-console")).toBe(false);
+		expect(isPluginCapabilityEnabled({ ...freeEntitlement, state: "expired" }, "learning")).toBe(false);
+		expect(() => validatePluginEntitlementStatusV1(freeEntitlement)).not.toThrow();
+		expect(() =>
+			validatePluginEntitlementStatusV1({
+				...freeEntitlement,
+				capabilities: { learning: { enabled: true, quota: { limit: 0, window: "day", scope: "device" } } },
+			}),
+		).toThrow("invalid quota limit");
+		expect(() => validatePluginEntitlementStatusV1({ ...freeEntitlement, capabilities: undefined })).toThrow(
+			"capabilities must be an object",
+		);
+	});
+
+	test("requires command capability guards to reference declared capabilities", () => {
+		const manifest: AgentMemoryPluginManifestV1 = {
+			schemaVersion: 1,
+			id: "agentmemory.session-intelligence",
+			name: "Session Intelligence",
+			version: "1.0.0",
+			description: "Session learning",
+			engine: ">=0.1.0",
+			entitlement: "commercial",
+			commands: [{ name: "learn", description: "Learn", requiredCapability: "learning" }],
+			permissions: ["sessions:read"],
+			capabilities: ["learning"],
+		};
+
+		expect(() => validatePluginManifestV1(manifest)).not.toThrow();
+		expect(() =>
+			validatePluginManifestV1({
+				...manifest,
+				commands: [{ name: "learn", description: "Learn", requiredCapability: "undeclared" }],
+			}),
+		).toThrow("requires undeclared capability");
+		expect(() => validatePluginManifestV1({ ...manifest, commands: [] })).not.toThrow();
+	});
+
 	test("validates bundle identity, entrypoint, and plugin IDs", () => {
 		expect(() => validateBundleManifestV1(testBundleManifest("1.0.0"))).not.toThrow();
 		expect(isSafeBundlePath("bundle/index.js")).toBe(true);
@@ -2115,7 +2173,7 @@ describe("official plugin bootstrap", () => {
 	});
 
 	test("returns an authentication action without changing disk", async () => {
-		backend.entitlement = { plan: null, state: "missing", features: [] };
+		backend.entitlement = { plan: null, state: "missing", features: [], capabilities: {} };
 		backend.decision = {
 			kind: "auth_required",
 			entitlement: structuredClone(backend.entitlement),

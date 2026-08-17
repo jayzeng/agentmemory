@@ -176,6 +176,7 @@ const MISSING_ENTITLEMENT: PluginEntitlementStatusV1 = {
 	plan: null,
 	state: "missing",
 	features: [],
+	capabilities: {},
 	reason: "No signed AgentMemory commercial entitlement is installed",
 };
 

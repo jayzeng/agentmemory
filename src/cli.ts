@@ -985,6 +985,7 @@ function pluginCommandFailure(command: string, error: unknown): PluginBootstrapR
 			plan: null,
 			state: "missing",
 			features: [],
+			capabilities: {},
 		},
 		nextAction: null,
 		error: {
