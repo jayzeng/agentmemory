@@ -4,18 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.14] - 2026-08-17
+
 ### Added
 - Versioned public plugin-host types and manifest validation through the `myagentmemory/plugin-host` export
 - Plan-neutral capability grants, device-local quota policy, and per-command/hook capability requirements in plugin-host API v1
 - Fail-closed official-plugin bootstrap commands, signed Ed25519 release verification, bounded package validation, atomic install/upgrade/rollback, explicit uninstall, and deterministic regression coverage
+- Temporary loopback email activation with a permission-restricted local record, unlimited capability grants, live commercial catalog/artifact retrieval, installed-bundle health checks, and paid-command dispatch
+- Official plugin runtime loading with manifest validation, shared bundle state, per-command capability enforcement, memory host APIs, abort handling, and Web Console support
 - Core-owned managed SessionStart hook installation for Claude Code, Codex, Cursor, and OpenCode
 - Bash, Zsh, Fish, and PowerShell completion generation and idempotent installation through public exports
 
 ### Changed
 - `agent-memory init`, `status`, and help now expose non-blocking optional-plugin discovery without affecting core memory behavior or opening a browser
 - Separate commercial plan identifiers from locally derived active/grace/missing/expired entitlement states
+- Clarify that AgentMemory core remains free and MIT-licensed while optional plugin implementations are distributed separately under their own terms
+- Run unit, CLI/package-portability, and evaluation suites before npm publication
+- Made Pro discovery, install, upgrade, and current-version output explain the included Session Intelligence, guided learning, local Web Console, privacy boundary, and useful next commands
+- Sent an explicit, bounded Pro activation record to the private control plane with transparent browser disclosure; the payload excludes memory, sessions, queries, paths, IP addresses, and user-agent strings
 
 ### Fixed
+- Expose the real core memory directory to permission-checked first-party plugins so local interfaces do not confuse plugin operational state with user memory
+- Accepted same-origin loopback activation forms from browsers that omit `Origin` or serialize it as `null`, while preserving nonce/Host validation and rejecting cross-origin requests
+- Reload local entitlement state before every installed-plugin command and bound error responses from the plugin service
+- Replace unsafe TLS-disable installation guidance with corporate CA-file configuration
 - Made the Homebrew update workflow match formula fields regardless of indentation and fail when expected fields are missing
 - Build public `dist` exports during commit-pinned Git dependency installation
 - Allow host adapters to write through the core memory contract to an explicit directory without mutating process-global core state

@@ -612,7 +612,24 @@ describe("CLI subprocess", () => {
 		expect(stdout).not.toContain(pluginDir);
 	});
 
-	test("plugin install fails closed when the production service is not configured", () => {
+	test("plugin discovery explains Pro value and the installation next step", () => {
+		const pluginDir = path.join(tmpDir, "plugin-install");
+		const result = Bun.spawnSync(["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin"], {
+			env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(result.exitCode).toBe(0);
+		const stdout = result.stdout.toString();
+		expect(stdout).toContain("AgentMemory Pro includes:");
+		expect(stdout).toContain("Session Intelligence");
+		expect(stdout).toContain("Guided Learning");
+		expect(stdout).toContain("Local Web Console");
+		expect(stdout).toContain("Your session content stays on this device.");
+		expect(stdout).toContain("agent-memory plugin install");
+	});
+
+	test("non-interactive plugin install requires temporary email activation without touching disk", () => {
 		const pluginDir = path.join(tmpDir, "plugin-install");
 		const result = Bun.spawnSync(
 			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "install", "--json"],
@@ -625,8 +642,9 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(1);
 		const out = JSON.parse(result.stdout.toString());
 		expect(out.ok).toBe(false);
-		expect(out.result).toBe("unavailable");
-		expect(out.error.code).toBe("service_not_configured");
+		expect(out.result).toBe("auth_required");
+		expect(out.error.code).toBe("auth_required");
+		expect(out.nextAction.url).toBe("https://jayzeng.github.io/agentmemory/");
 		expect(fs.existsSync(pluginDir)).toBe(false);
 	});
 
@@ -686,7 +704,7 @@ describe("CLI subprocess", () => {
 		expect(out.error.code).toBe("channel_invalid");
 	});
 
-	test("plugin help documents that commercial networking is not configured", () => {
+	test("plugin help documents temporary activation", () => {
 		const result = Bun.spawnSync(["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "--help"], {
 			stdout: "pipe",
 			stderr: "pipe",
@@ -694,7 +712,7 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory plugin install");
-		expect(out).toContain("unavailable until a production commercial service");
+		expect(out).toContain("temporary email activation");
 	});
 
 	test("unknown command exits with error", async () => {
@@ -716,9 +734,14 @@ describe("CLI subprocess", () => {
 	});
 
 	test("status --json includes embedMode field", async () => {
+		const pluginDir = path.join(tmpDir, "plugin-install");
 		const result = Bun.spawnSync(
 			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "status", "--dir", tmpDir, "--json"],
-			{ stdout: "pipe", stderr: "pipe" },
+			{
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
 		);
 		expect(result.exitCode).toBe(0);
 		const out = JSON.parse(result.stdout.toString());
@@ -1111,8 +1134,18 @@ describe("npm package portability", () => {
 			}>;
 			const packedPaths = pack.files.map((file) => file.path);
 			expect(packedPaths).toContain("dist/cli.js");
+			expect(packedPaths).toContain("LICENSE");
+			expect(packedPaths).toContain("docs/official-plugin-bootstrap.md");
 			expect(packedPaths).not.toContain("dist/agent-memory");
 			expect(packedPaths).not.toContain("dist/agent-memory.exe");
+			expect(packedPaths).not.toContain("issues.md");
+			expect(packedPaths).not.toContain("progress.md");
+			expect(
+				packedPaths.some((packedPath) =>
+					["plugins/", "services/", "artifacts/", "LICENSES/"].some((prefix) => packedPath.startsWith(prefix)),
+				),
+			).toBe(false);
+			expect(packedPaths.some((packedPath) => packedPath.endsWith(".map"))).toBe(false);
 			expect(pack.unpackedSize).toBeLessThan(2_000_000);
 
 			const prefix = path.join(tempDir, "prefix");

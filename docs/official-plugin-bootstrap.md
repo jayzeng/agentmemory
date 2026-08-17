@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted design on 2026-08-16. Stage 2 is implemented in the public core: host types, local discovery, signed-release verification, bounded package validation, and transactional install/rollback are available. Production authentication, catalog, download, and signing-key configuration remain intentionally unavailable until the commercial service is implemented.
+Accepted design on 2026-08-16. The public core now implements host types, temporary loopback activation, live catalog and artifact retrieval, Ed25519 release verification, bounded package validation, transactional install, bundle health checks, and paid-command dispatch. The temporary beta grants unlimited local use after email entry; durable authentication, payment, renewal, and account management remain deferred.
 
-The public `agentmemory` repository and `myagentmemory` npm package remain the MIT-licensed core. Official commercial implementations are built and distributed from the private `agent-memory-plugin` workspace. Pricing, the billing provider, the service hostname, device limits, offline-grace duration, and Enterprise contract terms are intentionally not decided here.
+The public `agentmemory` repository and `myagentmemory` npm package remain the free, MIT-licensed core. The public bootstrap client and host contracts are also MIT-licensed. Official commercial implementations and browser assets are built and distributed separately from the private `agent-memory-plugin` workspace under their own terms. Pricing, the billing provider, device limits, offline-grace duration, and Enterprise contract terms are intentionally not decided here. The temporary beta currently uses allowlisted `*.agentmemory.paperpilot.me` service origins; changing those origins is a public-client release change.
 
 ## Decision
 
@@ -23,11 +23,11 @@ agent-memory plugin install
 | Plugin absent | Active or grace | Install the compatible signed bundle |
 | Plugin older than the selected release | Active or grace | Upgrade atomically |
 | Plugin current | Active or grace | Report that it is current |
-| Any | Missing | Start authentication and plan selection |
+| Any | Missing | Start temporary loopback email activation in an interactive terminal |
 | Any | Expired | Direct the user to renewal; leave core available |
 | Incompatible bundle | Any | Leave the current version untouched and explain the required core version |
 
-An absent plugin cannot validate a commercial license. The public bootstrap performs the initial authenticated entitlement lookup and artifact verification. After activation, the private runtime validates a signed local entitlement before any paid entry point runs.
+An absent plugin cannot activate itself. The public bootstrap performs temporary local activation, obtains a short-lived artifact grant, and verifies the release and artifact. After installation, the public host validates the local activation record and checks the required capability before every paid command. Signed long-lived entitlements will replace this temporary record when authentication and payment ship.
 
 ## Ownership boundary
 
@@ -81,10 +81,10 @@ agent-memory plugin manage [--no-browser]
 - `status` is read-only. It reports the installed bundle, selected channel, compatibility, entitlement state, and update availability.
 - `install` authenticates when necessary, then installs, upgrades, or reports current state.
 - `update` requires an existing installation and never starts a new purchase implicitly.
-- `uninstall` removes executable plugin material, contributed skills, and managed hooks. It preserves core memory, private plugin-created user data, and the subscription.
-- `manage` opens or prints the authenticated account and billing URL.
+- `uninstall` removes executable plugin material and the active receipt. It preserves core memory, plugin state, and the temporary activation record.
+- `manage` remains unavailable until authenticated account and billing management exists.
 
-Installed plugins may contribute additional subcommands such as `plugin recall`. Bootstrap command names are reserved by the core and cannot be replaced by a plugin.
+Installed plugins contribute top-level commands such as `recall`, `learn`, `worker`, and `web`. Bootstrap command names are reserved by the core and cannot be replaced by a plugin.
 
 The current private compatibility CLI uses `plugin install` and `plugin uninstall` for skill files only. During migration, those meanings move to `install-skills --plugin-only` and `uninstall-skills --plugin-only`; the bootstrap command names above become authoritative.
 
@@ -99,7 +99,7 @@ Run: agent-memory plugin install
 
 Top-level help includes an `Optional official plugins` section. Human-readable `status` may include the same recommendation while no official plugin is installed. Routine `context`, `read`, `write`, `search`, and scratchpad commands never show commercial prompts.
 
-The core must not open a browser during package installation, `init`, `help`, `status`, or any normal memory operation. A browser may open only after an explicit `plugin install` or `plugin manage` invocation. `--no-browser`, non-interactive execution, and `--json` print the URL instead.
+The core must not open a browser during package installation, `init`, `help`, `status`, or any normal memory operation. A browser may open only after an explicit interactive `plugin install`. `--no-browser`, non-interactive execution, and `--json` fail closed with `auth_required` when no activation record exists.
 
 ### Machine-readable output
 
@@ -133,7 +133,18 @@ Every bootstrap command supports `--json` and emits one JSON document with a ver
 
 `result` is one of `not_installed`, `installed`, `upgraded`, `current`, `update_available`, `uninstalled`, `auth_required`, `renewal_required`, or `unavailable`. Failures use `ok: false` plus a stable `error.code` and redacted `error.message`. Output must never contain access tokens, download credentials, signed entitlement contents, local memory paths, or URLs containing bearer credentials.
 
-## Authentication and purchase flow
+## Temporary activation flow
+
+1. `agent-memory plugin install` starts an HTTP server bound to `127.0.0.1` on an ephemeral port.
+2. The CLI prints and opens a nonce-bearing local URL. The page accepts one email address with bounded input, an exact Host and nonce path, same-origin browser request validation, restrictive response headers, and a five-minute deadline.
+3. Submission writes a mode-0600 record under the plugin install root and returns a completion page.
+4. The waiting CLI sends the email plus core, installed-bundle, platform, architecture, release-channel, and consent-version fields to the private control plane. Its activation database stores none of the user's memory, sessions, queries, repository paths, IP address, or user-agent string, and deletes records after 365 days without activation.
+5. The CLI requests temporary unlimited capabilities and a short-lived object-bound artifact grant, verifies the Ed25519-signed release plus package digest and limits, imports it for health checks, then atomically activates the receipt.
+6. Installed paid commands reload the local entitlement and enforce their declared capability before execution.
+
+This is explicitly temporary. Authentication, payment, renewal, account management, server-side entitlement state, and durable credential storage are not implemented yet.
+
+## Future authentication and purchase flow
 
 1. The bootstrap inspects the local install receipt and signed entitlement without loading plugin code.
 2. If no usable entitlement or account credential exists, it requests a short-lived device authorization.
@@ -149,7 +160,13 @@ An Enterprise administrator may pre-provision an organization entitlement or man
 
 ## Control-plane boundary
 
-Endpoint names are illustrative until the service is selected, but the protocol responsibilities are fixed:
+The temporary service exposes:
+
+- `POST /v1/plugin/access` for unlimited temporary capability grants plus a short-lived artifact grant;
+- `GET /v1/plugin/releases` for an Ed25519-signed release selected from the private R2 catalog;
+- `GET|HEAD /v1/artifacts/download` for the exact content-addressed object authorized by the bearer grant.
+
+The temporary access request contains the submitted email plus the bounded core, bundle, platform, architecture, release-channel, and consent-version fields described above. Its application payload contains no memory content, search query, session content, path, repository name, qmd data, IP address, user-agent string, or plugin-derived metric; the activation database stores neither IP addresses nor user-agent strings. Future authenticated service responsibilities include:
 
 - create and poll a device authorization;
 - read the authenticated principal's effective entitlement;
@@ -273,13 +290,15 @@ export interface AgentMemoryPluginHostV1 {
 }
 ```
 
-The final exported contract must define the referenced request, result, command, hook, manifest, entitlement-status, permission, cancellation, and structured-error types. Commercial manifests are plan-neutral: they declare `entitlement: "commercial"`, their provided capabilities, and the `requiredCapability` for each guarded command or hook. The loader validates every bundled plugin first, then creates a host instance scoped to that plugin's manifest. Host methods enforce its declared permissions. Plugins receive only derived entitlement state, capability grants, quota policy, and time bounds, never raw signed claims or commercial credentials. They also never receive unrestricted core internals, arbitrary command execution, or ambient access to another plugin's state directory.
+The final exported contract must define the referenced request, result, command, hook, manifest, entitlement-status, permission, cancellation, and structured-error types. Commercial manifests are plan-neutral: they declare `entitlement: "commercial"`, their provided capabilities, and the `requiredCapability` for each guarded command or hook. The loader validates every bundled plugin first, then creates a host instance scoped to that plugin's manifest. Host methods enforce its declared permissions. Plugins receive only derived entitlement state, capability grants, quota policy, and time bounds through host APIs, never raw signed claims or commercial credentials.
+
+Installed bundles are trusted, signed first-party JavaScript loaded into the AgentMemory process. Manifest permissions constrain host APIs; they are not an operating-system sandbox and do not remove the bundle's ambient Node.js process or filesystem authority. This contract does not approve arbitrary third-party plugin loading. State-directory isolation prevents accidental host-API crossover, not malicious code running in the same process.
 
 Activation order is: verify artifact, verify entitlement, validate every manifest, resolve required dependencies, create permission-scoped host adapters, activate plugins, then register commands and hooks. Registered-but-unavailable dependencies do not satisfy `requires`.
 
 ## Runtime entitlement behavior
 
-Every commercial command, compatibility alias, hook, worker start, Web Console launch, and commercial API route checks both entitlement state and its exact required capability before activation. A long-running process rechecks at a bounded interval and responds safely to expiration or capability removal. Browser-session authorization remains separate from commercial entitlement and never contains subscription credentials.
+The core reloads local entitlement state before every commercial command or compatibility alias and checks its exact required capability before dispatch. Plugin-owned hooks, worker starts, Web Console launches, and commercial API routes must perform the same check through `host.getEntitlement()`. A long-running plugin process must recheck through that host API at a bounded interval and respond safely to expiration or capability removal. Browser-session authorization remains separate from commercial entitlement and never contains subscription credentials.
 
 When entitlement is in grace, paid capabilities continue locally and status explains when grace ends. When expired or invalid, new paid work fails closed with a renewal action; core memory remains available and no user data is deleted.
 

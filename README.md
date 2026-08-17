@@ -26,11 +26,11 @@ Coding-agent sessions preserve activity. They do not decide which facts, decisio
 
 ### Product boundary
 
-AgentMemory is a local Markdown store with a CLI, optional qmd search, and agent skills. It does not automatically import every vendor transcript or silently decide what becomes durable. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
+AgentMemory is free, open-source software under the MIT License. The core is a local Markdown store with a CLI, optional qmd search, and agent skills, and it remains fully usable without an account or commercial plugin. It does not automatically import every vendor transcript or silently decide what becomes durable. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
 
 ### Optional official plugins
 
-The core can discover and host separately distributed, signed first-party plugins while remaining fully useful on its own. `agent-memory plugin list` and `plugin status` report local state. The idempotent `agent-memory plugin install` state machine verifies signed release metadata, validates bounded packages, and installs or upgrades atomically. Commercial authentication and downloads remain fail-closed until the production service and signing keys are configured. See the [official plugin bootstrap and host contract](docs/official-plugin-bootstrap.md).
+The MIT-licensed core can discover and host separately distributed, signed first-party plugins while remaining fully useful on its own. Optional plugins may use their own license and distribution terms; their implementation and browser assets are not part of the `myagentmemory` package. `agent-memory plugin list` and `plugin status` report local state. In an interactive terminal, `agent-memory plugin install` opens a nonce-bound loopback page for an email address, resumes the waiting command, verifies signed release metadata and the downloaded bundle, and installs atomically. This temporary beta grants unlimited local use. The email remains in a mode-0600 local activation record and is also sent with bounded activation metadata to the private commercial service; memory, sessions, queries, repository paths, IP addresses, and user-agent strings are not stored in the activation database. Authentication and payment will replace this temporary flow later. See the [official plugin bootstrap and host contract](docs/official-plugin-bootstrap.md).
 
 ## Installation
 
@@ -42,8 +42,8 @@ brew install jayzeng/agentmemory/agent-memory
 # Install the portable CLI globally (Node.js 20+; macOS, Linux, or Windows)
 npm install -g myagentmemory
 
-# If you hit SSL errors due to corporate MITM/inspection, try:
-# npm config set strict-ssl false
+# If corporate TLS inspection requires a private CA, use your organization's CA file:
+# npm config set cafile /path/to/corporate-ca.pem
 
 # Or build from source
 bun run build:cli
@@ -284,16 +284,7 @@ agent-memory install-skills
 
 ## Publishing (maintainers)
 
-```bash
-# Confirm package name is available
-npm view myagentmemory
-
-# Bump version (choose patch/minor/major)
-npm version patch
-
-# Publish to npm (public)
-npm publish --access public
-```
+Publication is tag-driven through `.github/workflows/publish-npm.yml`. Configure `jayzeng/agentmemory` and `publish-npm.yml` as the npm trusted publisher for `myagentmemory`, merge a versioned changelog/package update, and push the matching `v<version>` tag. The workflow uses short-lived OIDC credentials, runs the complete release gate, and publishes the public package with provenance. Do not publish this package from the private plugin workspace.
 
 ### Repository assets (maintainers)
 

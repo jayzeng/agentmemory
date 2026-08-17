@@ -137,6 +137,7 @@ export interface AgentMemoryPluginHostV1 {
 	registerCommand(command: PluginCommandV1): void;
 	registerSessionStartHook(hook: PluginSessionStartHookV1): void;
 	getStateDirectory(): string;
+	getMemoryDirectory(): string;
 	getEntitlement(): Promise<PluginEntitlementStatusV1>;
 	redactSecrets(value: string): string;
 	writeMemory(request: PluginMemoryWriteV1): Promise<PluginMemoryWriteResultV1>;

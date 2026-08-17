@@ -91,6 +91,8 @@ import {
 	validatePluginEntitlementStatusV1,
 	validatePluginManifestV1,
 } from "../src/plugin-host.js";
+import { InstalledPluginRuntimeV1 } from "../src/plugin-runtime.js";
+import { collectTemporaryActivation, TemporaryPluginBackend } from "../src/plugin-service.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -2236,5 +2238,225 @@ describe("official plugin bootstrap", () => {
 		expect(result.result).toBe("uninstalled");
 		expect(fs.existsSync(userData)).toBe(true);
 		expect(new FilePluginInstallStore(installRoot).readReceipt(OFFICIAL_BUNDLE_ID)).toBeNull();
+	});
+});
+
+describe("temporary plugin activation and runtime", () => {
+	test("closes activation when the browser launcher throws", async () => {
+		await expect(
+			collectTemporaryActivation(() => {
+				throw new Error("launcher failed");
+			}),
+		).rejects.toMatchObject({ code: "browser_unavailable" });
+	});
+
+	test("collects an email when a same-origin browser omits Origin but sends Fetch Metadata and Referer", async () => {
+		let page = "";
+		const email = await collectTemporaryActivation((url) => {
+			void (async () => {
+				const loaded = await fetch(url);
+				page = await loaded.text();
+				const submitted = await fetch(url, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/x-www-form-urlencoded",
+						Referer: url,
+						"Sec-Fetch-Site": "same-origin",
+					},
+					body: new URLSearchParams({ email: "beta@example.invalid" }),
+				});
+				expect(submitted.status).toBe(200);
+			})();
+			return true;
+		});
+		expect(page).toContain("Activate AgentMemory Pro");
+		expect(page).toContain(
+			"sends your email plus core, bundle, platform, architecture, and release-channel metadata",
+		);
+		expect(page).toContain("never includes memory, session content, queries, repository paths, IP addresses");
+		expect(page).toContain("expires after 365 days without activation");
+		expect(email).toBe("beta@example.invalid");
+	});
+
+	test("accepts Chromium's opaque Origin only for a user-initiated same-origin document navigation", async () => {
+		let referrerPolicy = "";
+		const email = await collectTemporaryActivation((url) => {
+			void (async () => {
+				const loaded = await fetch(url);
+				referrerPolicy = loaded.headers.get("Referrer-Policy") ?? "";
+				const submitted = await fetch(url, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/x-www-form-urlencoded",
+						Origin: "null",
+						"Sec-Fetch-Dest": "document",
+						"Sec-Fetch-Mode": "navigate",
+						"Sec-Fetch-Site": "same-origin",
+						"Sec-Fetch-User": "?1",
+					},
+					body: new URLSearchParams({ email: "chromium@example.invalid" }),
+				});
+				expect(submitted.status).toBe(200);
+			})();
+			return true;
+		});
+		expect(referrerPolicy).toBe("same-origin");
+		expect(email).toBe("chromium@example.invalid");
+	});
+
+	test("rejects a cross-origin activation POST without consuming the nonce", async () => {
+		const email = await collectTemporaryActivation((url) => {
+			void (async () => {
+				const rejectedOpaqueOrigin = await fetch(url, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/x-www-form-urlencoded",
+						Origin: "null",
+						"Sec-Fetch-Dest": "document",
+						"Sec-Fetch-Mode": "navigate",
+						"Sec-Fetch-Site": "cross-site",
+						"Sec-Fetch-User": "?1",
+					},
+					body: new URLSearchParams({ email: "attacker@example.invalid" }),
+				});
+				expect(rejectedOpaqueOrigin.status).toBe(403);
+				const rejected = await fetch(url, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/x-www-form-urlencoded",
+						Origin: "https://malicious.example",
+						"Sec-Fetch-Site": "cross-site",
+					},
+					body: new URLSearchParams({ email: "attacker@example.invalid" }),
+				});
+				expect(rejected.status).toBe(403);
+				const submitted = await fetch(url, {
+					method: "POST",
+					headers: { "Content-Type": "application/x-www-form-urlencoded" },
+					body: new URLSearchParams({ email: "beta@example.invalid" }),
+				});
+				expect(submitted.status).toBe(200);
+			})();
+			return true;
+		});
+		expect(email).toBe("beta@example.invalid");
+	});
+
+	test("persists temporary activation locally and returns unlimited access", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-activation-"));
+		try {
+			const entitlement: PluginEntitlementStatusV1 = {
+				plan: "pro",
+				state: "active",
+				features: ["session-intelligence", "web-console"],
+				capabilities: { learning: { enabled: true }, "web-console": { enabled: true } },
+			};
+			let activations = 0;
+			let accessRequest: Record<string, unknown> | null = null;
+			const backend = new TemporaryPluginBackend({
+				root,
+				coreVersion: "0.4.14",
+				activate: async () => {
+					activations++;
+					return "beta@example.invalid";
+				},
+				fetch: (async (_input, init) => {
+					accessRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
+					return new Response(JSON.stringify({ entitlement, artifactGrant: "grant" }), {
+						headers: { "Content-Type": "application/json" },
+					});
+				}) as typeof fetch,
+			});
+			const access = await backend.resolveAccess({
+				bundleId: OFFICIAL_BUNDLE_ID,
+				channel: "stable",
+				allowAuthentication: true,
+			});
+			expect(access.kind).toBe("granted");
+			expect(activations).toBe(1);
+			expect((await backend.getLocalEntitlement()).capabilities.learning.enabled).toBe(true);
+			const record = path.join(root, "credentials", "temporary-access.json");
+			expect(fs.statSync(record).mode & 0o777).toBe(0o600);
+			expect(fs.readFileSync(record, "utf-8")).toContain("beta@example.invalid");
+			expect(accessRequest).toMatchObject({
+				schemaVersion: 1,
+				email: "beta@example.invalid",
+				bundleId: OFFICIAL_BUNDLE_ID,
+				installedVersion: null,
+				coreVersion: "0.4.14",
+				channel: "stable",
+				platform: process.platform,
+				architecture: process.arch,
+				consentVersion: "activation-v1",
+			});
+			if (process.platform !== "win32") {
+				fs.chmodSync(record, 0o644);
+				expect((await backend.getLocalEntitlement()).state).toBe("missing");
+				fs.chmodSync(record, 0o600);
+			}
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("rejects oversized plugin-service error responses", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-service-error-"));
+		try {
+			const backend = new TemporaryPluginBackend({
+				root,
+				activate: async () => "beta@example.invalid",
+				fetch: (async () =>
+					new Response("x".repeat(1024 * 1024 + 1), {
+						status: 503,
+						headers: { "Content-Type": "application/json" },
+					})) as typeof fetch,
+			});
+			await expect(
+				backend.resolveAccess({
+					bundleId: OFFICIAL_BUNDLE_ID,
+					channel: "stable",
+					allowAuthentication: true,
+				}),
+			).rejects.toMatchObject({ code: "service_response_too_large" });
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("loads an installed bundle and enforces capability checks on every command", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-"));
+		try {
+			const manifest: AgentMemoryBundleManifestV1 = {
+				...testBundleManifest("1.0.0"),
+				plugins: ["agentmemory.runtime-test"],
+			};
+			const source = Buffer.from(
+				`const manifest=${JSON.stringify(manifest)};export default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.runtime-test",name:"Runtime Test",version:"1.0.0",description:"Runtime test",engine:">=0.4.0",entitlement:"commercial",commands:[{name:"runtime-ping",description:"Ping",requiredCapability:"learning"}],permissions:[],capabilities:["learning"]},async activate(host){host.registerCommand({name:"runtime-ping",description:"Ping",requiredCapability:"learning",async run(context){return {ok:true,data:{args:context.args}}}})},async healthCheck(){return {ok:true}}}]};\n`,
+			);
+			const artifact = encodePluginPackage({
+				schemaVersion: 1,
+				manifest,
+				files: [{ path: manifest.entrypoint, sha256: sha256(source), contentBase64: source.toString("base64") }],
+			});
+			const release: SignedPluginReleaseV1 = {
+				schemaVersion: 1,
+				manifest,
+				platform: "any",
+				architecture: "any",
+				packageSha256: sha256(artifact),
+				size: artifact.byteLength,
+				signature: { algorithm: "ed25519", keyId: "test", value: Buffer.alloc(64).toString("base64") },
+			};
+			const store = new FilePluginInstallStore(root);
+			await store.install(artifact, release);
+			const backend = new FakePluginBackend();
+			const runtime = new InstalledPluginRuntimeV1({ coreVersion: "0.4.13", store, backend });
+			const context = { args: ["one"], flags: {}, signal: new AbortController().signal };
+			expect(await runtime.run("runtime-ping", context)).toEqual({ ok: true, data: { args: ["one"] } });
+			backend.entitlement.capabilities.learning.enabled = false;
+			expect((await runtime.run("runtime-ping", context))?.error?.code).toBe("plugin_capability_denied");
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
 	});
 });
