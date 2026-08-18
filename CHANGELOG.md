@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Isolated the anonymous Pro-install CLI test from the live production service so a healthy preview deployment cannot make the deterministic Core suite fail.
+
 ## [0.4.17] - 2026-08-17
 
 ### Added
