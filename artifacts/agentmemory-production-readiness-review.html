@@ -1,0 +1,1786 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="description" content="Comprehensive production-readiness audit of AgentMemory 0.4.13, covering security, data integrity, qmd operations, API design, evaluation methodology, CI/CD, packaging, and remediation priorities." />
+<title>AgentMemory Production Readiness Review</title>
+<style>
+:root {
+  color-scheme: dark;
+  --preview-font-size: 15px;
+  --bg: #1a1b21;
+  --card: #1f2027;
+  --panel-2: #25262f;
+  --border: #5f87ff;
+  --border-muted: #505050;
+  --border-subtle: #28292f;
+  --panel-border: #2c2d31;
+  --text: #d4d4d4;
+  --muted: #808080;
+  --accent: #81a2be;
+  --warn: #ffff00;
+  --error: #cc6666;
+  --ok: #b5bd68;
+  --code-bg: #25262f;
+  --link: #81a2be;
+  --md-heading: #f0c674;
+  --md-link: #81a2be;
+  --md-link-url: #666666;
+  --md-code: #8abeb7;
+  --md-codeblock: #b5bd68;
+  --md-codeblock-border: #31323a;
+  --md-quote: #808080;
+  --md-quote-border: #808080;
+  --md-hr: #808080;
+  --md-list-bullet: #8abeb7;
+  --syntax-keyword: #569cd6;
+  --syntax-function: #dcdcaa;
+  --syntax-variable: #9cdcfe;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-type: #4ec9b0;
+  --syntax-comment: #6a9955;
+  --syntax-operator: #d4d4d4;
+  --syntax-punctuation: #d4d4d4;
+  --syntax-error: #cc6666;
+  --annotation-bg: rgba(129, 162, 190, 0.25);
+  --annotation-border: rgba(129, 162, 190, 0.65);
+  --annotation-text: #d4d4d4;
+  --blockquote-bg: rgba(128, 128, 128, 0.16);
+  --inline-code-bg: rgba(128, 128, 128, 0.18);
+  --table-alt-bg: rgba(128, 128, 128, 0.14);
+  --md-table-border: #28292f;
+  --diff-add-bg: rgba(181, 189, 104, 0.14);
+  --diff-add-text: #b5bd68;
+  --diff-del-bg: rgba(204, 102, 102, 0.14);
+  --diff-del-text: #cc6666;
+  --diff-meta-text: #808080;
+  --diff-header-bg: rgba(129, 162, 190, 0.10);
+  --diff-header-text: #81a2be;
+  --diff-hunk-bg: rgba(129, 162, 190, 0.16);
+  --diff-hunk-text: #81a2be;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+body {
+  min-height: 100vh;
+  padding: 28px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+#preview-root {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 24px 28px;
+  overflow-wrap: anywhere;
+  line-height: 1.58;
+  font-size: var(--preview-font-size);
+}
+#preview-root h1, #preview-root h2, #preview-root h3, #preview-root h4, #preview-root h5, #preview-root h6 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--md-heading);
+}
+#preview-root h1 { font-size: 1.6em; border-bottom: 0; padding-bottom: 0; }
+#preview-root h2 { font-size: 1.25em; border-bottom: 0; padding-bottom: 0; }
+#preview-root p, #preview-root ul, #preview-root ol, #preview-root blockquote, #preview-root table {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+#preview-root li::marker { color: var(--md-list-bullet); }
+#preview-root a { color: var(--md-link); text-decoration: none; }
+#preview-root a:hover { text-decoration: underline; }
+#preview-root a.uri, #preview-root .uri { color: var(--md-link-url); }
+#preview-root blockquote {
+  margin-left: 0;
+  padding: 0.2em 1em;
+  border-left: 0.25em solid var(--md-quote-border);
+  border-radius: 0 8px 8px 0;
+  background: var(--blockquote-bg);
+  color: var(--md-quote);
+}
+#preview-root pre {
+  background: var(--panel-2);
+  border: 1px solid var(--md-codeblock-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+#preview-root code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9em;
+  color: var(--md-code);
+}
+#preview-root pre code {
+  color: var(--text);
+}
+#preview-root :not(pre) > code {
+  background: var(--inline-code-bg);
+  border: 1px solid var(--md-codeblock-border);
+  border-radius: 6px;
+  padding: 0.12em 0.35em;
+}
+#preview-root .annotation-marker {
+  display: inline;
+  border-radius: 4px;
+  border: 1px solid var(--annotation-border);
+  background: var(--annotation-bg);
+  color: var(--annotation-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  padding: 0 0.28em;
+}
+#preview-root .annotation-marker mjx-container {
+  margin: 0;
+}
+#preview-root pre.sourceCode.diff code > .diff-line {
+  display: block;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+#preview-root pre.sourceCode.diff code > .diff-add-line {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-del-line {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-meta-line {
+  color: var(--diff-meta-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-header-line {
+  background: var(--diff-header-bg);
+  color: var(--diff-header-text);
+  font-weight: 600;
+}
+#preview-root pre.sourceCode.diff code > .diff-hunk-line {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-line .kw,
+#preview-root pre.sourceCode.diff code > .diff-line .dt,
+#preview-root pre.sourceCode.diff code > .diff-line .st,
+#preview-root pre.sourceCode.diff code > .diff-line .va {
+  color: inherit;
+  font-weight: inherit;
+}
+#preview-root code span.kw,
+#preview-root code span.cf,
+#preview-root code span.im {
+  color: var(--syntax-keyword);
+  font-weight: 600;
+}
+#preview-root code span.dt {
+  color: var(--syntax-type);
+  font-weight: 600;
+}
+#preview-root code span.fu,
+#preview-root code span.bu {
+  color: var(--syntax-function);
+}
+#preview-root code span.va,
+#preview-root code span.ot {
+  color: var(--syntax-variable);
+}
+#preview-root code span.st,
+#preview-root code span.ss,
+#preview-root code span.sc,
+#preview-root code span.ch {
+  color: var(--syntax-string);
+}
+#preview-root code span.dv,
+#preview-root code span.bn,
+#preview-root code span.fl {
+  color: var(--syntax-number);
+}
+#preview-root code span.co {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+#preview-root code span.op {
+  color: var(--syntax-operator);
+}
+#preview-root code span.pp,
+#preview-root code span.pu {
+  color: var(--syntax-punctuation);
+}
+#preview-root code span.er,
+#preview-root code span.al {
+  color: var(--syntax-error);
+  font-weight: 600;
+}
+#preview-root table {
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+}
+#preview-root th, #preview-root td {
+  border: 1px solid var(--md-table-border);
+  padding: 6px 12px;
+}
+#preview-root thead th {
+  background: var(--panel-2);
+}
+#preview-root tbody tr:nth-child(even) {
+  background: var(--table-alt-bg);
+}
+#preview-root hr {
+  border: 0;
+  border-top: 1px solid var(--md-hr);
+  margin: 1.25em 0;
+}
+#preview-root img { max-width: 100%; }
+#preview-root math[display="block"] {
+  display: block;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#preview-root mjx-container[display="true"] {
+  display: block;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#preview-root .mermaid-container {
+  text-align: center;
+  margin: 1em 0;
+  overflow-x: auto;
+}
+#preview-root .mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+}
+</style>
+</head>
+<body>
+  <article id="preview-root"><h1 id="agentmemory-production-readiness-review">AgentMemory Production Readiness Review</h1>
+<p><strong>Repository:</strong> <code>jayzeng/agentmemory</code><br />
+<strong>Version reviewed:</strong> <code>0.4.13</code> at commit <code>46c4eb7</code><br />
+<strong>Review date:</strong> 2026-08-11<br />
+<strong>Scope:</strong> Evaluation dataset and methodology, runtime storage, security and privacy, qmd integration, CLI/public API, skills and installers, packaging, CI/CD, release supply chain, documentation, and operational maturity.</p>
+<blockquote>
+<p><strong>Bottom line:</strong> AgentMemory has a compelling low-dependency design and a substantial deterministic test suite, but it is not yet production-safe for sensitive or concurrent multi-agent workloads. The immediate blockers are a trust-filter bypass, memory-root escapes, qmd cross-profile isolation failure, and reproducible lost writes. The current evaluation suite is useful as a targeted regression harness, not as an independent quality benchmark.</p>
+</blockquote>
+<hr />
+<h2 id="executive-summary">Executive summary</h2>
+<h3 id="release-blockers">Release blockers</h3>
+<ol type="1">
+<li><strong>Trust and lifecycle metadata can be bypassed with a leading blank line</strong>, allowing explicitly untrusted or expired instructions into injected context.</li>
+<li><strong>Daily reads can traverse outside the memory directory</strong>, and symlinked memory files can redirect reads/writes outside the root.</li>
+<li><strong>qmd collection identity is not bound to the configured memory directory</strong>, so <code>--dir</code> can search another profile’s collection.</li>
+<li><strong>Concurrent writers lose data.</strong> In a local 80-write / 24-worker probe, only 61 entries survived.</li>
+<li><strong>Agent-facing direct search returns untrusted/expired qmd snippets without the safety filtering used by context injection.</strong></li>
+</ol>
+<h3 id="production-posture">Production posture</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Area</th>
+<th>Assessment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Core design</td>
+<td>Strong simplicity and portability goals; excessive singleton state and synchronous whole-file I/O limit production embedding and scale.</td>
+</tr>
+<tr>
+<td>Data integrity</td>
+<td>Not ready for concurrent agents; no locking, atomic replacement, backup, repair, or format migration.</td>
+</tr>
+<tr>
+<td>Security/privacy</td>
+<td>Several root-boundary and trust-policy defects; default file permissions and global project scope are too permissive for sensitive memories.</td>
+</tr>
+<tr>
+<td>qmd operations</td>
+<td>Useful optional integration, but profile binding, freshness, failure reporting, cold starts, and version observability need redesign.</td>
+</tr>
+<tr>
+<td>Evaluation</td>
+<td>Good diagnostic/regression start; not an independent benchmark and currently emits a semantic false failure.</td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>Linux/Node 20 focused despite cross-platform claims; release provenance, dependency automation, and governance are incomplete.</td>
+</tr>
+<tr>
+<td>Documentation</td>
+<td>README is more accurate than the website and design document; several operational flags and destructive behaviors need stronger treatment.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="validation-evidence">Validation evidence</h2>
+<p>The following findings were reproduced with isolated temporary directories and qmd shims; no real user memory was read or modified.</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Probe</th>
+<th>Observed result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Daily path traversal</td>
+<td><code>--date ../../secret</code> returned a Markdown file outside the configured memory root.</td>
+</tr>
+<tr>
+<td>Concurrent writes</td>
+<td>80 parallel writes with 24 workers retained 61 entries.</td>
+</tr>
+<tr>
+<td>qmd profile binding</td>
+<td>A same-name collection declared at a different path was accepted and returned <code>CROSS_PROFILE_RESULT</code> under a custom <code>--dir</code>.</td>
+</tr>
+<tr>
+<td>Trust bypass</td>
+<td><code>Trust: untrusted</code> and <code>Status: expired</code> were filtered normally but survived when preceded by a blank line after the timestamp marker.</td>
+</tr>
+<tr>
+<td>Unsafe direct search</td>
+<td>Direct search returned <code>DO_NOT_SURFACE_THIS</code>; <code>context --query</code> correctly returned empty for the same untrusted source.</td>
+</tr>
+<tr>
+<td>Permissions</td>
+<td>With umask <code>0022</code>, memory directories were <code>0755</code> and files <code>0644</code>.</td>
+</tr>
+<tr>
+<td>Background update latency</td>
+<td>Deterministic 2-second qmd update: CLI took 2.87s in background mode versus 0.06s with updates off.</td>
+</tr>
+<tr>
+<td>Background embedding</td>
+<td>After a write and 6-second wait, qmd calls were <code>status, update</code>; <code>embed</code> never ran.</td>
+</tr>
+<tr>
+<td>Sync failure semantics</td>
+<td>Both update and embed failed, JSON returned <code>ok:false</code>, but process exit code was 0.</td>
+</tr>
+<tr>
+<td>Destructive distil</td>
+<td>An unpinned curated long-term decision disappeared after <code>distil</code>.</td>
+</tr>
+<tr>
+<td>Installer ownership</td>
+<td>Custom skill content was overwritten; uninstall then deleted the replacement with no ownership check.</td>
+</tr>
+<tr>
+<td>Metadata injection</td>
+<td>Malicious <code>sessionId</code>, topic name, and topic date values broke comments/headings and inserted arbitrary lines.</td>
+</tr>
+<tr>
+<td>Multiline scratchpad</td>
+<td><code>first\nsecond</code> round-tripped as only <code>first</code>; the second line became orphaned.</td>
+</tr>
+<tr>
+<td>Distil taxonomy cap</td>
+<td>25 unique tags produced <code>totalTags:20</code>, 15 tag sections, and 15 <code>tagCounts</code> keys without truncation diagnostics.</td>
+</tr>
+<tr>
+<td>Live qmd smoke test</td>
+<td>All 4 multilingual top-1 probes passed; first semantic query took 42.1s, later semantic queries ~2.4s, keyword 0.37s.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="verification-baseline">Verification baseline</h3>
+<ul>
+<li>Unit tests: <strong>157 passed, 0 failed</strong></li>
+<li>CLI tests: <strong>48 passed, 0 failed</strong></li>
+<li>Eval harness tests: <strong>6 passed, 0 failed</strong></li>
+<li>Biome lint: <strong>passed</strong></li>
+<li>TypeScript build: <strong>passed</strong></li>
+<li>Default feedback eval: <strong>10 passed, 2 failed, 4 deferred</strong></li>
+<li>Live feedback eval: multilingual probes passed; two expected/current deterministic failures remained</li>
+<li>Dependency audit: one low-severity dev-only <code>esbuild</code> advisory through <code>tsx</code></li>
+</ul>
+<hr />
+<h1 id="complete-finding-register">Complete finding register</h1>
+<h2 id="security-and-privacy">1. Security and privacy</h2>
+<h3 id="sec-01-trustlifecycle-filter-bypass-critical-reproduced">SEC-01 — Trust/lifecycle filter bypass — <strong>Critical · Reproduced</strong></h3>
+<p><code>isInactiveMemoryEntry()</code> examines only the first paragraph (<code>src/core.ts:171-179</code>). A blank line immediately after a timestamp marker makes that marker the entire first paragraph, so following <code>Trust: untrusted</code>, <code>Status: expired</code>, or <code>Valid until</code> metadata is ignored and the body is injected.</p>
+<p><strong>Impact:</strong> Stored prompt injection or retired instructions can enter high-priority system context despite being explicitly labeled unsafe.<br />
+<strong>Remediation:</strong> Parse metadata from a strict entry envelope independent of blank lines; validate all timestamped writes; add adversarial whitespace/BOM/line-ending tests.</p>
+<h3 id="sec-02-daily-path-traversal-critical-reproduced">SEC-02 — Daily path traversal — <strong>Critical · Reproduced</strong></h3>
+<p><code>dailyPath(date)</code> blindly joins input (<code>src/core.ts:104</code>), while CLI and public reads accept arbitrary dates (<code>src/cli.ts:239</code>, <code>src/core.ts:1716</code>).</p>
+<p><strong>Impact:</strong> A crafted date can read any accessible <code>.md</code> file reachable by traversal, contradicting the skill claim that commands stay inside the memory directory.<br />
+<strong>Remediation:</strong> Require exact <code>YYYY-MM-DD</code>, resolve the final path, and enforce canonical containment beneath <code>DAILY_DIR</code>.</p>
+<h3 id="sec-03-symlink-root-escape-high-reproduced">SEC-03 — Symlink root escape — <strong>High · Reproduced</strong></h3>
+<p>Memory paths are followed with ordinary <code>readFileSync</code>/<code>writeFileSync</code>; there is no <code>lstat</code>, canonical containment check, or no-follow open. A symlinked <code>MEMORY.md</code> redirected a write outside the configured root.</p>
+<p><strong>Impact:</strong> Another local process, compromised workspace, or misconfiguration can redirect sensitive reads/writes.<br />
+<strong>Remediation:</strong> Canonicalize the root, reject symlink components for managed files, and use safe open/create semantics.</p>
+<h3 id="sec-04-qmd-cross-profile-disclosure-critical-reproduced">SEC-04 — qmd cross-profile disclosure — <strong>Critical · Reproduced</strong></h3>
+<p>All stores use the singleton collection name <code>agent-memory</code> (<code>src/core.ts:580</code>). <code>checkCollection()</code> validates only the name (<code>src/core.ts:785-811</code>), not the configured path. Direct search then returns raw results (<code>src/core.ts:1800-1858</code>).</p>
+<p><strong>Impact:</strong> <code>--dir</code> or <code>AGENT_MEMORY_DIR</code> can search/update another profile’s index and expose unrelated project or personal memory.<br />
+<strong>Remediation:</strong> Derive collection identity from the canonical memory path, verify collection path on every open, and reject mismatches.</p>
+<h3 id="sec-05-direct-search-bypasses-trustsource-policy-high-reproduced">SEC-05 — Direct search bypasses trust/source policy — <strong>High · Reproduced</strong></h3>
+<p><code>searchRelevantMemories()</code> filters and source-verifies snippets, but CLI/public <code>memorySearch()</code> formats qmd results directly.</p>
+<p><strong>Impact:</strong> Agent-invoked search can reintroduce untrusted, expired, superseded, or externally indexed instructions that automatic context correctly rejects.<br />
+<strong>Remediation:</strong> Centralize one result-policy pipeline for context, CLI search, and public API search; optionally expose raw inspection only behind an explicit flag.</p>
+<h3 id="sec-06-no-projectworkspace-isolation-by-default-high-design-risk">SEC-06 — No project/workspace isolation by default — <strong>High · Design risk</strong></h3>
+<p>All projects share <code>~/.agent-memory</code>; skills do not derive or pass a project-specific directory. <code>README.md:16</code> describes project memory, but default behavior is global.</p>
+<p><strong>Impact:</strong> Facts, source paths, client names, and operational details from one repository can enter unrelated projects.<br />
+<strong>Remediation:</strong> Add explicit scopes (global/user/project), project IDs in entries, per-scope context policy, and migration tooling.</p>
+<h3 id="sec-07-memory-files-are-not-private-by-default-high-reproduced">SEC-07 — Memory files are not private by default — <strong>High · Reproduced</strong></h3>
+<p><code>ensureDirs()</code> uses default mkdir modes (<code>src/core.ts:68-71</code>) and writes inherit umask. Common <code>0022</code> produced <code>0755</code> directories and <code>0644</code> files.</p>
+<p><strong>Impact:</strong> Other local users may read memory on shared workstations or build hosts.<br />
+<strong>Remediation:</strong> Default to <code>0700</code> directories and <code>0600</code> files, preserve stricter existing modes, and document an opt-out for intentionally shared stores.</p>
+<h3 id="sec-08-skill-installuninstall-has-no-ownership-protection-high-reproduced">SEC-08 — Skill install/uninstall has no ownership protection — <strong>High · Reproduced</strong></h3>
+<p>Install blindly copies over <code>SKILL.md</code> (<code>src/core.ts:1025-1026</code>); uninstall blindly deletes it (<code>src/core.ts:1073</code>). Bash and PowerShell behave similarly.</p>
+<p><strong>Impact:</strong> User-customized or third-party skills can be destroyed.<br />
+<strong>Remediation:</strong> Store a manifest with version/hash/owner, refuse unknown files unless <code>--force</code>, back up modifications, and uninstall only files whose hash matches an installed version.</p>
+<h3 id="sec-09-external-memory-is-trusted-by-default-high-architecture-risk">SEC-09 — External memory is trusted by default — <strong>High · Architecture risk</strong></h3>
+<p><code>Source:</code> provenance does not affect trust. Stored Markdown is inserted into system context as instruction-like text; only exact manual metadata can suppress it.</p>
+<p><strong>Impact:</strong> Imported transcripts, copied documentation, or poisoned qmd content can become agent instructions.<br />
+<strong>Remediation:</strong> Model trust as structured metadata, default imported/external content to untrusted, quote memories as data, and maintain source allow/deny policies.</p>
+<h3 id="sec-10-secret-screening-is-narrow-and-raw-tools-bypass-legacy-redaction-medium-code-confirmed">SEC-10 — Secret screening is narrow and raw tools bypass legacy redaction — <strong>Medium · Code-confirmed</strong></h3>
+<p>The scanner covers four regex families (<code>src/core.ts:155-160</code>). It misses many JWT, PEM/private-key, database URL, password, Slack/npm/Azure, bearer, and provider-specific formats. Raw <code>read</code> and direct search return legacy content unchanged.</p>
+<p><strong>Impact:</strong> Sensitive values can persist and be surfaced to agents.<br />
+<strong>Remediation:</strong> Add broader provider patterns, PEM/JWT/URL credential checks, optional entropy scanning, bounded redacted reads by default, and explicit raw-inspection controls.</p>
+<hr />
+<h2 id="data-integrity-durability-and-scale">2. Data integrity, durability, and scale</h2>
+<h3 id="data-01-concurrent-writes-lose-entries-critical-reproduced">DATA-01 — Concurrent writes lose entries — <strong>Critical · Reproduced</strong></h3>
+<p>Appends are read → concatenate → truncate-and-rewrite (<code>src/core.ts:1414-1428</code>, <code>1534-1536</code>) with no inter-process lock or conflict detection.</p>
+<p><strong>Impact:</strong> The core multi-agent use case silently loses memory.<br />
+<strong>Remediation:</strong> Add cross-process locking and atomic temp-file replacement, or a safe append protocol with recovery tests.</p>
+<h3 id="data-02-writes-are-not-crash-safe-high-code-confirmed">DATA-02 — Writes are not crash-safe — <strong>High · Code-confirmed</strong></h3>
+<p><code>writeFileSync</code> truncates targets in place; there is no temp file, fsync, journal, checksum, or recovery copy.</p>
+<p><strong>Impact:</strong> Process/host failure or disk-full conditions can leave partial or empty high-value files.<br />
+<strong>Remediation:</strong> Write to a same-filesystem temp file, fsync, atomic rename, and retain a rotating backup.</p>
+<h3 id="data-03-distil-destructively-replaces-curated-memory-high-reproduced">DATA-03 — <code>distil</code> destructively replaces curated memory — <strong>High · Reproduced</strong></h3>
+<p>Only an exact <code>## Pinned</code> section is preserved (<code>src/core.ts:2168-2174</code>); <code>MEMORY.md</code> is overwritten at <code>src/core.ts:2255</code>.</p>
+<p><strong>Impact:</strong> Durable decisions not represented in daily/tag data disappear.<br />
+<strong>Remediation:</strong> Make preview the default, require <code>--apply</code>, back up the file, or generate a separate <code>INDEX.md</code>.</p>
+<h3 id="data-04-no-format-version-migrations-integrity-check-backup-or-repair-high-product-gap">DATA-04 — No format version, migrations, integrity check, backup, or repair — <strong>High · Product gap</strong></h3>
+<p>Production files contain no schema/version marker and there is no migration, verify, restore, retention, quota, or corruption-repair command.</p>
+<p><strong>Impact:</strong> Future parser changes and accidental corruption have no controlled recovery path.<br />
+<strong>Remediation:</strong> Define a versioned entry envelope, migration contract, <code>verify</code>, <code>backup</code>, <code>restore</code>, and retention/archive operations.</p>
+<h3 id="data-05-output-budgets-do-not-bound-input-work-high-code-confirmed">DATA-05 — Output budgets do not bound input work — <strong>High · Code-confirmed</strong></h3>
+<p>Context reads entire files synchronously before truncation; topic context scans all topic files; distil reads all daily/topic history.</p>
+<p><strong>Impact:</strong> Large histories can block the process or exhaust memory even though final context is capped at 16K.<br />
+<strong>Remediation:</strong> Implement bounded tail/head readers, file-size limits, incremental indexes, pagination, and streaming distillation.</p>
+<h3 id="data-06-reads-and-search-responses-are-unbounded-medium-code-confirmed">DATA-06 — Reads and search responses are unbounded — <strong>Medium · Code-confirmed</strong></h3>
+<p><code>memoryRead</code> and CLI read return complete files; direct qmd results have no response-byte cap.</p>
+<p><strong>Impact:</strong> A tool call can overflow an agent context, API response, terminal, or memory budget.<br />
+<strong>Remediation:</strong> Add default previews, <code>offset</code>/<code>limit</code>, maximum aggregate bytes, and explicit <code>--raw</code>/<code>--all</code> modes.</p>
+<h3 id="data-07-metadata-fields-permit-structural-injection-high-reproduced">DATA-07 — Metadata fields permit structural injection — <strong>High · Reproduced</strong></h3>
+<p>Only <code>sourceUri</code> is single-line sanitized (<code>src/core.ts:230-241</code>). <code>sessionId</code>, topic display name, and topic date can inject comment terminators, headings, lifecycle metadata, and arbitrary lines.</p>
+<p><strong>Impact:</strong> Entry boundaries, trust policy, provenance, and Markdown structure can be corrupted.<br />
+<strong>Remediation:</strong> Validate every metadata field, escape comment delimiters, enforce date/schema formats, and generate opaque entry IDs.</p>
+<h3 id="data-08-scratchpad-multiline-content-is-silently-lost-medium-reproduced">DATA-08 — Scratchpad multiline content is silently lost — <strong>Medium · Reproduced</strong></h3>
+<p>Serialization permits newlines, but parsing recognizes only checklist-prefixed lines. Subsequent mutation rewrites only parsed items.</p>
+<p><strong>Impact:</strong> User TODO detail disappears without warning.<br />
+<strong>Remediation:</strong> Reject/escape newlines, support indented continuation lines, or store structured item blocks with IDs.</p>
+<h3 id="data-09-date-and-mode-contracts-drift-medium-reproduced">DATA-09 — Date and mode contracts drift — <strong>Medium · Reproduced</strong></h3>
+<p>README advertises write <code>--date</code> and generic append/overwrite mode, but daily writes always use <code>todayStr()</code> (<code>src/core.ts:1414</code>) and daily/topic mode is silently append. Day and expiry calculations use UTC ISO semantics.</p>
+<p><strong>Impact:</strong> Backfills land on the wrong day; automation believes overwrite/date were honored; local-day boundaries surprise users.<br />
+<strong>Remediation:</strong> Define target-specific options, reject unsupported combinations, validate dates, and expose/document timezone behavior.</p>
+<h3 id="data-10-distil-silently-truncates-taxonomy-and-misreports-totals-medium-reproduced">DATA-10 — Distil silently truncates taxonomy and misreports totals — <strong>Medium · Reproduced</strong></h3>
+<p>Only 15 section tags and 20 index tags are emitted (<code>src/core.ts:2164-2165</code>); <code>totalTags</code> is <code>indexTags.length</code> (<code>2267</code>) rather than the true total.</p>
+<p><strong>Impact:</strong> Less-common knowledge disappears from the generated index and metrics are misleading.<br />
+<strong>Remediation:</strong> Report true totals, expose caps in output, paginate/index all tags, and emit truncation diagnostics.</p>
+<h3 id="data-11-entry-identity-and-topic-naming-are-weak-medium-design-risk">DATA-11 — Entry identity and topic naming are weak — <strong>Medium · Design risk</strong></h3>
+<p>Timestamp-to-second plus an eight-character session label is not guaranteed unique. Slug collisions merge distinct topic names; backlink dates can dangle.</p>
+<p><strong>Impact:</strong> Reliable supersession, deduplication, audit, and targeted editing are difficult.<br />
+<strong>Remediation:</strong> Assign immutable UUID/ULID entry IDs and store normalized topic metadata separately from display names.</p>
+<hr />
+<h2 id="qmd-integration-and-operations">3. qmd integration and operations</h2>
+<h3 id="qmd-01-cli-writes-do-not-start-background-embedding-high-reproduced">QMD-01 — CLI writes do not start background embedding — <strong>High · Reproduced</strong></h3>
+<p>Embedding is scheduled after update on a five-second unref’ed timer (<code>src/core.ts:850-861</code>). A one-shot CLI exits before the timer fires.</p>
+<p><strong>Impact:</strong> Keyword index updates, but semantic/deep embeddings remain stale until explicit sync.<br />
+<strong>Remediation:</strong> Spawn detached embedding immediately after update, use a persistent worker, or mark semantic indexing manual and report staleness clearly.</p>
+<h3 id="qmd-02-background-update-blocks-writes-medium-reproduced">QMD-02 — “Background” update blocks writes — <strong>Medium · Reproduced</strong></h3>
+<p>Writes await qmd detection and the update timer/child remains referenced (<code>src/core.ts:864-873</code>).</p>
+<p><strong>Impact:</strong> Every one-shot write can take seconds; the README’s fire-and-forget claim is false.<br />
+<strong>Remediation:</strong> Queue work in a detached helper/daemon or make update explicitly synchronous with honest status and timing.</p>
+<h3 id="qmd-03-initsync-can-report-success-on-failure-high-reproduced">QMD-03 — Init/sync can report success on failure — <strong>High · Reproduced</strong></h3>
+<p><code>runQmdUpdateNow()</code> discards callback errors (<code>src/core.ts:876-882</code>); init sets <code>indexUpdated=true</code> unconditionally; sync returns exit code 0 when update/embed fail.</p>
+<p><strong>Impact:</strong> Automation and users believe search is healthy when it is stale or absent.<br />
+<strong>Remediation:</strong> Propagate typed errors, set non-zero exit codes, and include actionable stderr in JSON.</p>
+<h3 id="qmd-04-index-failures-are-silent-and-have-no-retry-queue-medium-code-confirmed">QMD-04 — Index failures are silent and have no retry queue — <strong>Medium · Code-confirmed</strong></h3>
+<p>Scheduled update callbacks ignore errors; detached embedding has no durable status, backoff, or per-write pending marker.</p>
+<p><strong>Impact:</strong> Search silently diverges from Markdown source of truth.<br />
+<strong>Remediation:</strong> Persist dirty state, retry with bounded backoff, expose last successful sync/error, and make <code>status</code> authoritative.</p>
+<h3 id="qmd-05-cold-semantic-latency-is-operationally-large-medium-reproduced">QMD-05 — Cold semantic latency is operationally large — <strong>Medium · Reproduced</strong></h3>
+<p>The isolated live eval’s first semantic query took 42.1 seconds; later queries took ~2.4 seconds.</p>
+<p><strong>Impact:</strong> CLI search can appear hung; 3-second prompt retrieval silently drops relevant memory on cold starts.<br />
+<strong>Remediation:</strong> Prewarm models, expose cold/warm telemetry, make timeouts configurable, and document measured latency distributions.</p>
+<h3 id="qmd-06-qmdmodel-versions-are-unpinned-and-unreported-medium-reproducibilitysupply-chain-risk">QMD-06 — qmd/model versions are unpinned and unreported — <strong>Medium · Reproducibility/supply-chain risk</strong></h3>
+<p>Installation points to an unpinned Git repository; reports/status do not capture qmd version, model, index format, or corpus hash.</p>
+<p><strong>Impact:</strong> Behavior and eval results drift across installations; upgrades can break command parsing.<br />
+<strong>Remediation:</strong> Pin supported versions/releases, implement compatibility checks, and record version/model/index metadata.</p>
+<h3 id="qmd-07-postinstall-can-hang-indefinitely-medium-code-confirmed">QMD-07 — Postinstall can hang indefinitely — <strong>Medium · Code-confirmed</strong></h3>
+<p><code>scripts/postinstall.cjs</code> runs synchronous <code>qmd status</code> without a timeout.</p>
+<p><strong>Impact:</strong> A broken qmd executable can block <code>npm install</code>.<br />
+<strong>Remediation:</strong> Add a short timeout, make detection opt-in or non-blocking, and never make optional tooling part of install critical path.</p>
+<h3 id="qmd-08-operational-configuration-is-incomplete-low-docs-gap">QMD-08 — Operational configuration is incomplete — <strong>Low · Docs gap</strong></h3>
+<p><code>AGENT_MEMORY_QMD_EMBED</code> exists but is undocumented; <code>sync</code>, <code>distil</code>, and status <code>--probe</code> are absent from the README command table.</p>
+<p><strong>Remediation:</strong> Publish a complete config/command reference with update/embed lifecycle diagrams and failure semantics.</p>
+<h3 id="qmd-09-multi-process-indexing-is-uncoordinated-medium-architecture-risk">QMD-09 — Multi-process indexing is uncoordinated — <strong>Medium · Architecture risk</strong></h3>
+<p>Each CLI process can detect, update, and attempt embedding independently; there is no shared lock or coalescing daemon.</p>
+<p><strong>Impact:</strong> Concurrent agents create redundant expensive work and may contend on qmd’s index.<br />
+<strong>Remediation:</strong> Single-flight updates per collection, process lock, and observable queue state.</p>
+<hr />
+<h2 id="cli-public-api-cross-platform-and-agent-integration">4. CLI, public API, cross-platform, and agent integration</h2>
+<h3 id="api-01-runtime-enums-are-not-validated-high-reproduced">API-01 — Runtime enums are not validated — <strong>High · Reproduced</strong></h3>
+<p>In JavaScript, invalid write/read targets fall through to long-term behavior; invalid scratchpad actions return ordinary non-error results.</p>
+<p><strong>Impact:</strong> Bad integrations mutate/read the wrong file without detection.<br />
+<strong>Remediation:</strong> Validate every public API input at runtime and use a discriminated error/result contract.</p>
+<h3 id="api-02-search-limit-accepts-invalid-and-extreme-values-medium-reproduced">API-02 — Search limit accepts invalid and extreme values — <strong>Medium · Reproduced</strong></h3>
+<p><code>Number.parseInt</code> is unchecked (<code>src/cli.ts:391</code>); <code>NaN</code>, zero, negative, and huge limits are passed to qmd.</p>
+<p><strong>Impact:</strong> Unclear failures or resource-heavy queries.<br />
+<strong>Remediation:</strong> Require an integer within a documented bound, e.g. 1–100.</p>
+<h3 id="api-03-windows-default-home-handling-is-inconsistent-medium-code-confirmed">API-03 — Windows default home handling is inconsistent — <strong>Medium · Code-confirmed</strong></h3>
+<p>Core default uses <code>HOME ?? "~"</code> (<code>src/core.ts:17</code>), while installer code correctly falls back to <code>USERPROFILE</code>.</p>
+<p><strong>Impact:</strong> Windows users without <code>HOME</code> can write under a literal <code>~</code> path.<br />
+<strong>Remediation:</strong> Use <code>os.homedir()</code> consistently and test Windows path behavior.</p>
+<h3 id="api-04-multilingual-storage-conventions-are-ascii-only-medium-reproduced">API-04 — Multilingual storage conventions are ASCII-only — <strong>Medium · Reproduced</strong></h3>
+<p>Japanese/Chinese topic names slugify to empty (<code>src/core.ts:112-120</code>); non-ASCII hashtags are ignored (<code>1882-1887</code>).</p>
+<p><strong>Impact:</strong> Multilingual users can retrieve content semantically but cannot organize it naturally.<br />
+<strong>Remediation:</strong> Unicode-aware normalization/slugs/tags with collision-safe IDs.</p>
+<h3 id="api-05-library-is-a-mutable-singleton-high-architecture-risk">API-05 — Library is a mutable singleton — <strong>High · Architecture risk</strong></h3>
+<p>Memory paths, qmd flags, timers, collection, home paths, and child-process adapters are module globals.</p>
+<p><strong>Impact:</strong> Multiple stores or tenants cannot be used safely in one process; concurrent tests/integrations interfere.<br />
+<strong>Remediation:</strong> Introduce an instance-based <code>MemoryStore</code> with immutable configuration and injected adapters.</p>
+<h3 id="api-06-synchronous-io-blocks-embedding-hosts-medium-architecture-risk">API-06 — Synchronous I/O blocks embedding hosts — <strong>Medium · Architecture risk</strong></h3>
+<p>Core uses synchronous file APIs throughout while being published as a reusable library.</p>
+<p><strong>Impact:</strong> Large stores block agent/server event loops.<br />
+<strong>Remediation:</strong> Provide async production APIs; keep sync wrappers only for the CLI if desired.</p>
+<h3 id="api-07-real-agent-provenance-is-not-captured-high-product-gap">API-07 — Real agent provenance is not captured — <strong>High · Product gap</strong></h3>
+<p>CLI hardcodes <code>sessionId:"cli"</code> (<code>src/cli.ts:197</code>); bundled skill write examples never include <code>--source-uri</code>.</p>
+<p><strong>Impact:</strong> Users cannot determine whether Claude, Codex, Cursor, or another session authored a memory. The provenance eval tests a fixture path, not real installed behavior.<br />
+<strong>Remediation:</strong> Pass agent/session/run IDs automatically and support structured source records.</p>
+<h3 id="api-08-largemultiline-input-relies-on-command-arguments-medium-usabilitysecurity-risk">API-08 — Large/multiline input relies on command arguments — <strong>Medium · Usability/security risk</strong></h3>
+<p>There is no stdin/file input mode. Content appears in shell history/process listings and is constrained by OS argument limits.</p>
+<p><strong>Remediation:</strong> Add <code>--content-file</code>, <code>--stdin</code>, and JSON request modes; discourage sensitive content in argv.</p>
+<h3 id="api-09-agent-lifecycle-is-instruction-based-not-guaranteed-medium-product-contract-gap">API-09 — Agent lifecycle is instruction-based, not guaranteed — <strong>Medium · Product-contract gap</strong></h3>
+<p>Except for Claude’s inline directive, skills ask agents to run context/search/write commands. Hosts do not guarantee execution, session-end logging, or prompt-aware retrieval.</p>
+<p><strong>Impact:</strong> Behavior varies by model/host and can silently disappear.<br />
+<strong>Remediation:</strong> Offer native hooks where available, expose capability levels per host, and avoid universal automation claims.</p>
+<h3 id="api-10-public-package-surface-includes-test-internals-low-api-hygiene">API-10 — Public package surface includes test internals — <strong>Low · API hygiene</strong></h3>
+<p>Generated declarations export <code>_setBaseDir</code>, process overrides, qmd flags, timers, and other test hooks. The tarball also ships full <code>src/</code> in addition to <code>dist/</code>.</p>
+<p><strong>Impact:</strong> Consumers couple to unstable internals and semver obligations grow.<br />
+<strong>Remediation:</strong> Curate package exports, move test hooks behind a test-only subpath, and ship only necessary source artifacts.</p>
+<h3 id="api-11-cli-parser-is-intentionally-minimal-but-under-validates-low-usability">API-11 — CLI parser is intentionally minimal but under-validates — <strong>Low · Usability</strong></h3>
+<p>Unknown flags are ignored; <code>--key=value</code>, <code>--</code> termination, short flags, and values beginning with <code>--</code> are unsupported.</p>
+<p><strong>Remediation:</strong> Reject unknown flags and either document the grammar precisely or adopt a small mature parser.</p>
+<hr />
+<h2 id="evaluation-dataset-and-methodology">5. Evaluation dataset and methodology</h2>
+<h3 id="eval-01-exact-marker-oracle-creates-a-semantic-false-failure-high-reproduced">EVAL-01 — Exact-marker oracle creates a semantic false failure — <strong>High · Reproduced</strong></h3>
+<p>README says AgentMemory “is not a Python SDK, vector database, or knowledge graph” (<code>README.md:26</code>). The probe requires exact “does not provide …” strings (<code>external-feedback-v1.json:397+</code>) and reports <code>product-identity</code> as confirmed.</p>
+<p><strong>Remediation:</strong> Use normalized concepts, accepted regex alternatives, or a structured documentation contract rather than exact marketing copy.</p>
+<h3 id="eval-02-dataset-validation-permits-vacuous-cases-high-reproduced">EVAL-02 — Dataset validation permits vacuous cases — <strong>High · Reproduced</strong></h3>
+<p><code>stringArray()</code> accepts <code>[]</code> (<code>eval/dataset.ts:7</code>); fixture bodies and evaluator-specific contracts are mostly unvalidated; empty oracles can pass.</p>
+<p><strong>Remediation:</strong> Adopt JSON Schema/Zod-style complete runtime validation and require at least one meaningful assertion per executable probe.</p>
+<h3 id="eval-03-strict-mode-cannot-distinguish-regression-from-known-gap-high-reproduced">EVAL-03 — Strict mode cannot distinguish regression from known gap — <strong>High · Reproduced</strong></h3>
+<p><code>--strict</code> fails on any failed probe (<code>eval/run.ts:415</code>). The shipped transcript-import product opportunity is intentionally expected to fail.</p>
+<p><strong>Remediation:</strong> Add expected status/baseline, regression-gate flags, and separate “known issue reproduced” from “unexpected regression.”</p>
+<h3 id="eval-04-evaluators-are-partly-hard-coded-or-mislabeled-medium-code-confirmed">EVAL-04 — Evaluators are partly hard-coded or mislabeled — <strong>Medium · Code-confirmed</strong></h3>
+<p>Prompt routing executes a baked scenario (<code>eval/run.ts:95+</code>); <code>cross-agent</code> is ordinary context construction (<code>202</code>); docs boundary always reads README.</p>
+<p><strong>Impact:</strong> Dataset fields do not fully drive execution, and “Claude-to-Codex” is not an actual two-agent integration.<br />
+<strong>Remediation:</strong> Make evaluators declarative and rename smoke proxies honestly.</p>
+<h3 id="eval-05-this-is-a-regressiondiagnostic-suite-not-an-independent-benchmark-medium-methodology">EVAL-05 — This is a regression/diagnostic suite, not an independent benchmark — <strong>Medium · Methodology</strong></h3>
+<p>Dataset, fixes, and probes landed together in commit <code>ac678f6</code>; there is no holdout, blinded labeling, or independent scorer.</p>
+<p><strong>Remediation:</strong> Separate development fixtures from a frozen external holdout and report both.</p>
+<h3 id="eval-06-external-feedback-provenance-is-not-auditable-enough-medium-methodology">EVAL-06 — External-feedback provenance is not auditable enough — <strong>Medium · Methodology</strong></h3>
+<p>Sources have URLs/titles but no author, publication/access dates, archived snapshot, exact excerpt, or per-claim quote. One of four sources is the repository’s own review.</p>
+<p><strong>Remediation:</strong> Store source snapshots/excerpts and trace each issue to exact evidence.</p>
+<h3 id="eval-07-multilingual-corpus-has-very-low-external-validity-medium-methodology">EVAL-07 — Multilingual corpus has very low external validity — <strong>Medium · Methodology</strong></h3>
+<p>Five synthetic documents, four probes, one query per condition, top-1 substring checks, and minimal distractors cannot establish broad multilingual quality.</p>
+<p><strong>Remediation:</strong> Add many paraphrases/languages, lexical and semantic positive controls, hard negatives, distractor scaling, and real anonymized corpora where permitted.</p>
+<h3 id="eval-08-reports-omit-retrieval-science-and-environment-metadata-medium-methodology">EVAL-08 — Reports omit retrieval science and environment metadata — <strong>Medium · Methodology</strong></h3>
+<p>No qmd/model/version, platform, corpus hash, score/margin, MRR/nDCG/recall, seed, repeated trials, or latency thresholds are recorded.</p>
+<p><strong>Remediation:</strong> Emit a reproducibility manifest and standard ranking/latency metrics with confidence intervals.</p>
+<h3 id="eval-09-issue-verdict-aggregation-is-simplistic-medium-methodology">EVAL-09 — Issue verdict aggregation is simplistic — <strong>Medium · Methodology</strong></h3>
+<p>Any failure becomes <code>confirmed</code>, all passes become <code>not-reproduced</code>, and a mixture becomes <code>mixed</code> (<code>eval/run.ts:341-360</code>), regardless of expected outcomes, severity, or probe applicability.</p>
+<p><strong>Remediation:</strong> Model claims, requirements, weights, expected outcomes, and evidence strength explicitly.</p>
+<h3 id="eval-10-eval-is-not-a-real-ci-product-gate-high-delivery-gap">EVAL-10 — Eval is not a real CI product gate — <strong>High · Delivery gap</strong></h3>
+<p>CI omits <code>test:eval</code>; publish runs unit-only <code>npm test</code>. Even <code>test:eval</code> primarily verifies harness execution and intentionally accepts product probe failures.</p>
+<p><strong>Remediation:</strong> Run harness validation in CI, maintain an expected baseline, fail only on regressions, and schedule isolated live-qmd compatibility jobs.</p>
+<hr />
+<h2 id="cicd-packaging-installers-docs-and-governance">6. CI/CD, packaging, installers, docs, and governance</h2>
+<h3 id="ops-01-cross-platformruntime-claims-exceed-ci-coverage-high">OPS-01 — Cross-platform/runtime claims exceed CI coverage — <strong>High</strong></h3>
+<p>CI runs only Ubuntu with Node 20 and mutable Bun latest. There is no Windows/macOS or Node 22/24 matrix.</p>
+<p><strong>Remediation:</strong> Add OS/runtime matrices and platform-specific installer/path tests.</p>
+<h3 id="ops-02-qmd-integration-is-not-continuously-tested-medium">OPS-02 — qmd integration is not continuously tested — <strong>Medium</strong></h3>
+<p>There is no pinned real-qmd CI lane. Local “qmd-free” suites can accidentally call the user’s real global qmd because update mode is not forced off.</p>
+<p><strong>Remediation:</strong> Force qmd off in unit tests, use shims for deterministic integration, and add a scheduled pinned real-qmd job.</p>
+<h3 id="ops-03-critical-failure-modes-lack-tests-medium">OPS-03 — Critical failure modes lack tests — <strong>Medium</strong></h3>
+<p>No committed tests cover traversal, locking/concurrency, symlinks, permissions, disk failures, large inputs, pagination, backups, malformed metadata, collection path mismatch, skill ownership, or Windows behavior.</p>
+<p><strong>Remediation:</strong> Convert every reproduced issue in this report into a regression test; add coverage and mutation/fault-injection targets.</p>
+<h3 id="ops-04-npm-publication-lacks-modern-provenance-high">OPS-04 — npm publication lacks modern provenance — <strong>High</strong></h3>
+<p>Publish uses a long-lived <code>NPM_TOKEN</code> and plain <code>npm publish</code> (<code>publish-npm.yml:16,48</code>) without trusted publishing or provenance attestations.</p>
+<p><strong>Remediation:</strong> Use npm OIDC trusted publishing, <code>--provenance</code>, protected release environments, and immutable build inputs.</p>
+<h3 id="ops-05-build-dependenciesactions-are-mutable-medium">OPS-05 — Build dependencies/actions are mutable — <strong>Medium</strong></h3>
+<p>GitHub Actions use major tags; Bun is <code>latest</code>; qmd is installed from an unpinned Git URL.</p>
+<p><strong>Remediation:</strong> Pin actions by commit SHA, pin Bun, and define a tested qmd version range/release checksum.</p>
+<h3 id="ops-06-homebrew-update-workflow-trusts-unvalidated-manual-input-high-code-confirmed">OPS-06 — Homebrew update workflow trusts unvalidated manual input — <strong>High · Code-confirmed</strong></h3>
+<p><code>${{ inputs.tag }}</code> is interpolated into shell/Python/branch fields (<code>update-homebrew-formula.yml:31+</code>) without strict semver validation; <code>curl -L</code> lacks <code>--fail</code> (<code>:48</code>).</p>
+<p><strong>Impact:</strong> Authorized dispatch input can break command/script structure or update the formula with a hashed error page.<br />
+<strong>Remediation:</strong> Pass values through environment variables, validate <code>^v\d+\.\d+\.\d+$</code>, use <code>curl --fail --show-error</code>, and verify archive/package version.</p>
+<h3 id="ops-07-installed-skills-have-no-versionupgrade-manifest-medium">OPS-07 — Installed skills have no version/upgrade manifest — <strong>Medium</strong></h3>
+<p>There is no recorded package version, source hash, install timestamp, or modified-state detection.</p>
+<p><strong>Impact:</strong> Skills become stale after package upgrades and cannot be safely updated/uninstalled.<br />
+<strong>Remediation:</strong> Add a manifest and <code>install-skills --check/--upgrade/--force</code> lifecycle.</p>
+<h3 id="ops-08-installer-implementations-drift-low">OPS-08 — Installer implementations drift — <strong>Low</strong></h3>
+<p>PowerShell has no uninstall mode; Bash uses unnecessary <code>eval</code>; core, Bash, and PowerShell duplicate detection/ownership logic.</p>
+<p><strong>Remediation:</strong> Drive all installers from one manifest/implementation and test parity on each OS.</p>
+<h3 id="ops-09-website-and-design-docs-overclaimstale-medium">OPS-09 — Website and design docs overclaim/stale — <strong>Medium</strong></h3>
+<p>Website says qmd surfaces memory into “every turn, automatically” (<code>docs/index.html:471-472,515,557</code>), while README correctly says session-start context plus explicit search (<code>README.md:173</code>). <code>design.md</code> has obsolete line counts, test counts, injection behavior, and “no entry boundary tracking.” Historical README copy at <code>:297</code> repeats old automatic behavior.</p>
+<p><strong>Remediation:</strong> Establish one capability matrix/source of truth and test important claims as documentation contracts.</p>
+<h3 id="ops-10-main-cliconfig-reference-is-incomplete-low">OPS-10 — Main CLI/config reference is incomplete — <strong>Low</strong></h3>
+<p>README table omits <code>version</code>, <code>distil</code>, and <code>sync</code>; config omits embed mode; status <code>--probe</code> and destructive distil safety deserve stronger documentation.</p>
+<h3 id="ops-11-security-and-maintenance-governance-is-absent-medium">OPS-11 — Security and maintenance governance is absent — <strong>Medium</strong></h3>
+<p>No <code>SECURITY.md</code>, supported-version policy, private disclosure channel, CODEOWNERS, dependency bot, contribution guide, or issue templates.</p>
+<p><strong>Impact:</strong> Sensitive-memory vulnerabilities and dependency updates lack an operational process.<br />
+<strong>Remediation:</strong> Add disclosure/response SLAs, ownership, automation, and support policy.</p>
+<h3 id="ops-12-dependencyruntime-alignment-needs-maintenance-low">OPS-12 — Dependency/runtime alignment needs maintenance — <strong>Low</strong></h3>
+<p>One low-severity dev-only esbuild advisory arrives through apparently unused <code>tsx</code>; Biome/tsx/types are behind wanted versions; <code>@types/node</code> targets 25 while runtime floor is 20; npm and Bun lockfiles require manual parity.</p>
+<p><strong>Remediation:</strong> Remove unused dependencies, align Node types with supported runtimes, automate updates, and verify lockfile consistency.</p>
+<h3 id="ops-13-local-and-release-gates-are-incompleteinconsistent-medium">OPS-13 — Local and release gates are incomplete/inconsistent — <strong>Medium</strong></h3>
+<p>Tracked pre-commit runs unit-only <code>npm test</code> plus lint, while repository instructions require unit, CLI, lint, and build. Publish likewise omits CLI/eval tests.</p>
+<p><strong>Remediation:</strong> Define one <code>verify</code> script used by hooks, CI, and release; add eval-baseline and package smoke checks.</p>
+<h3 id="ops-14-homebrew-test-is-weak-and-environment-sensitive-low">OPS-14 — Homebrew test is weak and environment-sensitive — <strong>Low</strong></h3>
+<p>Formula test runs only <code>status</code>, which creates directories and may inspect a real qmd environment; it does not validate isolated write/read behavior.</p>
+<p><strong>Remediation:</strong> Set a temporary <code>AGENT_MEMORY_DIR</code>, disable qmd, and test version plus write/read round trip.</p>
+<hr />
+<h2 id="strengths-worth-preserving">Strengths worth preserving</h2>
+<ul>
+<li>Zero production npm dependencies in the core path.</li>
+<li>Plain Markdown remains inspectable, portable, and manually recoverable.</li>
+<li>Strict TypeScript and substantial deterministic unit/CLI coverage.</li>
+<li>Production child-process calls use argv arrays rather than shell interpolation.</li>
+<li>Context output has a complete 16K cap and section priorities are explicit.</li>
+<li>Automatic context search applies conservative source-root verification.</li>
+<li>Secret screening, lifecycle filtering, and provenance show the right security direction even though the boundary needs hardening.</li>
+<li>Tests generally use temporary memory directories; npm package portability has an end-to-end pack/install smoke test.</li>
+<li>Live multilingual qmd smoke probes passed in the reviewed environment.</li>
+</ul>
+<hr />
+<h1 id="recommended-remediation-plan">Recommended remediation plan</h1>
+<h2 id="phase-0-security-and-data-loss-release-blockers">Phase 0 — Security and data-loss release blockers</h2>
+<ol type="1">
+<li>Replace lifecycle parsing with a strict, whitespace-insensitive, versioned entry envelope.</li>
+<li>Enforce canonical root containment for every read/write and reject symlinks.</li>
+<li>Bind qmd collection identity to canonical memory directory and filter all search surfaces.</li>
+<li>Implement cross-process locking plus atomic durable writes.</li>
+<li>Add regression tests for the exact reproduced exploits and races.</li>
+</ol>
+<h2 id="phase-1-durability-and-privacy">Phase 1 — Durability and privacy</h2>
+<ol type="1">
+<li>Restrict filesystem permissions.</li>
+<li>Add backup/restore/verify and make distil non-destructive by default.</li>
+<li>Add project/global scopes and structured trust/provenance.</li>
+<li>Bound reads, search outputs, file sizes, and history processing.</li>
+<li>Introduce stable entry IDs and runtime schemas.</li>
+</ol>
+<h2 id="phase-2-qmd-and-api-reliability">Phase 2 — qmd and API reliability</h2>
+<ol type="1">
+<li>Replace singleton globals with instance-based store configuration.</li>
+<li>Redesign update/embed as an observable single-flight worker or explicit sync model.</li>
+<li>Propagate errors and non-zero exit codes; add retry/dirty state.</li>
+<li>Pin and report qmd/model/index versions.</li>
+<li>Add async/paginated APIs, stdin/file inputs, Unicode-safe topics/tags, and full runtime validation.</li>
+</ol>
+<h2 id="phase-3-evaluation-credibility">Phase 3 — Evaluation credibility</h2>
+<ol type="1">
+<li>Fix the semantic false failure and add expected outcomes/baselines.</li>
+<li>Fully validate the dataset schema and make evaluators declarative.</li>
+<li>Capture source excerpts/snapshots and split development from holdout data.</li>
+<li>Expand multilingual/ranking/latency methodology and emit reproducibility manifests.</li>
+<li>Add baseline eval and scheduled pinned live-qmd jobs to CI.</li>
+</ol>
+<h2 id="phase-4-delivery-and-operational-maturity">Phase 4 — Delivery and operational maturity</h2>
+<ol type="1">
+<li>Add Windows/macOS and Node LTS matrices.</li>
+<li>Adopt npm trusted publishing/provenance and SHA-pinned actions.</li>
+<li>Harden Homebrew automation and installer ownership/versioning.</li>
+<li>Create one verify gate for local hooks, CI, and releases.</li>
+<li>Publish security/support/governance policies and reconcile website/design/README claims.</li>
+</ol>
+<hr />
+<h2 id="review-limitations">Review limitations</h2>
+<p>This was a static and targeted dynamic review, not a formal penetration test. Linux/macOS behavior was exercised locally; Windows behavior was inspected but not executed. Live qmd evaluation used the installed qmd environment and an isolated corpus, but the current harness does not record qmd/model versions. Findings labeled <strong>Reproduced</strong> have direct probe evidence; <strong>Code-confirmed</strong> findings follow deterministically from implementation; <strong>Design risk/Product gap</strong> findings require product-policy decisions but are material to production readiness.</p>
+</article>
+  <script>
+(() => {
+  function normalizePreviewAnnotationLabel(text) {
+    return String(text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\s*\n\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  function advancePastBacktickSpan(source, startIndex) {
+    let fenceLength = 1;
+    while (source[startIndex + fenceLength] === "`") fenceLength += 1;
+
+    let index = startIndex + fenceLength;
+    while (index < source.length) {
+      const ch = source[index];
+      if (ch === "\\") {
+        index = Math.min(source.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        let runLength = 1;
+        while (source[index + runLength] === "`") runLength += 1;
+        if (runLength === fenceLength) {
+          return index + runLength;
+        }
+        index += runLength;
+        continue;
+      }
+      if (ch === "\n") {
+        return index + 1;
+      }
+      index += 1;
+    }
+
+    return source.length;
+  }
+
+  function readInlineAnnotationMarkerAt(source, startIndex) {
+    const text = String(source || "");
+    if (startIndex < 0 || startIndex + 4 > text.length) return null;
+    if (text[startIndex] !== "[" || text.slice(startIndex, startIndex + 4).toLowerCase() !== "[an:") {
+      return null;
+    }
+
+    let index = startIndex + 4;
+    while (index < text.length && /\s/.test(text[index])) index += 1;
+    const bodyStart = index;
+    let squareDepth = 0;
+
+    while (index < text.length) {
+      const ch = text[index];
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(text, index);
+        continue;
+      }
+      if (ch === "[") {
+        squareDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "]") {
+        if (squareDepth === 0) {
+          const end = index + 1;
+          return {
+            start: startIndex,
+            end: end,
+            raw: text.slice(startIndex, end),
+            body: text.slice(bodyStart, index),
+          };
+        }
+        squareDepth -= 1;
+        index += 1;
+        continue;
+      }
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function collectInlineAnnotationMarkers(text) {
+    const source = String(text || "");
+    const markers = [];
+    let index = 0;
+
+    while (index < source.length) {
+      const ch = source[index];
+      if (ch === "\\") {
+        index = Math.min(source.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(source, index);
+        continue;
+      }
+      if (ch === "[" && source.slice(index, index + 4).toLowerCase() === "[an:") {
+        const marker = readInlineAnnotationMarkerAt(source, index);
+        if (marker) {
+          markers.push(marker);
+          index = marker.end;
+          continue;
+        }
+      }
+      index += 1;
+    }
+
+    return markers;
+  }
+
+  function replaceInlineAnnotationMarkers(text, annotationReplacer, textReplacer) {
+    const source = String(text || "");
+    const markers = collectInlineAnnotationMarkers(source);
+    const replaceAnnotation = typeof annotationReplacer === "function"
+      ? annotationReplacer
+      : function(marker) { return marker.raw; };
+    const replaceText = typeof textReplacer === "function"
+      ? textReplacer
+      : function(segment) { return segment; };
+
+    if (markers.length === 0) {
+      return replaceText(source);
+    }
+
+    let out = "";
+    let lastIndex = 0;
+    markers.forEach(function(marker) {
+      if (marker.start > lastIndex) {
+        out += String(replaceText(source.slice(lastIndex, marker.start)) ?? "");
+      }
+      out += String(replaceAnnotation(marker) ?? "");
+      lastIndex = marker.end;
+    });
+    if (lastIndex < source.length) {
+      out += String(replaceText(source.slice(lastIndex)) ?? "");
+    }
+    return out;
+  }
+
+  function escapeHtml(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function isWordChar(ch) {
+    return typeof ch === "string" && /[A-Za-z0-9]/.test(ch);
+  }
+
+  function readInlineMarkdownLinkAt(source, startIndex) {
+    const text = String(source || "");
+    if (text[startIndex] !== "[") return null;
+
+    let index = startIndex + 1;
+    let squareDepth = 0;
+    while (index < text.length) {
+      const ch = text[index];
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(text, index);
+        continue;
+      }
+      if (ch === "[") {
+        squareDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "]") {
+        if (squareDepth === 0) break;
+        squareDepth -= 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "\n") return null;
+      index += 1;
+    }
+
+    if (index >= text.length || text[index] !== "]" || text[index + 1] !== "(") return null;
+
+    index += 2;
+    let parenDepth = 0;
+    while (index < text.length) {
+      const ch = text[index];
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(text, index);
+        continue;
+      }
+      if (ch === "(") {
+        parenDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (ch === ")") {
+        if (parenDepth === 0) {
+          return {
+            type: "literal",
+            raw: text.slice(startIndex, index + 1),
+            end: index + 1,
+          };
+        }
+        parenDepth -= 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "\n") return null;
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function readDelimitedPreviewTokenAt(source, startIndex, open, close, allowNewlines) {
+    const text = String(source || "");
+    if (text.slice(startIndex, startIndex + open.length) !== open) return null;
+
+    let index = startIndex + open.length;
+    while (index < text.length) {
+      const ch = text[index];
+      if (!allowNewlines && ch === "\n") return null;
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (text.slice(index, index + close.length) === close) {
+        return {
+          type: "math",
+          raw: text.slice(startIndex, index + close.length),
+          end: index + close.length,
+        };
+      }
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function readInlineMathTokenAt(source, startIndex) {
+    const text = String(source || "");
+    if (text[startIndex] === "\\" && text[startIndex + 1] === "(") {
+      return readDelimitedPreviewTokenAt(text, startIndex, "\\(", "\\)", true);
+    }
+    if (text[startIndex] === "\\" && text[startIndex + 1] === "[") {
+      return readDelimitedPreviewTokenAt(text, startIndex, "\\[", "\\]", true);
+    }
+    if (text[startIndex] === "$" && text[startIndex + 1] === "$") {
+      return readDelimitedPreviewTokenAt(text, startIndex, "$$", "$$", true);
+    }
+    if (text[startIndex] === "$" && text[startIndex + 1] !== "$" && text[startIndex + 1] && !/\s/.test(text[startIndex + 1])) {
+      const token = readDelimitedPreviewTokenAt(text, startIndex, "$", "$", false);
+      if (token && token.raw.length > 2) return token;
+    }
+    return null;
+  }
+
+  function readBareUrlTokenAt(source, startIndex) {
+    const text = String(source || "").slice(startIndex);
+    const match = text.match(/^https?:\/\/[^\s<]+/i);
+    if (!match) return null;
+    return {
+      type: "literal",
+      raw: match[0],
+      end: startIndex + match[0].length,
+    };
+  }
+
+  function readAnnotationPreviewProtectedTokenAt(source, startIndex) {
+    const text = String(source || "");
+    if (startIndex < 0 || startIndex >= text.length) return null;
+
+    if (text[startIndex] === "`") {
+      const end = advancePastBacktickSpan(text, startIndex);
+      return {
+        type: "code",
+        raw: text.slice(startIndex, end),
+        end: end,
+      };
+    }
+
+    const linkToken = text[startIndex] === "["
+      ? readInlineMarkdownLinkAt(text, startIndex)
+      : null;
+    if (linkToken) return linkToken;
+
+    const mathToken = (text[startIndex] === "$" || text[startIndex] === "\\")
+      ? readInlineMathTokenAt(text, startIndex)
+      : null;
+    if (mathToken) return mathToken;
+
+    const urlToken = text[startIndex].toLowerCase() === "h"
+      ? readBareUrlTokenAt(text, startIndex)
+      : null;
+    if (urlToken) return urlToken;
+
+    return null;
+  }
+
+  function canOpenEmphasisDelimiter(source, startIndex, delimiter) {
+    const text = String(source || "");
+    if (text.slice(startIndex, startIndex + delimiter.length) !== delimiter) return false;
+    const prev = startIndex > 0 ? text[startIndex - 1] : "";
+    const next = text[startIndex + delimiter.length] || "";
+    if (!next || /\s/.test(next)) return false;
+    return !isWordChar(prev);
+  }
+
+  function canCloseEmphasisDelimiter(source, startIndex, delimiter) {
+    const text = String(source || "");
+    if (text.slice(startIndex, startIndex + delimiter.length) !== delimiter) return false;
+    const prev = startIndex > 0 ? text[startIndex - 1] : "";
+    const next = text[startIndex + delimiter.length] || "";
+    if (!prev || /\s/.test(prev)) return false;
+    return !isWordChar(next);
+  }
+
+  function readAnnotationEmphasisSpanAt(source, startIndex, delimiter, tagName) {
+    const text = String(source || "");
+    if (!canOpenEmphasisDelimiter(text, startIndex, delimiter)) return null;
+
+    let index = startIndex + delimiter.length;
+    while (index < text.length) {
+      if (text[index] === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+
+      const protectedToken = readAnnotationPreviewProtectedTokenAt(text, index);
+      if (protectedToken) {
+        index = protectedToken.end;
+        continue;
+      }
+
+      if (canCloseEmphasisDelimiter(text, index, delimiter)) {
+        const inner = text.slice(startIndex + delimiter.length, index);
+        return {
+          end: index + delimiter.length,
+          html: "<" + tagName + ">" + renderAnnotationPlainTextHtml(inner) + "</" + tagName + ">",
+        };
+      }
+
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function renderAnnotationCodeSpanHtml(rawToken) {
+    const raw = String(rawToken || "");
+    if (!raw || raw[0] !== "`") return escapeHtml(raw);
+
+    let fenceLength = 1;
+    while (raw[fenceLength] === "`") fenceLength += 1;
+    const fence = "`".repeat(fenceLength);
+    if (raw.length < fenceLength * 2 || raw.slice(raw.length - fenceLength) !== fence) {
+      return escapeHtml(raw);
+    }
+
+    return "<code>" + escapeHtml(raw.slice(fenceLength, raw.length - fenceLength)) + "</code>";
+  }
+
+  function renderAnnotationPlainTextHtml(text) {
+    const source = String(text || "");
+    let out = "";
+    let index = 0;
+
+    while (index < source.length) {
+      const strongMatch = readAnnotationEmphasisSpanAt(source, index, "**", "strong")
+        || readAnnotationEmphasisSpanAt(source, index, "__", "strong");
+      if (strongMatch) {
+        out += strongMatch.html;
+        index = strongMatch.end;
+        continue;
+      }
+
+      const emphasisMatch = readAnnotationEmphasisSpanAt(source, index, "*", "em")
+        || readAnnotationEmphasisSpanAt(source, index, "_", "em");
+      if (emphasisMatch) {
+        out += emphasisMatch.html;
+        index = emphasisMatch.end;
+        continue;
+      }
+
+      out += escapeHtml(source[index]);
+      index += 1;
+    }
+
+    return out;
+  }
+
+  function renderPreviewAnnotationHtml(text) {
+    const source = normalizePreviewAnnotationLabel(text);
+    let out = "";
+    let plainStart = 0;
+    let index = 0;
+
+    while (index < source.length) {
+      const token = readAnnotationPreviewProtectedTokenAt(source, index);
+      if (!token) {
+        index += 1;
+        continue;
+      }
+
+      if (index > plainStart) {
+        out += renderAnnotationPlainTextHtml(source.slice(plainStart, index));
+      }
+
+      if (token.type === "code") {
+        out += renderAnnotationCodeSpanHtml(token.raw);
+      } else {
+        out += escapeHtml(token.raw);
+      }
+
+      index = token.end;
+      plainStart = index;
+    }
+
+    if (plainStart < source.length) {
+      out += renderAnnotationPlainTextHtml(source.slice(plainStart));
+    }
+
+    return out;
+  }
+
+  function transformMarkdownOutsideFences(text, plainTransformer) {
+    const source = String(text || "").replace(/\r\n/g, "\n");
+    if (!source) return source;
+
+    const transformPlain = typeof plainTransformer === "function"
+      ? plainTransformer
+      : function(segment) { return segment; };
+    const lines = source.split("\n");
+    const out = [];
+    let plainBuffer = [];
+    let inFence = false;
+    let fenceChar = null;
+    let fenceLength = 0;
+
+    function flushPlain() {
+      if (plainBuffer.length === 0) return;
+      const transformed = transformPlain(plainBuffer.join("\n"));
+      out.push(typeof transformed === "string" ? transformed : String(transformed ?? ""));
+      plainBuffer = [];
+    }
+
+    lines.forEach(function(line) {
+      const trimmed = line.trimStart();
+      const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+      if (fenceMatch) {
+        const marker = fenceMatch[1] || "";
+        const markerChar = marker.charAt(0);
+        const markerLength = marker.length;
+
+        if (!inFence) {
+          flushPlain();
+          inFence = true;
+          fenceChar = markerChar;
+          fenceLength = markerLength;
+          out.push(line);
+          return;
+        }
+
+        if (fenceChar === markerChar && markerLength >= fenceLength) {
+          inFence = false;
+          fenceChar = null;
+          fenceLength = 0;
+        }
+
+        out.push(line);
+        return;
+      }
+
+      if (inFence) {
+        out.push(line);
+      } else {
+        plainBuffer.push(line);
+      }
+    });
+
+    flushPlain();
+    return out.join("\n");
+  }
+
+  function hasAnnotationMarkers(text) {
+    let found = false;
+    transformMarkdownOutsideFences(text, function(segment) {
+      if (!found && collectInlineAnnotationMarkers(segment).length > 0) {
+        found = true;
+      }
+      return segment;
+    });
+    return found;
+  }
+
+  function stripAnnotationMarkers(text) {
+    return transformMarkdownOutsideFences(text, function(segment) {
+      return replaceInlineAnnotationMarkers(segment, function() { return ""; });
+    });
+  }
+
+  function prepareMarkdownForPandocPreview(markdown, placeholderPrefix) {
+    const placeholders = [];
+    const prefix = typeof placeholderPrefix === "string" && placeholderPrefix
+      ? placeholderPrefix
+      : "PIMDANNOT";
+    const prepared = transformMarkdownOutsideFences(markdown, function(segment) {
+      return replaceInlineAnnotationMarkers(segment, function(marker) {
+        const label = normalizePreviewAnnotationLabel(marker.body);
+        if (!label) return "";
+        const token = prefix + placeholders.length + "TOKEN";
+        placeholders.push({ token: token, text: label, title: "[an: " + label + "]" });
+        return token;
+      });
+    });
+    return { markdown: prepared, placeholders: placeholders };
+  }
+
+  const helpers = Object.freeze({
+    collectInlineAnnotationMarkers: collectInlineAnnotationMarkers,
+    hasAnnotationMarkers: hasAnnotationMarkers,
+    normalizePreviewAnnotationLabel: normalizePreviewAnnotationLabel,
+    prepareMarkdownForPandocPreview: prepareMarkdownForPandocPreview,
+    readInlineAnnotationMarkerAt: readInlineAnnotationMarkerAt,
+    renderPreviewAnnotationHtml: renderPreviewAnnotationHtml,
+    replaceInlineAnnotationMarkers: replaceInlineAnnotationMarkers,
+    stripAnnotationMarkers: stripAnnotationMarkers,
+    transformMarkdownOutsideFences: transformMarkdownOutsideFences,
+  });
+
+  globalThis.PiMarkdownPreviewAnnotationHelpers = helpers;
+})();
+
+  </script>
+  <script type="module">
+  (async () => {
+    const annotationHelpers = window.PiMarkdownPreviewAnnotationHelpers || null;
+    const previewAnnotationPlaceholders = [];
+    const DIFF_META_LINE_REGEX = /^(diff --git |index |new file mode |deleted file mode |similarity index |rename from |rename to |Binary files )/;
+
+    const escapeRegExp = (text) => {
+      const backslash = String.fromCharCode(92);
+      const specials = '.+*?^' + '$' + '{}|[]' + backslash;
+      return Array.from(String(text || '')).map((ch) => specials.includes(ch) ? backslash + ch : ch).join('');
+    };
+
+    const setAnnotationMarkerContent = (marker, text) => {
+      if (!(marker instanceof HTMLElement)) return;
+      const rendered = annotationHelpers && typeof annotationHelpers.renderPreviewAnnotationHtml === 'function'
+        ? annotationHelpers.renderPreviewAnnotationHtml(text)
+        : String(text || '');
+      marker.innerHTML = rendered;
+    };
+
+    const replaceAnnotationTextNode = (textNode) => {
+      if (!annotationHelpers || typeof annotationHelpers.collectInlineAnnotationMarkers !== 'function') return;
+      const text = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+      if (!text || text.toLowerCase().indexOf('[an:') === -1) return;
+
+      const markers = annotationHelpers.collectInlineAnnotationMarkers(text);
+      if (!Array.isArray(markers) || markers.length === 0) return;
+
+      const fragment = document.createDocumentFragment();
+      let lastIndex = 0;
+      markers.forEach((markerInfo) => {
+        const token = markerInfo && typeof markerInfo.raw === 'string' ? markerInfo.raw : '';
+        const start = markerInfo && typeof markerInfo.start === 'number' ? markerInfo.start : lastIndex;
+        const end = markerInfo && typeof markerInfo.end === 'number' ? markerInfo.end : start;
+        if (start > lastIndex) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+        }
+
+        const markerText = annotationHelpers && typeof annotationHelpers.normalizePreviewAnnotationLabel === 'function'
+          ? annotationHelpers.normalizePreviewAnnotationLabel(markerInfo.body)
+          : String(markerInfo && markerInfo.body || '').trim();
+        if (markerText) {
+          const markerEl = document.createElement('span');
+          markerEl.className = 'annotation-marker';
+          markerEl.title = token || markerText;
+          setAnnotationMarkerContent(markerEl, markerText);
+          fragment.appendChild(markerEl);
+        }
+
+        lastIndex = end;
+      });
+
+      if (lastIndex < text.length) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+      }
+
+      if (textNode.parentNode) {
+        textNode.parentNode.replaceChild(fragment, textNode);
+      }
+    };
+
+    const applyPreviewAnnotationPlaceholders = (root) => {
+      if (!root || !Array.isArray(previewAnnotationPlaceholders) || previewAnnotationPlaceholders.length === 0) return;
+      const placeholderMap = new Map();
+      const placeholderTokens = [];
+      previewAnnotationPlaceholders.forEach((entry) => {
+        const token = entry && typeof entry.token === 'string' ? entry.token : '';
+        if (!token) return;
+        placeholderMap.set(token, entry);
+        placeholderTokens.push(token);
+      });
+      if (placeholderTokens.length === 0) return;
+
+      const placeholderPattern = new RegExp(placeholderTokens.map(escapeRegExp).join('|'), 'g');
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const textNodes = [];
+      let node = walker.nextNode();
+      while (node) {
+        const textNode = node;
+        const value = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+        if (value && value.indexOf('PIMDPREVIEWANNOT') !== -1) {
+          const parent = textNode.parentElement;
+          const tag = parent && parent.tagName ? parent.tagName.toUpperCase() : '';
+          if (tag !== 'CODE' && tag !== 'PRE' && tag !== 'SCRIPT' && tag !== 'STYLE' && tag !== 'TEXTAREA') {
+            textNodes.push(textNode);
+          }
+        }
+        node = walker.nextNode();
+      }
+
+      textNodes.forEach((textNode) => {
+        const text = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+        if (!text) return;
+        placeholderPattern.lastIndex = 0;
+        if (!placeholderPattern.test(text)) return;
+        placeholderPattern.lastIndex = 0;
+
+        const fragment = document.createDocumentFragment();
+        let lastIndex = 0;
+        let match;
+        while ((match = placeholderPattern.exec(text)) !== null) {
+          const token = match[0] || '';
+          const entry = placeholderMap.get(token);
+          const start = typeof match.index === 'number' ? match.index : 0;
+          if (start > lastIndex) {
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+          }
+          if (entry) {
+            const markerEl = document.createElement('span');
+            markerEl.className = 'annotation-marker';
+            const markerText = typeof entry.text === 'string' ? entry.text : token;
+            markerEl.title = typeof entry.title === 'string' ? entry.title : markerText;
+            setAnnotationMarkerContent(markerEl, markerText);
+            fragment.appendChild(markerEl);
+          } else {
+            fragment.appendChild(document.createTextNode(token));
+          }
+          lastIndex = start + token.length;
+          if (token.length === 0) {
+            placeholderPattern.lastIndex += 1;
+          }
+        }
+
+        if (lastIndex < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+
+        if (textNode.parentNode) {
+          textNode.parentNode.replaceChild(fragment, textNode);
+        }
+      });
+    };
+
+    const decorateDiffCodeBlocks = (root) => {
+      if (!root) return;
+      const diffBlocks = Array.from(root.querySelectorAll('pre.sourceCode.diff code'));
+
+      diffBlocks.forEach((codeBlock) => {
+        const lineElements = Array.from(codeBlock.children).filter((child) => child instanceof HTMLElement);
+        lineElements.forEach((lineEl) => {
+          const text = typeof lineEl.textContent === 'string' ? lineEl.textContent : '';
+          if (!text) return;
+
+          if (/^\+(?!\+\+)/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-add-line');
+          } else if (/^-(?!--)/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-del-line');
+          } else if (/^@@/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-hunk-line');
+          } else if (/^(?:\+\+\+ |--- )/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-header-line');
+          } else if (DIFF_META_LINE_REGEX.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-meta-line');
+          }
+
+          const walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT);
+          const matches = [];
+          let node = walker.nextNode();
+          while (node) {
+            const textNode = node;
+            const value = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+            const parent = textNode.parentElement;
+            if (value && value.toLowerCase().indexOf('[an:') !== -1 && parent && !parent.closest('a, .annotation-marker')) {
+              matches.push(textNode);
+            }
+            node = walker.nextNode();
+          }
+
+          matches.forEach(replaceAnnotationTextNode);
+        });
+      });
+    };
+
+    const MATHJAX_CDN_URL = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js';
+
+    const waitForFonts = async () => {
+      if ('fonts' in document) {
+        try {
+          await document.fonts.ready;
+        } catch {}
+      }
+    };
+
+    const waitForPaint = async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+
+    const extractMathFallbackTex = (text, displayMode) => {
+      const source = typeof text === 'string' ? text.trim() : '';
+      if (!source) return '';
+
+      if (displayMode) {
+        if (source.startsWith('$$') && source.endsWith('$$') && source.length >= 4) {
+          return source.slice(2, -2).trim();
+        }
+        if (source.startsWith('\\[') && source.endsWith('\\]') && source.length >= 4) {
+          return source.slice(2, -2).trim();
+        }
+        return source;
+      }
+
+      if (source.startsWith('\\(') && source.endsWith('\\)') && source.length >= 4) {
+        return source.slice(2, -2).trim();
+      }
+      if (source.startsWith('$') && source.endsWith('$') && source.length >= 2) {
+        return source.slice(1, -1).trim();
+      }
+      return source;
+    };
+
+    const collectMathFallbackTargets = (root) => {
+      if (!root) return [];
+      const nodes = Array.from(root.querySelectorAll('.math.display, .math.inline'));
+      const targets = [];
+      const seenTargets = new Set();
+
+      nodes.forEach((node) => {
+        const displayMode = node.classList.contains('display');
+        const rawText = typeof node.textContent === 'string' ? node.textContent : '';
+        const tex = extractMathFallbackTex(rawText, displayMode);
+        if (!tex) return;
+
+        let renderTarget = node;
+        if (displayMode) {
+          const parent = node.parentElement;
+          const parentText = parent && typeof parent.textContent === 'string' ? parent.textContent.trim() : '';
+          if (parent && parent.tagName === 'P' && parentText === rawText.trim()) {
+            renderTarget = parent;
+          }
+        }
+
+        if (seenTargets.has(renderTarget)) return;
+        seenTargets.add(renderTarget);
+        targets.push({ renderTarget, displayMode, tex });
+      });
+
+      return targets;
+    };
+
+    let mathJaxPromise = null;
+    const ensureMathJax = () => {
+      if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+        return Promise.resolve(window.MathJax);
+      }
+      if (mathJaxPromise) return mathJaxPromise;
+
+      mathJaxPromise = new Promise((resolve, reject) => {
+        window.MathJax = {
+          loader: { load: ['[tex]/ams', '[tex]/noerrors', '[tex]/noundefined'] },
+          tex: {
+            inlineMath: [['\\(', '\\)'], ['$', '$']],
+            displayMath: [['\\[', '\\]'], ['$$', '$$']],
+            packages: { '[+]': ['ams', 'noerrors', 'noundefined'] },
+          },
+          options: {
+            skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+          },
+          startup: { typeset: false },
+        };
+
+        const script = document.createElement('script');
+        script.src = MATHJAX_CDN_URL;
+        script.async = true;
+        script.onload = () => {
+          const api = window.MathJax;
+          if (api && api.startup && api.startup.promise && typeof api.startup.promise.then === 'function') {
+            api.startup.promise.then(() => resolve(api)).catch(reject);
+            return;
+          }
+          if (api && typeof api.typesetPromise === 'function') {
+            resolve(api);
+            return;
+          }
+          reject(new Error('MathJax did not initialize.'));
+        };
+        script.onerror = () => reject(new Error('Failed to load MathJax.'));
+        document.head.appendChild(script);
+      }).catch((error) => {
+        mathJaxPromise = null;
+        throw error;
+      });
+
+      return mathJaxPromise;
+    };
+
+    const markerNeedsMath = (text) => {
+      const source = typeof text === 'string' ? text : '';
+      if (!source) return false;
+      const backslash = String.fromCharCode(92);
+      if (source.includes(backslash + '(') || source.includes(backslash + '[') || source.includes('$$')) return true;
+      for (let index = 0; index < source.length - 1; index += 1) {
+        const char = source[index];
+        const next = source[index + 1] || '';
+        if (char === '$' && next.trim() !== '') return true;
+        if (char === backslash && /[A-Za-z]/.test(next)) return true;
+      }
+      return false;
+    };
+
+    const renderAnnotationMarkerMath = async (root) => {
+      if (!root) return;
+      const markers = Array.from(root.querySelectorAll('.annotation-marker')).filter((marker) => {
+        if (!(marker instanceof HTMLElement)) return false;
+        if (marker.querySelector('math, mjx-container')) return false;
+        const text = typeof marker.textContent === 'string' ? marker.textContent : '';
+        return markerNeedsMath(text);
+      });
+      if (markers.length === 0) return;
+
+      let mathJax;
+      try {
+        mathJax = await ensureMathJax();
+      } catch (e) {
+        console.error('MathJax load failed:', e);
+        return;
+      }
+
+      try {
+        await mathJax.typesetPromise(markers);
+      } catch (e) {
+        console.error('Annotation math render failed:', e);
+      }
+    };
+
+    const renderMathFallback = async (root) => {
+      const fallbackTargets = collectMathFallbackTargets(root);
+      if (fallbackTargets.length === 0) return;
+
+      let mathJax;
+      try {
+        mathJax = await ensureMathJax();
+      } catch (e) {
+        console.error('MathJax load failed:', e);
+        return;
+      }
+
+      fallbackTargets.forEach(({ renderTarget, displayMode, tex }) => {
+        renderTarget.textContent = displayMode ? '\\[\n' + tex + '\n\\]' : '\\(' + tex + '\\)';
+      });
+
+      try {
+        await mathJax.typesetPromise(fallbackTargets.map(({ renderTarget }) => renderTarget));
+      } catch (e) {
+        console.error('MathJax render failed:', e);
+      }
+    };
+
+
+    const setMermaidRenderResult = (status, error) => {
+      window.__mermaidRenderResult = error ? { status, error } : { status };
+    };
+    const renderMermaidFailure = (wrappers, message) => {
+      wrappers.forEach((wrapper) => {
+        const failure = document.createElement('pre');
+        failure.className = 'mermaid-error';
+        failure.setAttribute('role', 'alert');
+        failure.style.cssText = 'margin:0;padding:12px 14px;border:1px solid var(--error,#cf222e);border-radius:8px;background:var(--panel-2,#f8fafc);color:var(--error,#cf222e);text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;';
+        failure.textContent = 'Mermaid render failed: ' + message;
+        wrapper.replaceChildren(failure);
+      });
+    };
+    const renderMermaid = async () => {
+      const mermaidBlocks = document.querySelectorAll('pre.mermaid');
+      if (mermaidBlocks.length === 0) {
+        setMermaidRenderResult('skipped');
+        return;
+      }
+
+      setMermaidRenderResult('pending');
+      const wrappers = Array.from(mermaidBlocks).map((pre) => {
+        const code = pre.querySelector('code');
+        const src = code ? code.textContent : pre.textContent;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-container';
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = src;
+        wrapper.appendChild(div);
+        pre.replaceWith(wrapper);
+        return wrapper;
+      });
+
+      try {
+        const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs');
+        const packs = [{"name":"lucide","url":"https://unpkg.com/@iconify-json/lucide@1/icons.json"},{"name":"logos","url":"https://unpkg.com/@iconify-json/logos@1/icons.json"}];
+        const pending = new Map();
+        let iconPackError = null;
+        const load = (pack) => {
+          if (!pending.has(pack.name)) {
+            pending.set(pack.name, fetch(pack.url).then((response) => {
+              if (!response.ok) throw new Error('Failed to load Mermaid icon pack ' + pack.name + ': HTTP ' + response.status);
+              return response.json();
+            }).catch((error) => {
+              iconPackError ??= error instanceof Error ? error : new Error(String(error));
+              throw error;
+            }));
+          }
+          return pending.get(pack.name);
+        };
+        mermaid.registerIconPacks(packs.map((pack) => ({ name: pack.name, loader: () => load(pack) })));
+        mermaid.initialize({"startOnLoad":false,"theme":"base","themeVariables":{"background":"#1a1b21","primaryColor":"#25262f","primaryTextColor":"#d4d4d4","primaryBorderColor":"#808080","secondaryColor":"#1f2027","secondaryTextColor":"#d4d4d4","secondaryBorderColor":"#808080","tertiaryColor":"#1f2027","tertiaryTextColor":"#d4d4d4","tertiaryBorderColor":"#808080","lineColor":"#808080","textColor":"#d4d4d4","edgeLabelBackground":"#25262f","nodeBorder":"#808080","clusterBkg":"#1f2027","clusterBorder":"#808080","titleColor":"#f0c674"}});
+        await mermaid.run();
+        if (iconPackError) throw iconPackError;
+        const parseRgb = (value) => {
+          const match = value.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/);
+          return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+        };
+        const isOpaqueColor = (value) => {
+          if (!parseRgb(value)) return false;
+          const alphaMatch = value.match(/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)$/);
+          return !alphaMatch || Number(alphaMatch[1]) >= 1;
+        };
+        const findOpaqueFill = (root) => {
+          if (!(root instanceof Element)) return null;
+          const shape = Array.from(root.querySelectorAll('rect, polygon, path, circle, ellipse')).find((candidate) => {
+            const fill = getComputedStyle(candidate).fill;
+            return isOpaqueColor(fill);
+          });
+          return shape ? getComputedStyle(shape).fill : null;
+        };
+        const findOpaqueBackground = (element, fallback) => {
+          let current = element instanceof Element ? element : null;
+          while (current) {
+            const background = getComputedStyle(current).backgroundColor;
+            if (current instanceof HTMLElement && isOpaqueColor(background)) return background;
+            current = current.parentElement;
+          }
+          return fallback;
+        };
+        const relativeLuminance = (color) => {
+          const linear = color.map((channel) => {
+            const value = channel / 255;
+            return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+        };
+        const contrastRatio = (foreground, background) => {
+          const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+          const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+          return (lighter + 0.05) / (darker + 0.05);
+        };
+        const toRgb = (color) => 'rgb(' + color.map((channel) => Math.round(channel)).join(', ') + ')';
+        const ensureReadableColor = (foregroundCss, backgroundCss) => {
+          const foreground = parseRgb(foregroundCss);
+          const background = parseRgb(backgroundCss);
+          if (!foreground || !background || contrastRatio(foreground, background) >= 4.5) return foregroundCss;
+          const readableCandidates = [[0, 0, 0], [255, 255, 255]].flatMap((target) => {
+            for (let step = 1; step <= 20; step += 1) {
+              const amount = step / 20;
+              const color = foreground.map((channel, index) => channel + (target[index] - channel) * amount);
+              if (contrastRatio(color, background) >= 4.5) return [{ amount, color }];
+            }
+            return [];
+          });
+          readableCandidates.sort((left, right) => left.amount - right.amount);
+          if (readableCandidates.length > 0) return toRgb(readableCandidates[0].color);
+          const black = [0, 0, 0];
+          const white = [255, 255, 255];
+          return toRgb(contrastRatio(black, background) >= contrastRatio(white, background) ? black : white);
+        };
+        const pageBackground = getComputedStyle(document.body).backgroundColor;
+        document.querySelectorAll('.mermaid-container .icon-shape').forEach((node) => {
+          const icon = node.querySelector('svg');
+          if (!icon) return;
+          const semanticColor = getComputedStyle(icon).color;
+          const iconSurface = findOpaqueFill(node.firstElementChild)
+            || findOpaqueBackground(icon, pageBackground);
+          const iconColor = ensureReadableColor(semanticColor, iconSurface);
+          icon.style.setProperty('color', iconColor, 'important');
+          node.querySelectorAll('.labelBkg, .nodeLabel').forEach((label) => {
+            if (!(label instanceof HTMLElement)) return;
+            const labelSurface = findOpaqueBackground(label, pageBackground);
+            const labelColor = ensureReadableColor(semanticColor, labelSurface);
+            label.style.setProperty('color', labelColor, 'important');
+          });
+        });
+        document.querySelectorAll('.mermaid-container .node:not(.icon-shape)').forEach((node) => {
+          const shape = Array.from(node.querySelectorAll('rect, polygon, path, circle, ellipse')).find((candidate) => {
+            const fill = getComputedStyle(candidate).fill;
+            return fill && fill !== 'none' && fill !== 'rgba(0, 0, 0, 0)';
+          });
+          if (!shape) return;
+          const shapeFill = getComputedStyle(shape).fill;
+          node.querySelectorAll('.nodeLabel').forEach((label) => {
+            if (!(label instanceof HTMLElement)) return;
+            const labelColor = ensureReadableColor(getComputedStyle(label).color, shapeFill);
+            label.style.setProperty('color', labelColor, 'important');
+          });
+        });
+        setMermaidRenderResult('success');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setMermaidRenderResult('failed', message);
+        renderMermaidFailure(wrappers, message);
+        console.error('Mermaid render failed:', error);
+      }
+    };
+  
+
+    const root = document.getElementById('preview-root');
+    try {
+      await renderMermaid();
+      applyPreviewAnnotationPlaceholders(root);
+      decorateDiffCodeBlocks(root);
+      await renderAnnotationMarkerMath(root);
+      await renderMathFallback(root);
+      await waitForFonts();
+      await waitForPaint();
+    } finally {
+      window.__mermaidDone = true;
+    }
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1958 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="description" content="AgentMemory Eval 2.0 strategy and 90-day implementation plan for a world-class, decision-useful memory evaluation program." />
+<title>AgentMemory Eval 2.0 Strategy Plan</title>
+<style>
+:root {
+  color-scheme: dark;
+  --preview-font-size: 15px;
+  --bg: #1a1b21;
+  --card: #1f2027;
+  --panel-2: #25262f;
+  --border: #5f87ff;
+  --border-muted: #505050;
+  --border-subtle: #28292f;
+  --panel-border: #2c2d31;
+  --text: #d4d4d4;
+  --muted: #808080;
+  --accent: #81a2be;
+  --warn: #ffff00;
+  --error: #cc6666;
+  --ok: #b5bd68;
+  --code-bg: #25262f;
+  --link: #81a2be;
+  --md-heading: #f0c674;
+  --md-link: #81a2be;
+  --md-link-url: #666666;
+  --md-code: #8abeb7;
+  --md-codeblock: #b5bd68;
+  --md-codeblock-border: #31323a;
+  --md-quote: #808080;
+  --md-quote-border: #808080;
+  --md-hr: #808080;
+  --md-list-bullet: #8abeb7;
+  --syntax-keyword: #569cd6;
+  --syntax-function: #dcdcaa;
+  --syntax-variable: #9cdcfe;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-type: #4ec9b0;
+  --syntax-comment: #6a9955;
+  --syntax-operator: #d4d4d4;
+  --syntax-punctuation: #d4d4d4;
+  --syntax-error: #cc6666;
+  --annotation-bg: rgba(129, 162, 190, 0.25);
+  --annotation-border: rgba(129, 162, 190, 0.65);
+  --annotation-text: #d4d4d4;
+  --blockquote-bg: rgba(128, 128, 128, 0.16);
+  --inline-code-bg: rgba(128, 128, 128, 0.18);
+  --table-alt-bg: rgba(128, 128, 128, 0.14);
+  --md-table-border: #28292f;
+  --diff-add-bg: rgba(181, 189, 104, 0.14);
+  --diff-add-text: #b5bd68;
+  --diff-del-bg: rgba(204, 102, 102, 0.14);
+  --diff-del-text: #cc6666;
+  --diff-meta-text: #808080;
+  --diff-header-bg: rgba(129, 162, 190, 0.10);
+  --diff-header-text: #81a2be;
+  --diff-hunk-bg: rgba(129, 162, 190, 0.16);
+  --diff-hunk-text: #81a2be;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+body {
+  min-height: 100vh;
+  padding: 28px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+#preview-root {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 24px 28px;
+  overflow-wrap: anywhere;
+  line-height: 1.58;
+  font-size: var(--preview-font-size);
+}
+#preview-root h1, #preview-root h2, #preview-root h3, #preview-root h4, #preview-root h5, #preview-root h6 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--md-heading);
+}
+#preview-root h1 { font-size: 1.6em; border-bottom: 0; padding-bottom: 0; }
+#preview-root h2 { font-size: 1.25em; border-bottom: 0; padding-bottom: 0; }
+#preview-root p, #preview-root ul, #preview-root ol, #preview-root blockquote, #preview-root table {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+#preview-root li::marker { color: var(--md-list-bullet); }
+#preview-root a { color: var(--md-link); text-decoration: none; }
+#preview-root a:hover { text-decoration: underline; }
+#preview-root a.uri, #preview-root .uri { color: var(--md-link-url); }
+#preview-root blockquote {
+  margin-left: 0;
+  padding: 0.2em 1em;
+  border-left: 0.25em solid var(--md-quote-border);
+  border-radius: 0 8px 8px 0;
+  background: var(--blockquote-bg);
+  color: var(--md-quote);
+}
+#preview-root pre {
+  background: var(--panel-2);
+  border: 1px solid var(--md-codeblock-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+#preview-root code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9em;
+  color: var(--md-code);
+}
+#preview-root pre code {
+  color: var(--text);
+}
+#preview-root :not(pre) > code {
+  background: var(--inline-code-bg);
+  border: 1px solid var(--md-codeblock-border);
+  border-radius: 6px;
+  padding: 0.12em 0.35em;
+}
+#preview-root .annotation-marker {
+  display: inline;
+  border-radius: 4px;
+  border: 1px solid var(--annotation-border);
+  background: var(--annotation-bg);
+  color: var(--annotation-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  padding: 0 0.28em;
+}
+#preview-root .annotation-marker mjx-container {
+  margin: 0;
+}
+#preview-root pre.sourceCode.diff code > .diff-line {
+  display: block;
+  margin: 0 -4px;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+#preview-root pre.sourceCode.diff code > .diff-add-line {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-del-line {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-meta-line {
+  color: var(--diff-meta-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-header-line {
+  background: var(--diff-header-bg);
+  color: var(--diff-header-text);
+  font-weight: 600;
+}
+#preview-root pre.sourceCode.diff code > .diff-hunk-line {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-text);
+}
+#preview-root pre.sourceCode.diff code > .diff-line .kw,
+#preview-root pre.sourceCode.diff code > .diff-line .dt,
+#preview-root pre.sourceCode.diff code > .diff-line .st,
+#preview-root pre.sourceCode.diff code > .diff-line .va {
+  color: inherit;
+  font-weight: inherit;
+}
+#preview-root code span.kw,
+#preview-root code span.cf,
+#preview-root code span.im {
+  color: var(--syntax-keyword);
+  font-weight: 600;
+}
+#preview-root code span.dt {
+  color: var(--syntax-type);
+  font-weight: 600;
+}
+#preview-root code span.fu,
+#preview-root code span.bu {
+  color: var(--syntax-function);
+}
+#preview-root code span.va,
+#preview-root code span.ot {
+  color: var(--syntax-variable);
+}
+#preview-root code span.st,
+#preview-root code span.ss,
+#preview-root code span.sc,
+#preview-root code span.ch {
+  color: var(--syntax-string);
+}
+#preview-root code span.dv,
+#preview-root code span.bn,
+#preview-root code span.fl {
+  color: var(--syntax-number);
+}
+#preview-root code span.co {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+#preview-root code span.op {
+  color: var(--syntax-operator);
+}
+#preview-root code span.pp,
+#preview-root code span.pu {
+  color: var(--syntax-punctuation);
+}
+#preview-root code span.er,
+#preview-root code span.al {
+  color: var(--syntax-error);
+  font-weight: 600;
+}
+#preview-root table {
+  border-collapse: collapse;
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+}
+#preview-root th, #preview-root td {
+  border: 1px solid var(--md-table-border);
+  padding: 6px 12px;
+}
+#preview-root thead th {
+  background: var(--panel-2);
+}
+#preview-root tbody tr:nth-child(even) {
+  background: var(--table-alt-bg);
+}
+#preview-root hr {
+  border: 0;
+  border-top: 1px solid var(--md-hr);
+  margin: 1.25em 0;
+}
+#preview-root img { max-width: 100%; }
+#preview-root math[display="block"] {
+  display: block;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#preview-root mjx-container[display="true"] {
+  display: block;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#preview-root .mermaid-container {
+  text-align: center;
+  margin: 1em 0;
+  overflow-x: auto;
+}
+#preview-root .mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+}
+</style>
+</head>
+<body>
+  <article id="preview-root"><h1 id="agentmemory-eval-2.0-strategy">AgentMemory Eval 2.0 Strategy</h1>
+<h2 id="core-recommendation">Core recommendation</h2>
+<p>Do <strong>not</strong> keep stretching the current feedback suite into a benchmark.</p>
+<p>Reclassify it as:</p>
+<blockquote>
+<p><strong><code>feedback-regression</code> — targeted probes derived from reported issues</strong></p>
+</blockquote>
+<p>Then build a new evaluation program alongside it:</p>
+<blockquote>
+<p><strong>CodingMemoryBench — a reproducible benchmark for whether memory improves coding-agent outcomes safely and efficiently</strong></p>
+</blockquote>
+<p>A world-class eval must answer more than “was a marker present?” It should answer:</p>
+<blockquote>
+<p>Did AgentMemory supply the right evidence at the right time, improve the agent’s decision or task outcome, avoid stale or unsafe influence, and do so within acceptable latency, token, and reliability budgets?</p>
+</blockquote>
+<hr />
+<h2 id="define-the-decisions-the-eval-must-support">1. Define the decisions the eval must support</h2>
+<p>Every suite should exist to support an actual product decision:</p>
+<ol type="1">
+<li><strong>Can this release ship?</strong></li>
+<li><strong>Did retrieval improve or regress?</strong></li>
+<li><strong>Does semantic search beat BM25 enough to justify its latency?</strong></li>
+<li><strong>Is the 16K context budget allocated correctly?</strong></li>
+<li><strong>Does memory improve coding-agent task completion?</strong></li>
+<li><strong>Does it reduce repeated questions and contradictory decisions?</strong></li>
+<li><strong>Can untrusted, stale, or cross-project memory influence the agent?</strong></li>
+<li><strong>Does it work across corpus sizes, languages, agents, platforms, and qmd versions?</strong></li>
+<li><strong>Which product gap should be fixed next?</strong></li>
+<li><strong>Which marketing claims are supported by evidence?</strong></li>
+</ol>
+<p>If a metric cannot influence one of these decisions, it is probably noise.</p>
+<hr />
+<h2 id="north-star-useful-memory-yield">2. North star: Useful Memory Yield</h2>
+<p>Define the north star as <strong>Useful Memory Yield</strong>:</p>
+<blockquote>
+<p>The probability that memory supplies evidence that is relevant, current, source-grounded, safe, and causally improves the agent’s task outcome—relative to added tokens, latency, and operational failures.</p>
+</blockquote>
+<p>Do not immediately compress this into one vanity number. Publish a six-dimensional scorecard:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Core question</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Durability</td>
+<td>Was memory recorded and preserved correctly?</td>
+</tr>
+<tr>
+<td>Retrieval</td>
+<td>Was the right evidence retrieved and ranked?</td>
+</tr>
+<tr>
+<td>Context quality</td>
+<td>Did the final context contain useful evidence without stale or unsafe material?</td>
+</tr>
+<tr>
+<td>Agent outcome</td>
+<td>Did memory improve the downstream task?</td>
+</tr>
+<tr>
+<td>Safety/privacy</td>
+<td>Did memory cause leakage, prompt injection, or cross-scope contamination?</td>
+</tr>
+<tr>
+<td>Efficiency</td>
+<td>What did the improvement cost in tokens, latency, CPU, and failures?</td>
+</tr>
+</tbody>
+</table>
+<p>A single composite score can come later, after the individual metrics are validated.</p>
+<hr />
+<h2 id="build-a-layered-evaluation-system">3. Build a layered evaluation system</h2>
+<h3 id="l0-harness-and-schema-conformance">L0 — Harness and schema conformance</h3>
+<p>Tests whether the evaluation system itself is trustworthy:</p>
+<ul>
+<li>Full runtime schema validation</li>
+<li>No empty or vacuous oracles</li>
+<li>Unique scenario and evidence IDs</li>
+<li>Valid fixture references</li>
+<li>Valid expected outcomes</li>
+<li>Dataset hash and version</li>
+<li>Complete environment manifest</li>
+<li>Deterministic replay</li>
+<li>Oracle mutation tests: deliberately break a result and prove the oracle notices</li>
+</ul>
+<p>This prevents the harness from “passing” meaningless cases.</p>
+<h3 id="l1-storage-and-policy-conformance">L1 — Storage and policy conformance</h3>
+<p>Fast, deterministic product invariants:</p>
+<ul>
+<li>Concurrent writes preserve every committed entry</li>
+<li>Crash during write leaves either the old or new complete file</li>
+<li>Path traversal is rejected</li>
+<li>Symlinks cannot escape the root</li>
+<li>Trust/expiry metadata survives whitespace and line-ending variations</li>
+<li>Untrusted results are filtered consistently across context and search</li>
+<li>Project scopes do not leak</li>
+<li>Secret redaction policies hold</li>
+<li>File permissions are private</li>
+<li>Metadata cannot corrupt entry boundaries</li>
+<li>Distil cannot destroy curated memory without explicit consent</li>
+</ul>
+<p>These should be mandatory release gates with <strong>zero tolerated failures</strong>.</p>
+<h3 id="l2-retrieval-benchmark">L2 — Retrieval benchmark</h3>
+<p>Measure retrieval independently from the agent:</p>
+<ul>
+<li>Keyword/BM25</li>
+<li>Semantic</li>
+<li>Hybrid/deep</li>
+<li>Cross-language</li>
+<li>Temporal conflicts</li>
+<li>Entity ambiguity</li>
+<li>Paraphrase distance</li>
+<li>Negation</li>
+<li>Multi-hop evidence</li>
+<li>Source trust</li>
+<li>Corpus scale</li>
+<li>Distractor density</li>
+<li>Recently updated versus stale index</li>
+</ul>
+<p>Metrics:</p>
+<ul>
+<li><a href="mailto:Recall@1" class="email">Recall@1</a>, <span class="citation" data-cites="3">@3</span>, <span class="citation" data-cites="5">@5</span></li>
+<li><a href="mailto:Precision@k" class="email">Precision@k</a></li>
+<li>MRR</li>
+<li><a href="mailto:nDCG@k" class="email">nDCG@k</a></li>
+<li>Stale-fact contamination rate</li>
+<li>Forbidden-evidence retrieval rate</li>
+<li>Cross-scope leakage rate</li>
+<li>Retrieval score margin</li>
+<li>Index freshness lag</li>
+<li>Warm and cold latency</li>
+</ul>
+<h3 id="l3-context-assembly-benchmark">L3 — Context assembly benchmark</h3>
+<p>Retrieval success does not guarantee good context. Measure the actual prompt payload:</p>
+<ul>
+<li>Evidence recall in emitted context</li>
+<li>Evidence precision</li>
+<li>Priority preservation under saturation</li>
+<li>Token efficiency: useful evidence per 1,000 tokens</li>
+<li>Duplicate evidence rate</li>
+<li>Contradiction rate</li>
+<li>Stale/expired inclusion rate</li>
+<li>Untrusted instruction exposure</li>
+<li>Section truncation behavior</li>
+<li>Whether the final context remains structurally valid after truncation</li>
+</ul>
+<p>This layer should directly evaluate <code>buildMemoryContext()</code> rather than qmd alone.</p>
+<h3 id="l4-end-to-end-coding-agent-outcomes">L4 — End-to-end coding-agent outcomes</h3>
+<p>This is the most important layer.</p>
+<p>Give an agent a realistic repository task with and without memory. Example scenarios:</p>
+<ul>
+<li>Continue an unfinished refactor from a previous session</li>
+<li>Respect an architecture decision made five sessions earlier</li>
+<li>Use the project-specific test command</li>
+<li>Avoid a previously documented production incident</li>
+<li>Apply a corrected API endpoint instead of a superseded endpoint</li>
+<li>Resume after context compaction</li>
+<li>Switch from Claude to Codex mid-task</li>
+<li>Diagnose a bug whose root cause was learned previously</li>
+<li>Avoid repeating a failed approach</li>
+<li>Follow a user preference consistently</li>
+</ul>
+<p>Measure:</p>
+<ul>
+<li>Task completion rate</li>
+<li>Test pass rate</li>
+<li>Correct decision rate</li>
+<li>Contradiction rate</li>
+<li>Repeated-question rate</li>
+<li>Repeated-work rate</li>
+<li>Time to first correct action</li>
+<li>Tool calls</li>
+<li>Tokens</li>
+<li>Wall-clock time</li>
+<li>Human correction count</li>
+<li>Unsupported-memory citation rate</li>
+</ul>
+<p>The key result should be a paired delta:</p>
+<pre class="text"><code>Agent + no memory
+Agent + base context only
+Agent + BM25 retrieval
+Agent + semantic retrieval
+Agent + hybrid retrieval</code></pre>
+<h3 id="l5-adversarial-safety-benchmark">L5 — Adversarial safety benchmark</h3>
+<p>Create an explicit <strong>Memory Red Team</strong> suite:</p>
+<ul>
+<li>Prompt injection inside stored memory</li>
+<li>Leading/trailing whitespace variants</li>
+<li>Markdown/comment boundary attacks</li>
+<li>Fake provenance</li>
+<li>Poisoned source URI</li>
+<li>Cross-project memory leakage</li>
+<li>Secret-bearing memories</li>
+<li>Symlink/path traversal</li>
+<li>Unicode normalization attacks</li>
+<li>Homoglyph metadata</li>
+<li>Contradictory trusted/untrusted memories</li>
+<li>qmd result from the wrong collection</li>
+<li>Stale fact ranked above current fact</li>
+<li>Malicious transcript import</li>
+<li>Oversized files and output amplification</li>
+</ul>
+<p>Metrics:</p>
+<ul>
+<li>Attack success rate</li>
+<li>Forbidden evidence exposure</li>
+<li>Unsafe instruction execution rate</li>
+<li>Secret exposure rate</li>
+<li>Cross-scope leakage rate</li>
+<li>False-positive filtering of safe evidence</li>
+</ul>
+<h3 id="l6-operational-resilience">L6 — Operational resilience</h3>
+<p>Run real processes under failure and scale:</p>
+<ul>
+<li>Multiple concurrent CLI agents</li>
+<li>Process kill during write</li>
+<li>Disk-full simulation</li>
+<li>Read-only files</li>
+<li>Corrupt Markdown</li>
+<li>Missing qmd</li>
+<li>Hanging qmd</li>
+<li>qmd non-zero exit</li>
+<li>Index/model version mismatch</li>
+<li>10, 100, 1K, 10K, and 100K memories</li>
+<li>1 MB, 10 MB, and 100 MB daily logs</li>
+<li>Cold and warm models</li>
+<li>macOS, Linux, Windows</li>
+<li>Node 20, 22, and 24</li>
+</ul>
+<p>Metrics:</p>
+<ul>
+<li>Data-loss rate</li>
+<li>Recovery success</li>
+<li>p50/p95/p99 latency</li>
+<li>Peak memory</li>
+<li>CPU</li>
+<li>Search availability</li>
+<li>Index lag</li>
+<li>Error-reporting accuracy</li>
+<li>Time to recovery</li>
+</ul>
+<h3 id="l7-longitudinal-field-evidence">L7 — Longitudinal field evidence</h3>
+<p>Some claims cannot be proven synthetically:</p>
+<ul>
+<li>User retention</li>
+<li>How often remembered facts prevent repeated work</li>
+<li>Whether users continue using the installed skill</li>
+<li>How often memories become stale</li>
+<li>Whether cross-agent handoffs are genuinely useful</li>
+<li>Operational confidence over months</li>
+</ul>
+<p>Use opt-in, privacy-preserving studies:</p>
+<ul>
+<li>Donated anonymized traces</li>
+<li>User interviews</li>
+<li>Structured incident reports</li>
+<li>Local summary statistics rather than raw memory</li>
+<li>Quarterly benchmark refreshes based on real failures</li>
+</ul>
+<hr />
+<h2 id="create-a-rigorous-scenario-schema">4. Create a rigorous scenario schema</h2>
+<p>Each scenario should describe an event stream—not just a file and query.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;id&quot;</span><span class="fu">:</span> <span class="st">&quot;temporal.api-endpoint.001&quot;</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;version&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;suite&quot;</span><span class="fu">:</span> <span class="st">&quot;retrieval&quot;</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;split&quot;</span><span class="fu">:</span> <span class="st">&quot;holdout&quot;</span><span class="fu">,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;dimensions&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;temporal&quot;</span><span class="ot">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;supersession&quot;</span><span class="ot">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;paraphrase&quot;</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;corpus&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;scale&quot;</span><span class="fu">:</span> <span class="dv">1000</span><span class="fu">,</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;language&quot;</span><span class="fu">:</span> <span class="st">&quot;en&quot;</span><span class="fu">,</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;distractorProfile&quot;</span><span class="fu">:</span> <span class="st">&quot;same-entity&quot;</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;events&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;at&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-01-01T10:00:00Z&quot;</span><span class="fu">,</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;memory.write&quot;</span><span class="fu">,</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;evidenceId&quot;</span><span class="fu">:</span> <span class="st">&quot;endpoint-old&quot;</span><span class="fu">,</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="st">&quot;Harbor uses Gull v1.&quot;</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;at&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-02-01T10:00:00Z&quot;</span><span class="fu">,</span></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;memory.supersede&quot;</span><span class="fu">,</span></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;evidenceId&quot;</span><span class="fu">:</span> <span class="st">&quot;endpoint-new&quot;</span><span class="fu">,</span></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;supersedes&quot;</span><span class="fu">:</span> <span class="st">&quot;endpoint-old&quot;</span><span class="fu">,</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;content&quot;</span><span class="fu">:</span> <span class="st">&quot;Harbor now uses Albatross v3.&quot;</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;query&quot;</span><span class="fu">:</span> <span class="st">&quot;Which internal Harbor endpoint should this client call?&quot;</span><span class="fu">,</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;relevantEvidence&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;endpoint-new&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;forbiddenEvidence&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;endpoint-old&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;expectedOutcome&quot;</span><span class="fu">:</span> <span class="st">&quot;pass&quot;</span><span class="fu">,</span></span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;gate&quot;</span><span class="fu">:</span> <span class="kw">true</span></span>
+<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Important design choices:</p>
+<ul>
+<li>Use <strong>evidence IDs</strong>, not magic marker strings.</li>
+<li>Separate semantic facts from exact wording.</li>
+<li>Represent time, scope, source, trust, and supersession structurally.</li>
+<li>Record whether a case is a release gate, benchmark metric, or known gap.</li>
+<li>Store expected evidence and forbidden evidence independently.</li>
+<li>Make every scenario replayable from an empty directory.</li>
+</ul>
+<hr />
+<h2 id="use-strong-baselines">5. Use strong baselines</h2>
+<p>Every benchmark result should be compared against:</p>
+<ol type="1">
+<li><strong>No memory</strong></li>
+<li><strong>MEMORY.md injected without retrieval</strong></li>
+<li><strong>Filesystem grep</strong></li>
+<li><strong>qmd BM25</strong></li>
+<li><strong>qmd semantic</strong></li>
+<li><strong>qmd hybrid/deep</strong></li>
+<li><strong>Previous AgentMemory release</strong></li>
+<li><strong>Oracle retrieval</strong>, where the correct evidence is supplied directly</li>
+</ol>
+<p>Oracle retrieval is especially important. It separates:</p>
+<ul>
+<li>Retrieval failure</li>
+<li>Context formatting failure</li>
+<li>Agent reasoning failure</li>
+</ul>
+<p>Without it, a failed task is difficult to diagnose.</p>
+<p>General memory benchmarks such as <strong>LoCoMo</strong> and <strong>LongMemEval</strong> can provide external comparability, but they should be adapters—not the primary benchmark. AgentMemory needs a coding-agent-specific benchmark with repositories, commands, decisions, failures, and cross-session work.</p>
+<hr />
+<h2 id="build-a-defensible-dataset">6. Build a defensible dataset</h2>
+<p>Use three dataset classes.</p>
+<h3 id="a.-procedural-synthetic-scenarios">A. Procedural synthetic scenarios</h3>
+<p>Best for:</p>
+<ul>
+<li>Exact ground truth</li>
+<li>Large-scale variants</li>
+<li>Adversarial mutation</li>
+<li>Temporal ordering</li>
+<li>Concurrency/fault testing</li>
+<li>Multilingual controls</li>
+</ul>
+<p>Generate many surface forms from templates, but split by template family so test cases are not trivial paraphrases of training fixtures.</p>
+<h3 id="b.-curated-realistic-coding-histories">B. Curated realistic coding histories</h3>
+<p>Create realistic multi-session project histories covering:</p>
+<ul>
+<li>Architecture decisions</li>
+<li>Commands and environment details</li>
+<li>Bug investigations</li>
+<li>Reverted decisions</li>
+<li>User preferences</li>
+<li>Deployment incidents</li>
+<li>Incomplete tasks</li>
+<li>Cross-agent handoffs</li>
+</ul>
+<p>These can be authored independently, reviewed by multiple engineers, and released under a permissive license.</p>
+<h3 id="c.-sanitized-field-cases">C. Sanitized field cases</h3>
+<p>Collect opt-in examples derived from real failures:</p>
+<ul>
+<li>What should have been remembered?</li>
+<li>What was retrieved?</li>
+<li>What did the agent do?</li>
+<li>What was the correct outcome?</li>
+</ul>
+<p>Never require publishing raw personal memory. Store sanitized minimal reproductions and provenance cards.</p>
+<hr />
+<h2 id="prevent-benchmark-leakage-and-overfitting">7. Prevent benchmark leakage and overfitting</h2>
+<p>Use:</p>
+<ul>
+<li>Public development set</li>
+<li>Frozen public benchmark set</li>
+<li>Private rotating release holdout</li>
+<li>Quarterly publication and replacement of old holdouts</li>
+<li>Generator-family separation across splits</li>
+<li>Canary phrases to detect accidental leakage</li>
+<li>Dataset hashes in every report</li>
+<li>Independent review of new holdout cases</li>
+<li>Prohibition on adding a fix-specific marker and calling it a benchmark improvement</li>
+</ul>
+<p>A case can move from private holdout into public regression after it has caught a real defect.</p>
+<hr />
+<h2 id="judge-policy">8. Judge policy</h2>
+<h3 id="prefer-deterministic-judges">Prefer deterministic judges</h3>
+<p>Use deterministic evaluation for:</p>
+<ul>
+<li>Evidence retrieval</li>
+<li>Source identity</li>
+<li>Lifecycle state</li>
+<li>Forbidden content</li>
+<li>File integrity</li>
+<li>Security policy</li>
+<li>Commands executed</li>
+<li>Test results</li>
+<li>Latency and tokens</li>
+</ul>
+<h3 id="use-semantic-slot-scoring">Use semantic slot scoring</h3>
+<p>For answers, extract required facts:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;endpoint&quot;</span><span class="fu">:</span> <span class="st">&quot;albatross.invalid/v3&quot;</span><span class="fu">,</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mustReject&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;old-gull.invalid/v1&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sourceEvidence&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;endpoint-new&quot;</span><span class="ot">]</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>This is much better than exact wording.</p>
+<h3 id="use-llm-judges-only-where-necessary">Use LLM judges only where necessary</h3>
+<p>For free-form coding quality:</p>
+<ul>
+<li>Blind the judge to system name</li>
+<li>Randomize output order</li>
+<li>Use a different model family from the evaluated model</li>
+<li>Require structured rubric output</li>
+<li>Run judge repeats</li>
+<li>Measure judge agreement</li>
+<li>Calibrate against a human-labeled sample</li>
+<li>Escalate disagreements</li>
+<li>Record judge model/version/prompt</li>
+</ul>
+<p>Never let one opaque judge score become the only release gate.</p>
+<hr />
+<h2 id="apply-statistical-rigor">9. Apply statistical rigor</h2>
+<p>For stochastic agent tasks:</p>
+<ul>
+<li>Pair runs on the same task, repository, model, and seed</li>
+<li>Run at least 3–5 repetitions per configuration</li>
+<li>Report 95% bootstrap confidence intervals</li>
+<li>Report effect sizes, not only p-values</li>
+<li>Use paired significance tests</li>
+<li>Predefine regression thresholds</li>
+<li>Separate cold and warm latency</li>
+<li>Report failures and timeouts, not only successful runs</li>
+<li>Preserve per-case artifacts for replay</li>
+</ul>
+<p>A release should not be declared better because one aggregate score moved from 78 to 79 on one run.</p>
+<hr />
+<h2 id="ci-and-execution-tiers">10. CI and execution tiers</h2>
+<h3 id="pull-request-under-two-minutes">Pull request: under two minutes</h3>
+<ul>
+<li>Schema validation</li>
+<li>Deterministic conformance</li>
+<li>Security invariants</li>
+<li>Tiny retrieval smoke corpus</li>
+<li>Expected-baseline comparison</li>
+<li>No qmd/model/network requirement</li>
+</ul>
+<h3 id="nightly">Nightly</h3>
+<ul>
+<li>Pinned real qmd</li>
+<li>Corpus scale matrix</li>
+<li>Concurrency and fault injection</li>
+<li>Windows/macOS/Linux</li>
+<li>Node LTS matrix</li>
+<li>Warm/cold latency</li>
+<li>Prior-release comparison</li>
+</ul>
+<h3 id="weekly">Weekly</h3>
+<ul>
+<li>Real coding-agent tasks</li>
+<li>Multilingual suite</li>
+<li>Randomized adversarial scenarios</li>
+<li>Multiple model tiers</li>
+<li>Judge calibration sample</li>
+</ul>
+<h3 id="release-candidate">Release candidate</h3>
+<ul>
+<li>Frozen holdout</li>
+<li>Full platform and qmd matrix</li>
+<li>Previous-release paired comparison</li>
+<li>Safety red-team suite</li>
+<li>Artifact and environment manifest</li>
+<li>Human review of every statistically meaningful regression</li>
+</ul>
+<h3 id="quarterly">Quarterly</h3>
+<ul>
+<li>Publish old holdout</li>
+<li>Rotate new private holdout</li>
+<li>Add field-derived failures</li>
+<li>Recalibrate judges and release thresholds</li>
+</ul>
+<hr />
+<h2 id="release-gates">11. Release gates</h2>
+<p>Start with explicit gates rather than a weighted score.</p>
+<h3 id="mandatory-zero-failure-gates">Mandatory zero-failure gates</h3>
+<ul>
+<li>No path/root escapes</li>
+<li>No forbidden trust/lifecycle exposure</li>
+<li>No cross-project leakage</li>
+<li>No committed-write loss under supported concurrency</li>
+<li>No corrupted file after injected process failure</li>
+<li>No false success exit code for failed sync</li>
+<li>All supported platforms pass conformance</li>
+</ul>
+<h3 id="regression-gates">Regression gates</h3>
+<ul>
+<li>Retrieval <a href="mailto:Recall@5" class="email">Recall@5</a> and nDCG cannot decline beyond a predefined margin</li>
+<li>Agent task success must be statistically non-inferior to the previous release</li>
+<li>No statistically significant increase in contradiction or stale-fact use</li>
+<li>Token overhead must remain within budget</li>
+<li>Warm and cold latency budgets must be met separately</li>
+<li>Index freshness must remain within its SLO</li>
+</ul>
+<p>Provisional targets can be introduced after the first stable baseline. Avoid inventing thresholds before measuring current variance.</p>
+<hr />
+<h2 id="reporting">12. Reporting</h2>
+<p>Every run should emit:</p>
+<pre class="text"><code>eval-results/
+  report.json
+  report.html
+  environment.json
+  dataset-manifest.json
+  cases/
+    &lt;scenario-id&gt;/
+      inputs.json
+      retrieved.json
+      context.md
+      agent-output.json
+      judge.json
+      timings.json</code></pre>
+<p>The report should show:</p>
+<ul>
+<li>Current versus previous release</li>
+<li>Current versus each baseline</li>
+<li>Confidence intervals</li>
+<li>Failure clusters by dimension</li>
+<li>Scale/language/platform slices</li>
+<li>Cold versus warm latency</li>
+<li>Safety violations</li>
+<li>Direct replay command for every failed case</li>
+</ul>
+<p>Do not lead with one overall score. Lead with a release verdict and the six-dimensional scorecard.</p>
+<hr />
+<h2 id="a-practical-90-day-roadmap">13. A practical 90-day roadmap</h2>
+<h3 id="weeks-12-eval-contract">Weeks 1–2: Eval contract</h3>
+<ul>
+<li>Rename existing suite to <code>feedback-regression</code></li>
+<li>Define the versioned scenario schema</li>
+<li>Add expected outcomes and gating classification</li>
+<li>Add environment and dataset manifests</li>
+<li>Fix exact-marker false failures</li>
+<li>Make evaluator behavior fully dataset-driven</li>
+</ul>
+<h3 id="weeks-34-conformance-and-safety">Weeks 3–4: Conformance and safety</h3>
+<p>Turn every reproduced production issue into a deterministic case:</p>
+<ul>
+<li>Traversal</li>
+<li>Symlinks</li>
+<li>Trust whitespace bypass</li>
+<li>Cross-profile qmd</li>
+<li>Unsafe direct search</li>
+<li>Concurrent writes</li>
+<li>Crash safety</li>
+<li>File permissions</li>
+<li>Metadata injection</li>
+<li>Destructive distil</li>
+</ul>
+<p>This becomes the first meaningful release gate.</p>
+<h3 id="weeks-57-codingmemorybench-retrieval-v0">Weeks 5–7: CodingMemoryBench Retrieval v0</h3>
+<p>Target roughly:</p>
+<ul>
+<li>300–500 retrieval scenarios</li>
+<li>Multiple corpus scales</li>
+<li>Temporal and contradictory evidence</li>
+<li>Several languages</li>
+<li>Hard distractors</li>
+<li>No-memory, grep, BM25, semantic, hybrid, and prior-release baselines</li>
+<li>Recall, nDCG, stale contamination, latency, and index freshness</li>
+</ul>
+<h3 id="weeks-810-agent-outcome-benchmark">Weeks 8–10: Agent outcome benchmark</h3>
+<p>Build 40–60 realistic coding tasks:</p>
+<ul>
+<li>Resume work</li>
+<li>Apply prior decisions</li>
+<li>Avoid known mistakes</li>
+<li>Cross-agent handoffs</li>
+<li>Temporal corrections</li>
+<li>Incident knowledge</li>
+</ul>
+<p>Run paired memory/no-memory experiments with at least two representative model tiers.</p>
+<h3 id="weeks-1112-holdout-and-publication">Weeks 11–12: Holdout and publication</h3>
+<ul>
+<li>Create private release holdout</li>
+<li>Publish benchmark/data cards</li>
+<li>Add nightly/weekly workflows</li>
+<li>Produce HTML comparison dashboard</li>
+<li>Define release regression policy</li>
+<li>Document exactly which product claims are supported</li>
+</ul>
+<hr />
+<h2 id="first-three-prs">First three PRs</h2>
+<h3 id="pr-1-evaluation-foundation">PR 1 — Evaluation foundation</h3>
+<ul>
+<li>Versioned scenario schema</li>
+<li>Full validation</li>
+<li>Evidence IDs</li>
+<li>Expected outcomes</li>
+<li><code>gate</code> classification</li>
+<li>Environment/dataset manifest</li>
+<li>Baseline comparison report</li>
+<li>Migrate current feedback cases without changing behavior</li>
+</ul>
+<h3 id="pr-2-production-conformance-suite">PR 2 — Production conformance suite</h3>
+<p>Convert the production audit findings into deterministic security, durability, isolation, and failure-semantics tests.</p>
+<p>This should become the first zero-tolerance release gate.</p>
+<h3 id="pr-3-codingmemorybench-retrieval-v0">PR 3 — CodingMemoryBench Retrieval v0</h3>
+<ul>
+<li>Realistic corpus generator</li>
+<li>Temporal/conflicting evidence</li>
+<li>Corpus scale tiers</li>
+<li>Multilingual cases</li>
+<li>BM25/semantic/hybrid/previous-release baselines</li>
+<li><a href="mailto:Recall@k" class="email">Recall@k</a>, nDCG, stale contamination, and latency</li>
+<li>Confidence-interval HTML report</li>
+</ul>
+<h2 id="strategic-principle">Strategic principle</h2>
+<p>The evaluation becomes world-class when it stops being a collection of tests and becomes a <strong>measurement system for product decisions</strong>:</p>
+<ul>
+<li>It distinguishes correctness from quality.</li>
+<li>It distinguishes retrieval failure from agent reasoning failure.</li>
+<li>It measures causal task improvement, not merely recall.</li>
+<li>It treats safety and data integrity as first-class outcomes.</li>
+<li>It is statistically defensible and reproducible.</li>
+<li>It catches regressions without being permanently red.</li>
+<li>It can support—or falsify—public product claims.</li>
+</ul>
+</article>
+  <script>
+(() => {
+  function normalizePreviewAnnotationLabel(text) {
+    return String(text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\s*\n\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
+  function advancePastBacktickSpan(source, startIndex) {
+    let fenceLength = 1;
+    while (source[startIndex + fenceLength] === "`") fenceLength += 1;
+
+    let index = startIndex + fenceLength;
+    while (index < source.length) {
+      const ch = source[index];
+      if (ch === "\\") {
+        index = Math.min(source.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        let runLength = 1;
+        while (source[index + runLength] === "`") runLength += 1;
+        if (runLength === fenceLength) {
+          return index + runLength;
+        }
+        index += runLength;
+        continue;
+      }
+      if (ch === "\n") {
+        return index + 1;
+      }
+      index += 1;
+    }
+
+    return source.length;
+  }
+
+  function readInlineAnnotationMarkerAt(source, startIndex) {
+    const text = String(source || "");
+    if (startIndex < 0 || startIndex + 4 > text.length) return null;
+    if (text[startIndex] !== "[" || text.slice(startIndex, startIndex + 4).toLowerCase() !== "[an:") {
+      return null;
+    }
+
+    let index = startIndex + 4;
+    while (index < text.length && /\s/.test(text[index])) index += 1;
+    const bodyStart = index;
+    let squareDepth = 0;
+
+    while (index < text.length) {
+      const ch = text[index];
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(text, index);
+        continue;
+      }
+      if (ch === "[") {
+        squareDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "]") {
+        if (squareDepth === 0) {
+          const end = index + 1;
+          return {
+            start: startIndex,
+            end: end,
+            raw: text.slice(startIndex, end),
+            body: text.slice(bodyStart, index),
+          };
+        }
+        squareDepth -= 1;
+        index += 1;
+        continue;
+      }
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function collectInlineAnnotationMarkers(text) {
+    const source = String(text || "");
+    const markers = [];
+    let index = 0;
+
+    while (index < source.length) {
+      const ch = source[index];
+      if (ch === "\\") {
+        index = Math.min(source.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(source, index);
+        continue;
+      }
+      if (ch === "[" && source.slice(index, index + 4).toLowerCase() === "[an:") {
+        const marker = readInlineAnnotationMarkerAt(source, index);
+        if (marker) {
+          markers.push(marker);
+          index = marker.end;
+          continue;
+        }
+      }
+      index += 1;
+    }
+
+    return markers;
+  }
+
+  function replaceInlineAnnotationMarkers(text, annotationReplacer, textReplacer) {
+    const source = String(text || "");
+    const markers = collectInlineAnnotationMarkers(source);
+    const replaceAnnotation = typeof annotationReplacer === "function"
+      ? annotationReplacer
+      : function(marker) { return marker.raw; };
+    const replaceText = typeof textReplacer === "function"
+      ? textReplacer
+      : function(segment) { return segment; };
+
+    if (markers.length === 0) {
+      return replaceText(source);
+    }
+
+    let out = "";
+    let lastIndex = 0;
+    markers.forEach(function(marker) {
+      if (marker.start > lastIndex) {
+        out += String(replaceText(source.slice(lastIndex, marker.start)) ?? "");
+      }
+      out += String(replaceAnnotation(marker) ?? "");
+      lastIndex = marker.end;
+    });
+    if (lastIndex < source.length) {
+      out += String(replaceText(source.slice(lastIndex)) ?? "");
+    }
+    return out;
+  }
+
+  function escapeHtml(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function isWordChar(ch) {
+    return typeof ch === "string" && /[A-Za-z0-9]/.test(ch);
+  }
+
+  function readInlineMarkdownLinkAt(source, startIndex) {
+    const text = String(source || "");
+    if (text[startIndex] !== "[") return null;
+
+    let index = startIndex + 1;
+    let squareDepth = 0;
+    while (index < text.length) {
+      const ch = text[index];
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(text, index);
+        continue;
+      }
+      if (ch === "[") {
+        squareDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "]") {
+        if (squareDepth === 0) break;
+        squareDepth -= 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "\n") return null;
+      index += 1;
+    }
+
+    if (index >= text.length || text[index] !== "]" || text[index + 1] !== "(") return null;
+
+    index += 2;
+    let parenDepth = 0;
+    while (index < text.length) {
+      const ch = text[index];
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (ch === "`") {
+        index = advancePastBacktickSpan(text, index);
+        continue;
+      }
+      if (ch === "(") {
+        parenDepth += 1;
+        index += 1;
+        continue;
+      }
+      if (ch === ")") {
+        if (parenDepth === 0) {
+          return {
+            type: "literal",
+            raw: text.slice(startIndex, index + 1),
+            end: index + 1,
+          };
+        }
+        parenDepth -= 1;
+        index += 1;
+        continue;
+      }
+      if (ch === "\n") return null;
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function readDelimitedPreviewTokenAt(source, startIndex, open, close, allowNewlines) {
+    const text = String(source || "");
+    if (text.slice(startIndex, startIndex + open.length) !== open) return null;
+
+    let index = startIndex + open.length;
+    while (index < text.length) {
+      const ch = text[index];
+      if (!allowNewlines && ch === "\n") return null;
+      if (ch === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (text.slice(index, index + close.length) === close) {
+        return {
+          type: "math",
+          raw: text.slice(startIndex, index + close.length),
+          end: index + close.length,
+        };
+      }
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function readInlineMathTokenAt(source, startIndex) {
+    const text = String(source || "");
+    if (text[startIndex] === "\\" && text[startIndex + 1] === "(") {
+      return readDelimitedPreviewTokenAt(text, startIndex, "\\(", "\\)", true);
+    }
+    if (text[startIndex] === "\\" && text[startIndex + 1] === "[") {
+      return readDelimitedPreviewTokenAt(text, startIndex, "\\[", "\\]", true);
+    }
+    if (text[startIndex] === "$" && text[startIndex + 1] === "$") {
+      return readDelimitedPreviewTokenAt(text, startIndex, "$$", "$$", true);
+    }
+    if (text[startIndex] === "$" && text[startIndex + 1] !== "$" && text[startIndex + 1] && !/\s/.test(text[startIndex + 1])) {
+      const token = readDelimitedPreviewTokenAt(text, startIndex, "$", "$", false);
+      if (token && token.raw.length > 2) return token;
+    }
+    return null;
+  }
+
+  function readBareUrlTokenAt(source, startIndex) {
+    const text = String(source || "").slice(startIndex);
+    const match = text.match(/^https?:\/\/[^\s<]+/i);
+    if (!match) return null;
+    return {
+      type: "literal",
+      raw: match[0],
+      end: startIndex + match[0].length,
+    };
+  }
+
+  function readAnnotationPreviewProtectedTokenAt(source, startIndex) {
+    const text = String(source || "");
+    if (startIndex < 0 || startIndex >= text.length) return null;
+
+    if (text[startIndex] === "`") {
+      const end = advancePastBacktickSpan(text, startIndex);
+      return {
+        type: "code",
+        raw: text.slice(startIndex, end),
+        end: end,
+      };
+    }
+
+    const linkToken = text[startIndex] === "["
+      ? readInlineMarkdownLinkAt(text, startIndex)
+      : null;
+    if (linkToken) return linkToken;
+
+    const mathToken = (text[startIndex] === "$" || text[startIndex] === "\\")
+      ? readInlineMathTokenAt(text, startIndex)
+      : null;
+    if (mathToken) return mathToken;
+
+    const urlToken = text[startIndex].toLowerCase() === "h"
+      ? readBareUrlTokenAt(text, startIndex)
+      : null;
+    if (urlToken) return urlToken;
+
+    return null;
+  }
+
+  function canOpenEmphasisDelimiter(source, startIndex, delimiter) {
+    const text = String(source || "");
+    if (text.slice(startIndex, startIndex + delimiter.length) !== delimiter) return false;
+    const prev = startIndex > 0 ? text[startIndex - 1] : "";
+    const next = text[startIndex + delimiter.length] || "";
+    if (!next || /\s/.test(next)) return false;
+    return !isWordChar(prev);
+  }
+
+  function canCloseEmphasisDelimiter(source, startIndex, delimiter) {
+    const text = String(source || "");
+    if (text.slice(startIndex, startIndex + delimiter.length) !== delimiter) return false;
+    const prev = startIndex > 0 ? text[startIndex - 1] : "";
+    const next = text[startIndex + delimiter.length] || "";
+    if (!prev || /\s/.test(prev)) return false;
+    return !isWordChar(next);
+  }
+
+  function readAnnotationEmphasisSpanAt(source, startIndex, delimiter, tagName) {
+    const text = String(source || "");
+    if (!canOpenEmphasisDelimiter(text, startIndex, delimiter)) return null;
+
+    let index = startIndex + delimiter.length;
+    while (index < text.length) {
+      if (text[index] === "\\") {
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+
+      const protectedToken = readAnnotationPreviewProtectedTokenAt(text, index);
+      if (protectedToken) {
+        index = protectedToken.end;
+        continue;
+      }
+
+      if (canCloseEmphasisDelimiter(text, index, delimiter)) {
+        const inner = text.slice(startIndex + delimiter.length, index);
+        return {
+          end: index + delimiter.length,
+          html: "<" + tagName + ">" + renderAnnotationPlainTextHtml(inner) + "</" + tagName + ">",
+        };
+      }
+
+      index += 1;
+    }
+
+    return null;
+  }
+
+  function renderAnnotationCodeSpanHtml(rawToken) {
+    const raw = String(rawToken || "");
+    if (!raw || raw[0] !== "`") return escapeHtml(raw);
+
+    let fenceLength = 1;
+    while (raw[fenceLength] === "`") fenceLength += 1;
+    const fence = "`".repeat(fenceLength);
+    if (raw.length < fenceLength * 2 || raw.slice(raw.length - fenceLength) !== fence) {
+      return escapeHtml(raw);
+    }
+
+    return "<code>" + escapeHtml(raw.slice(fenceLength, raw.length - fenceLength)) + "</code>";
+  }
+
+  function renderAnnotationPlainTextHtml(text) {
+    const source = String(text || "");
+    let out = "";
+    let index = 0;
+
+    while (index < source.length) {
+      const strongMatch = readAnnotationEmphasisSpanAt(source, index, "**", "strong")
+        || readAnnotationEmphasisSpanAt(source, index, "__", "strong");
+      if (strongMatch) {
+        out += strongMatch.html;
+        index = strongMatch.end;
+        continue;
+      }
+
+      const emphasisMatch = readAnnotationEmphasisSpanAt(source, index, "*", "em")
+        || readAnnotationEmphasisSpanAt(source, index, "_", "em");
+      if (emphasisMatch) {
+        out += emphasisMatch.html;
+        index = emphasisMatch.end;
+        continue;
+      }
+
+      out += escapeHtml(source[index]);
+      index += 1;
+    }
+
+    return out;
+  }
+
+  function renderPreviewAnnotationHtml(text) {
+    const source = normalizePreviewAnnotationLabel(text);
+    let out = "";
+    let plainStart = 0;
+    let index = 0;
+
+    while (index < source.length) {
+      const token = readAnnotationPreviewProtectedTokenAt(source, index);
+      if (!token) {
+        index += 1;
+        continue;
+      }
+
+      if (index > plainStart) {
+        out += renderAnnotationPlainTextHtml(source.slice(plainStart, index));
+      }
+
+      if (token.type === "code") {
+        out += renderAnnotationCodeSpanHtml(token.raw);
+      } else {
+        out += escapeHtml(token.raw);
+      }
+
+      index = token.end;
+      plainStart = index;
+    }
+
+    if (plainStart < source.length) {
+      out += renderAnnotationPlainTextHtml(source.slice(plainStart));
+    }
+
+    return out;
+  }
+
+  function transformMarkdownOutsideFences(text, plainTransformer) {
+    const source = String(text || "").replace(/\r\n/g, "\n");
+    if (!source) return source;
+
+    const transformPlain = typeof plainTransformer === "function"
+      ? plainTransformer
+      : function(segment) { return segment; };
+    const lines = source.split("\n");
+    const out = [];
+    let plainBuffer = [];
+    let inFence = false;
+    let fenceChar = null;
+    let fenceLength = 0;
+
+    function flushPlain() {
+      if (plainBuffer.length === 0) return;
+      const transformed = transformPlain(plainBuffer.join("\n"));
+      out.push(typeof transformed === "string" ? transformed : String(transformed ?? ""));
+      plainBuffer = [];
+    }
+
+    lines.forEach(function(line) {
+      const trimmed = line.trimStart();
+      const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+      if (fenceMatch) {
+        const marker = fenceMatch[1] || "";
+        const markerChar = marker.charAt(0);
+        const markerLength = marker.length;
+
+        if (!inFence) {
+          flushPlain();
+          inFence = true;
+          fenceChar = markerChar;
+          fenceLength = markerLength;
+          out.push(line);
+          return;
+        }
+
+        if (fenceChar === markerChar && markerLength >= fenceLength) {
+          inFence = false;
+          fenceChar = null;
+          fenceLength = 0;
+        }
+
+        out.push(line);
+        return;
+      }
+
+      if (inFence) {
+        out.push(line);
+      } else {
+        plainBuffer.push(line);
+      }
+    });
+
+    flushPlain();
+    return out.join("\n");
+  }
+
+  function hasAnnotationMarkers(text) {
+    let found = false;
+    transformMarkdownOutsideFences(text, function(segment) {
+      if (!found && collectInlineAnnotationMarkers(segment).length > 0) {
+        found = true;
+      }
+      return segment;
+    });
+    return found;
+  }
+
+  function stripAnnotationMarkers(text) {
+    return transformMarkdownOutsideFences(text, function(segment) {
+      return replaceInlineAnnotationMarkers(segment, function() { return ""; });
+    });
+  }
+
+  function prepareMarkdownForPandocPreview(markdown, placeholderPrefix) {
+    const placeholders = [];
+    const prefix = typeof placeholderPrefix === "string" && placeholderPrefix
+      ? placeholderPrefix
+      : "PIMDANNOT";
+    const prepared = transformMarkdownOutsideFences(markdown, function(segment) {
+      return replaceInlineAnnotationMarkers(segment, function(marker) {
+        const label = normalizePreviewAnnotationLabel(marker.body);
+        if (!label) return "";
+        const token = prefix + placeholders.length + "TOKEN";
+        placeholders.push({ token: token, text: label, title: "[an: " + label + "]" });
+        return token;
+      });
+    });
+    return { markdown: prepared, placeholders: placeholders };
+  }
+
+  const helpers = Object.freeze({
+    collectInlineAnnotationMarkers: collectInlineAnnotationMarkers,
+    hasAnnotationMarkers: hasAnnotationMarkers,
+    normalizePreviewAnnotationLabel: normalizePreviewAnnotationLabel,
+    prepareMarkdownForPandocPreview: prepareMarkdownForPandocPreview,
+    readInlineAnnotationMarkerAt: readInlineAnnotationMarkerAt,
+    renderPreviewAnnotationHtml: renderPreviewAnnotationHtml,
+    replaceInlineAnnotationMarkers: replaceInlineAnnotationMarkers,
+    stripAnnotationMarkers: stripAnnotationMarkers,
+    transformMarkdownOutsideFences: transformMarkdownOutsideFences,
+  });
+
+  globalThis.PiMarkdownPreviewAnnotationHelpers = helpers;
+})();
+
+  </script>
+  <script type="module">
+  (async () => {
+    const annotationHelpers = window.PiMarkdownPreviewAnnotationHelpers || null;
+    const previewAnnotationPlaceholders = [];
+    const DIFF_META_LINE_REGEX = /^(diff --git |index |new file mode |deleted file mode |similarity index |rename from |rename to |Binary files )/;
+
+    const escapeRegExp = (text) => {
+      const backslash = String.fromCharCode(92);
+      const specials = '.+*?^' + '$' + '{}|[]' + backslash;
+      return Array.from(String(text || '')).map((ch) => specials.includes(ch) ? backslash + ch : ch).join('');
+    };
+
+    const setAnnotationMarkerContent = (marker, text) => {
+      if (!(marker instanceof HTMLElement)) return;
+      const rendered = annotationHelpers && typeof annotationHelpers.renderPreviewAnnotationHtml === 'function'
+        ? annotationHelpers.renderPreviewAnnotationHtml(text)
+        : String(text || '');
+      marker.innerHTML = rendered;
+    };
+
+    const replaceAnnotationTextNode = (textNode) => {
+      if (!annotationHelpers || typeof annotationHelpers.collectInlineAnnotationMarkers !== 'function') return;
+      const text = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+      if (!text || text.toLowerCase().indexOf('[an:') === -1) return;
+
+      const markers = annotationHelpers.collectInlineAnnotationMarkers(text);
+      if (!Array.isArray(markers) || markers.length === 0) return;
+
+      const fragment = document.createDocumentFragment();
+      let lastIndex = 0;
+      markers.forEach((markerInfo) => {
+        const token = markerInfo && typeof markerInfo.raw === 'string' ? markerInfo.raw : '';
+        const start = markerInfo && typeof markerInfo.start === 'number' ? markerInfo.start : lastIndex;
+        const end = markerInfo && typeof markerInfo.end === 'number' ? markerInfo.end : start;
+        if (start > lastIndex) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+        }
+
+        const markerText = annotationHelpers && typeof annotationHelpers.normalizePreviewAnnotationLabel === 'function'
+          ? annotationHelpers.normalizePreviewAnnotationLabel(markerInfo.body)
+          : String(markerInfo && markerInfo.body || '').trim();
+        if (markerText) {
+          const markerEl = document.createElement('span');
+          markerEl.className = 'annotation-marker';
+          markerEl.title = token || markerText;
+          setAnnotationMarkerContent(markerEl, markerText);
+          fragment.appendChild(markerEl);
+        }
+
+        lastIndex = end;
+      });
+
+      if (lastIndex < text.length) {
+        fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+      }
+
+      if (textNode.parentNode) {
+        textNode.parentNode.replaceChild(fragment, textNode);
+      }
+    };
+
+    const applyPreviewAnnotationPlaceholders = (root) => {
+      if (!root || !Array.isArray(previewAnnotationPlaceholders) || previewAnnotationPlaceholders.length === 0) return;
+      const placeholderMap = new Map();
+      const placeholderTokens = [];
+      previewAnnotationPlaceholders.forEach((entry) => {
+        const token = entry && typeof entry.token === 'string' ? entry.token : '';
+        if (!token) return;
+        placeholderMap.set(token, entry);
+        placeholderTokens.push(token);
+      });
+      if (placeholderTokens.length === 0) return;
+
+      const placeholderPattern = new RegExp(placeholderTokens.map(escapeRegExp).join('|'), 'g');
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const textNodes = [];
+      let node = walker.nextNode();
+      while (node) {
+        const textNode = node;
+        const value = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+        if (value && value.indexOf('PIMDPREVIEWANNOT') !== -1) {
+          const parent = textNode.parentElement;
+          const tag = parent && parent.tagName ? parent.tagName.toUpperCase() : '';
+          if (tag !== 'CODE' && tag !== 'PRE' && tag !== 'SCRIPT' && tag !== 'STYLE' && tag !== 'TEXTAREA') {
+            textNodes.push(textNode);
+          }
+        }
+        node = walker.nextNode();
+      }
+
+      textNodes.forEach((textNode) => {
+        const text = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+        if (!text) return;
+        placeholderPattern.lastIndex = 0;
+        if (!placeholderPattern.test(text)) return;
+        placeholderPattern.lastIndex = 0;
+
+        const fragment = document.createDocumentFragment();
+        let lastIndex = 0;
+        let match;
+        while ((match = placeholderPattern.exec(text)) !== null) {
+          const token = match[0] || '';
+          const entry = placeholderMap.get(token);
+          const start = typeof match.index === 'number' ? match.index : 0;
+          if (start > lastIndex) {
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+          }
+          if (entry) {
+            const markerEl = document.createElement('span');
+            markerEl.className = 'annotation-marker';
+            const markerText = typeof entry.text === 'string' ? entry.text : token;
+            markerEl.title = typeof entry.title === 'string' ? entry.title : markerText;
+            setAnnotationMarkerContent(markerEl, markerText);
+            fragment.appendChild(markerEl);
+          } else {
+            fragment.appendChild(document.createTextNode(token));
+          }
+          lastIndex = start + token.length;
+          if (token.length === 0) {
+            placeholderPattern.lastIndex += 1;
+          }
+        }
+
+        if (lastIndex < text.length) {
+          fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+        }
+
+        if (textNode.parentNode) {
+          textNode.parentNode.replaceChild(fragment, textNode);
+        }
+      });
+    };
+
+    const decorateDiffCodeBlocks = (root) => {
+      if (!root) return;
+      const diffBlocks = Array.from(root.querySelectorAll('pre.sourceCode.diff code'));
+
+      diffBlocks.forEach((codeBlock) => {
+        const lineElements = Array.from(codeBlock.children).filter((child) => child instanceof HTMLElement);
+        lineElements.forEach((lineEl) => {
+          const text = typeof lineEl.textContent === 'string' ? lineEl.textContent : '';
+          if (!text) return;
+
+          if (/^\+(?!\+\+)/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-add-line');
+          } else if (/^-(?!--)/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-del-line');
+          } else if (/^@@/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-hunk-line');
+          } else if (/^(?:\+\+\+ |--- )/.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-header-line');
+          } else if (DIFF_META_LINE_REGEX.test(text)) {
+            lineEl.classList.add('diff-line', 'diff-meta-line');
+          }
+
+          const walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT);
+          const matches = [];
+          let node = walker.nextNode();
+          while (node) {
+            const textNode = node;
+            const value = typeof textNode.nodeValue === 'string' ? textNode.nodeValue : '';
+            const parent = textNode.parentElement;
+            if (value && value.toLowerCase().indexOf('[an:') !== -1 && parent && !parent.closest('a, .annotation-marker')) {
+              matches.push(textNode);
+            }
+            node = walker.nextNode();
+          }
+
+          matches.forEach(replaceAnnotationTextNode);
+        });
+      });
+    };
+
+    const MATHJAX_CDN_URL = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js';
+
+    const waitForFonts = async () => {
+      if ('fonts' in document) {
+        try {
+          await document.fonts.ready;
+        } catch {}
+      }
+    };
+
+    const waitForPaint = async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+
+    const extractMathFallbackTex = (text, displayMode) => {
+      const source = typeof text === 'string' ? text.trim() : '';
+      if (!source) return '';
+
+      if (displayMode) {
+        if (source.startsWith('$$') && source.endsWith('$$') && source.length >= 4) {
+          return source.slice(2, -2).trim();
+        }
+        if (source.startsWith('\\[') && source.endsWith('\\]') && source.length >= 4) {
+          return source.slice(2, -2).trim();
+        }
+        return source;
+      }
+
+      if (source.startsWith('\\(') && source.endsWith('\\)') && source.length >= 4) {
+        return source.slice(2, -2).trim();
+      }
+      if (source.startsWith('$') && source.endsWith('$') && source.length >= 2) {
+        return source.slice(1, -1).trim();
+      }
+      return source;
+    };
+
+    const collectMathFallbackTargets = (root) => {
+      if (!root) return [];
+      const nodes = Array.from(root.querySelectorAll('.math.display, .math.inline'));
+      const targets = [];
+      const seenTargets = new Set();
+
+      nodes.forEach((node) => {
+        const displayMode = node.classList.contains('display');
+        const rawText = typeof node.textContent === 'string' ? node.textContent : '';
+        const tex = extractMathFallbackTex(rawText, displayMode);
+        if (!tex) return;
+
+        let renderTarget = node;
+        if (displayMode) {
+          const parent = node.parentElement;
+          const parentText = parent && typeof parent.textContent === 'string' ? parent.textContent.trim() : '';
+          if (parent && parent.tagName === 'P' && parentText === rawText.trim()) {
+            renderTarget = parent;
+          }
+        }
+
+        if (seenTargets.has(renderTarget)) return;
+        seenTargets.add(renderTarget);
+        targets.push({ renderTarget, displayMode, tex });
+      });
+
+      return targets;
+    };
+
+    let mathJaxPromise = null;
+    const ensureMathJax = () => {
+      if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+        return Promise.resolve(window.MathJax);
+      }
+      if (mathJaxPromise) return mathJaxPromise;
+
+      mathJaxPromise = new Promise((resolve, reject) => {
+        window.MathJax = {
+          loader: { load: ['[tex]/ams', '[tex]/noerrors', '[tex]/noundefined'] },
+          tex: {
+            inlineMath: [['\\(', '\\)'], ['$', '$']],
+            displayMath: [['\\[', '\\]'], ['$$', '$$']],
+            packages: { '[+]': ['ams', 'noerrors', 'noundefined'] },
+          },
+          options: {
+            skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+          },
+          startup: { typeset: false },
+        };
+
+        const script = document.createElement('script');
+        script.src = MATHJAX_CDN_URL;
+        script.async = true;
+        script.onload = () => {
+          const api = window.MathJax;
+          if (api && api.startup && api.startup.promise && typeof api.startup.promise.then === 'function') {
+            api.startup.promise.then(() => resolve(api)).catch(reject);
+            return;
+          }
+          if (api && typeof api.typesetPromise === 'function') {
+            resolve(api);
+            return;
+          }
+          reject(new Error('MathJax did not initialize.'));
+        };
+        script.onerror = () => reject(new Error('Failed to load MathJax.'));
+        document.head.appendChild(script);
+      }).catch((error) => {
+        mathJaxPromise = null;
+        throw error;
+      });
+
+      return mathJaxPromise;
+    };
+
+    const markerNeedsMath = (text) => {
+      const source = typeof text === 'string' ? text : '';
+      if (!source) return false;
+      const backslash = String.fromCharCode(92);
+      if (source.includes(backslash + '(') || source.includes(backslash + '[') || source.includes('$$')) return true;
+      for (let index = 0; index < source.length - 1; index += 1) {
+        const char = source[index];
+        const next = source[index + 1] || '';
+        if (char === '$' && next.trim() !== '') return true;
+        if (char === backslash && /[A-Za-z]/.test(next)) return true;
+      }
+      return false;
+    };
+
+    const renderAnnotationMarkerMath = async (root) => {
+      if (!root) return;
+      const markers = Array.from(root.querySelectorAll('.annotation-marker')).filter((marker) => {
+        if (!(marker instanceof HTMLElement)) return false;
+        if (marker.querySelector('math, mjx-container')) return false;
+        const text = typeof marker.textContent === 'string' ? marker.textContent : '';
+        return markerNeedsMath(text);
+      });
+      if (markers.length === 0) return;
+
+      let mathJax;
+      try {
+        mathJax = await ensureMathJax();
+      } catch (e) {
+        console.error('MathJax load failed:', e);
+        return;
+      }
+
+      try {
+        await mathJax.typesetPromise(markers);
+      } catch (e) {
+        console.error('Annotation math render failed:', e);
+      }
+    };
+
+    const renderMathFallback = async (root) => {
+      const fallbackTargets = collectMathFallbackTargets(root);
+      if (fallbackTargets.length === 0) return;
+
+      let mathJax;
+      try {
+        mathJax = await ensureMathJax();
+      } catch (e) {
+        console.error('MathJax load failed:', e);
+        return;
+      }
+
+      fallbackTargets.forEach(({ renderTarget, displayMode, tex }) => {
+        renderTarget.textContent = displayMode ? '\\[\n' + tex + '\n\\]' : '\\(' + tex + '\\)';
+      });
+
+      try {
+        await mathJax.typesetPromise(fallbackTargets.map(({ renderTarget }) => renderTarget));
+      } catch (e) {
+        console.error('MathJax render failed:', e);
+      }
+    };
+
+
+    const setMermaidRenderResult = (status, error) => {
+      window.__mermaidRenderResult = error ? { status, error } : { status };
+    };
+    const renderMermaidFailure = (wrappers, message) => {
+      wrappers.forEach((wrapper) => {
+        const failure = document.createElement('pre');
+        failure.className = 'mermaid-error';
+        failure.setAttribute('role', 'alert');
+        failure.style.cssText = 'margin:0;padding:12px 14px;border:1px solid var(--error,#cf222e);border-radius:8px;background:var(--panel-2,#f8fafc);color:var(--error,#cf222e);text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;';
+        failure.textContent = 'Mermaid render failed: ' + message;
+        wrapper.replaceChildren(failure);
+      });
+    };
+    const renderMermaid = async () => {
+      const mermaidBlocks = document.querySelectorAll('pre.mermaid');
+      if (mermaidBlocks.length === 0) {
+        setMermaidRenderResult('skipped');
+        return;
+      }
+
+      setMermaidRenderResult('pending');
+      const wrappers = Array.from(mermaidBlocks).map((pre) => {
+        const code = pre.querySelector('code');
+        const src = code ? code.textContent : pre.textContent;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-container';
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = src;
+        wrapper.appendChild(div);
+        pre.replaceWith(wrapper);
+        return wrapper;
+      });
+
+      try {
+        const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs');
+        const packs = [{"name":"lucide","url":"https://unpkg.com/@iconify-json/lucide@1/icons.json"},{"name":"logos","url":"https://unpkg.com/@iconify-json/logos@1/icons.json"}];
+        const pending = new Map();
+        let iconPackError = null;
+        const load = (pack) => {
+          if (!pending.has(pack.name)) {
+            pending.set(pack.name, fetch(pack.url).then((response) => {
+              if (!response.ok) throw new Error('Failed to load Mermaid icon pack ' + pack.name + ': HTTP ' + response.status);
+              return response.json();
+            }).catch((error) => {
+              iconPackError ??= error instanceof Error ? error : new Error(String(error));
+              throw error;
+            }));
+          }
+          return pending.get(pack.name);
+        };
+        mermaid.registerIconPacks(packs.map((pack) => ({ name: pack.name, loader: () => load(pack) })));
+        mermaid.initialize({"startOnLoad":false,"theme":"base","themeVariables":{"background":"#1a1b21","primaryColor":"#25262f","primaryTextColor":"#d4d4d4","primaryBorderColor":"#808080","secondaryColor":"#1f2027","secondaryTextColor":"#d4d4d4","secondaryBorderColor":"#808080","tertiaryColor":"#1f2027","tertiaryTextColor":"#d4d4d4","tertiaryBorderColor":"#808080","lineColor":"#808080","textColor":"#d4d4d4","edgeLabelBackground":"#25262f","nodeBorder":"#808080","clusterBkg":"#1f2027","clusterBorder":"#808080","titleColor":"#f0c674"}});
+        await mermaid.run();
+        if (iconPackError) throw iconPackError;
+        const parseRgb = (value) => {
+          const match = value.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/);
+          return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+        };
+        const isOpaqueColor = (value) => {
+          if (!parseRgb(value)) return false;
+          const alphaMatch = value.match(/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)$/);
+          return !alphaMatch || Number(alphaMatch[1]) >= 1;
+        };
+        const findOpaqueFill = (root) => {
+          if (!(root instanceof Element)) return null;
+          const shape = Array.from(root.querySelectorAll('rect, polygon, path, circle, ellipse')).find((candidate) => {
+            const fill = getComputedStyle(candidate).fill;
+            return isOpaqueColor(fill);
+          });
+          return shape ? getComputedStyle(shape).fill : null;
+        };
+        const findOpaqueBackground = (element, fallback) => {
+          let current = element instanceof Element ? element : null;
+          while (current) {
+            const background = getComputedStyle(current).backgroundColor;
+            if (current instanceof HTMLElement && isOpaqueColor(background)) return background;
+            current = current.parentElement;
+          }
+          return fallback;
+        };
+        const relativeLuminance = (color) => {
+          const linear = color.map((channel) => {
+            const value = channel / 255;
+            return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+        };
+        const contrastRatio = (foreground, background) => {
+          const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+          const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+          return (lighter + 0.05) / (darker + 0.05);
+        };
+        const toRgb = (color) => 'rgb(' + color.map((channel) => Math.round(channel)).join(', ') + ')';
+        const ensureReadableColor = (foregroundCss, backgroundCss) => {
+          const foreground = parseRgb(foregroundCss);
+          const background = parseRgb(backgroundCss);
+          if (!foreground || !background || contrastRatio(foreground, background) >= 4.5) return foregroundCss;
+          const readableCandidates = [[0, 0, 0], [255, 255, 255]].flatMap((target) => {
+            for (let step = 1; step <= 20; step += 1) {
+              const amount = step / 20;
+              const color = foreground.map((channel, index) => channel + (target[index] - channel) * amount);
+              if (contrastRatio(color, background) >= 4.5) return [{ amount, color }];
+            }
+            return [];
+          });
+          readableCandidates.sort((left, right) => left.amount - right.amount);
+          if (readableCandidates.length > 0) return toRgb(readableCandidates[0].color);
+          const black = [0, 0, 0];
+          const white = [255, 255, 255];
+          return toRgb(contrastRatio(black, background) >= contrastRatio(white, background) ? black : white);
+        };
+        const pageBackground = getComputedStyle(document.body).backgroundColor;
+        document.querySelectorAll('.mermaid-container .icon-shape').forEach((node) => {
+          const icon = node.querySelector('svg');
+          if (!icon) return;
+          const semanticColor = getComputedStyle(icon).color;
+          const iconSurface = findOpaqueFill(node.firstElementChild)
+            || findOpaqueBackground(icon, pageBackground);
+          const iconColor = ensureReadableColor(semanticColor, iconSurface);
+          icon.style.setProperty('color', iconColor, 'important');
+          node.querySelectorAll('.labelBkg, .nodeLabel').forEach((label) => {
+            if (!(label instanceof HTMLElement)) return;
+            const labelSurface = findOpaqueBackground(label, pageBackground);
+            const labelColor = ensureReadableColor(semanticColor, labelSurface);
+            label.style.setProperty('color', labelColor, 'important');
+          });
+        });
+        document.querySelectorAll('.mermaid-container .node:not(.icon-shape)').forEach((node) => {
+          const shape = Array.from(node.querySelectorAll('rect, polygon, path, circle, ellipse')).find((candidate) => {
+            const fill = getComputedStyle(candidate).fill;
+            return fill && fill !== 'none' && fill !== 'rgba(0, 0, 0, 0)';
+          });
+          if (!shape) return;
+          const shapeFill = getComputedStyle(shape).fill;
+          node.querySelectorAll('.nodeLabel').forEach((label) => {
+            if (!(label instanceof HTMLElement)) return;
+            const labelColor = ensureReadableColor(getComputedStyle(label).color, shapeFill);
+            label.style.setProperty('color', labelColor, 'important');
+          });
+        });
+        setMermaidRenderResult('success');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setMermaidRenderResult('failed', message);
+        renderMermaidFailure(wrappers, message);
+        console.error('Mermaid render failed:', error);
+      }
+    };
+  
+
+    const root = document.getElementById('preview-root');
+    try {
+      await renderMermaid();
+      applyPreviewAnnotationPlaceholders(root);
+      decorateDiffCodeBlocks(root);
+      await renderAnnotationMarkerMath(root);
+      await renderMathFallback(root);
+      await waitForFonts();
+      await waitForPaint();
+    } finally {
+      window.__mermaidDone = true;
+    }
+  })();
+  </script>
+</body>
+</html>

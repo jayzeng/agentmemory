@@ -96,6 +96,27 @@ export interface PluginSessionStartHookV1 {
 	run(context: PluginSessionStartContextV1): Promise<void>;
 }
 
+export interface PluginContextSectionV1 {
+	id: string;
+	label: string;
+	content: string;
+	artifactPath?: string;
+	metadata?: Record<string, string | number | boolean>;
+}
+
+export interface PluginContextProviderContextV1 {
+	host: string;
+	cwd?: string;
+	query?: string;
+	signal: AbortSignal;
+}
+
+export interface PluginContextProviderV1 {
+	name: string;
+	requiredCapability: string;
+	provide(context: PluginContextProviderContextV1): Promise<PluginContextSectionV1[]>;
+}
+
 export interface PluginMemoryWriteV1 {
 	target: "long_term" | "daily" | "topic";
 	content: string;
@@ -136,6 +157,7 @@ export interface AgentMemoryPluginHostV1 {
 	coreVersion: string;
 	registerCommand(command: PluginCommandV1): void;
 	registerSessionStartHook(hook: PluginSessionStartHookV1): void;
+	registerContextProvider(provider: PluginContextProviderV1): void;
 	getStateDirectory(): string;
 	getMemoryDirectory(): string;
 	getEntitlement(): Promise<PluginEntitlementStatusV1>;

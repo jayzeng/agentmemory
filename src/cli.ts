@@ -280,10 +280,24 @@ async function cmdContext(flags: Record<string, string | boolean>) {
 	ensureDirs();
 	if (!noSearch && query) await ensureQmdAvailableForSync();
 	const searchResults = noSearch ? "" : await searchRelevantMemories(query);
-	const context = buildMemoryContext(searchResults);
+	let pluginSections: Awaited<ReturnType<InstalledPluginRuntimeV1["provideContext"]>> = [];
+	try {
+		pluginSections = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).provideContext({
+			host: getFlag(flags, "agent") ?? "cli",
+			cwd: process.cwd(),
+			query,
+			signal: new AbortController().signal,
+		});
+	} catch {
+		// Paid context must never make public-core memory unavailable.
+	}
+	const context = buildMemoryContext(
+		searchResults,
+		pluginSections.map((section) => ({ label: section.label, content: section.content })),
+	);
 
 	if (json) {
-		output({ context, directory: getMemoryDir() }, true);
+		output({ context, directory: getMemoryDir(), pluginSections }, true);
 	} else {
 		if (context) {
 			process.stdout.write(context);
@@ -1228,7 +1242,7 @@ async function main() {
 			if (positional[0] !== "session-start") exitError("hook requires 'session-start'", json);
 			const agent = getFlag(flags, "agent");
 			if (!agent) exitError("hook session-start requires --agent", json);
-			await cmdContext({ "no-search": true });
+			await cmdContext({ "no-search": true, agent });
 			try {
 				const decision = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).runSessionStart({
 					host: agent,

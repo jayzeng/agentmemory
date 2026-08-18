@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<meta content="Architecture proposal for executable app semantics and continuous learning around AgentMemory, informed by Better Harness and Prime Agent." name="description"/>
+<title>AgentMemory — Executable App Semantics &amp; Continuous Agent Learning</title>
+<style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #11182c;
+      --panel-2: #151e35;
+      --text: #e9eefb;
+      --muted: #a9b4cf;
+      --line: #2a3553;
+      --accent: #7dd3fc;
+      --accent-2: #a78bfa;
+      --good: #6ee7b7;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --code: #090e1a;
+      --shadow: 0 18px 45px rgba(0,0,0,.24);
+      --radius: 16px;
+      --max: 1180px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(1100px 500px at 10% -10%, rgba(125,211,252,.10), transparent 65%),
+        radial-gradient(900px 500px at 100% 0%, rgba(167,139,250,.10), transparent 60%),
+        var(--bg);
+      font: 16px/1.65 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    a:focus-visible, button:focus-visible { outline: 3px solid var(--warn); outline-offset: 3px; }
+    .skip-link { position: fixed; left: 16px; top: 12px; z-index: 100; transform: translateY(-160%); background: #fff; color: #111827; padding: 10px 14px; border-radius: 8px; font-weight: 700; }
+    .skip-link:focus { transform: translateY(0); }
+    .shell { max-width: var(--max); margin: 0 auto; padding: 0 28px 72px; }
+    header.hero { padding: 74px 0 42px; }
+    .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 12px; }
+    h1 { font-size: clamp(40px, 7vw, 78px); line-height: .98; letter-spacing: -.055em; margin: 12px 0 22px; max-width: 980px; }
+    h2 { font-size: clamp(28px, 4vw, 44px); line-height: 1.08; letter-spacing: -.035em; margin: 0 0 18px; }
+    h3 { font-size: 22px; line-height: 1.25; margin: 34px 0 12px; }
+    h4 { font-size: 17px; margin: 24px 0 8px; }
+    p { margin: 10px 0 18px; }
+    .lede { max-width: 920px; color: #cad4eb; font-size: 20px; }
+    .meta { color: var(--muted); font-size: 13px; margin-top: 24px; }
+    .pillrow { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
+    .pill { border: 1px solid var(--line); background: rgba(255,255,255,.03); border-radius: 999px; padding: 7px 11px; color: #cbd5e1; font-size: 13px; }
+    .pill.status { border-color: rgba(251,191,36,.55); color: #fde68a; background: rgba(251,191,36,.08); }
+    .decision-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 18px; margin: 22px 0; }
+    .status-list { display: grid; grid-template-columns: auto 1fr; gap: 7px 16px; margin: 0; }
+    .status-list dt { color: var(--muted); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .status-list dd { margin: 0; }
+    .badge { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 750; white-space: nowrap; }
+    .badge.accepted { color: var(--good); border-color: rgba(110,231,183,.45); }
+    .badge.deferred { color: var(--warn); border-color: rgba(251,191,36,.45); }
+    .badge.rejected { color: var(--bad); border-color: rgba(251,113,133,.45); }
+    nav.toc { position: sticky; top: 0; z-index: 20; margin: 0 -28px 44px; padding: 12px 28px; backdrop-filter: blur(16px); background: rgba(11,16,32,.82); border-top: 1px solid rgba(255,255,255,.04); border-bottom: 1px solid var(--line); overflow-x: auto; white-space: nowrap; }
+    nav.toc a { color: var(--muted); margin-right: 17px; font-size: 13px; padding: 5px 0; }
+    nav.toc a:hover { color: var(--text); text-decoration: none; }
+    nav.toc a.active, nav.toc a[aria-current="location"] { color: var(--text); box-shadow: inset 0 -2px var(--accent); }
+    section { margin: 72px 0; scroll-margin-top: 70px; }
+    .card { background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018)); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); }
+    .grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }
+    .callout { border-left: 3px solid var(--accent); background: rgba(125,211,252,.075); padding: 18px 20px; border-radius: 0 12px 12px 0; margin: 22px 0; }
+    .callout.good { border-left-color: var(--good); background: rgba(110,231,183,.07); }
+    .callout.warn { border-left-color: var(--warn); background: rgba(251,191,36,.07); }
+    .callout.bad { border-left-color: var(--bad); background: rgba(251,113,133,.07); }
+    .thesis { font-size: 23px; line-height: 1.45; letter-spacing: -.015em; margin: 0; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+    code { color: #d8e5ff; background: rgba(255,255,255,.055); padding: .13em .35em; border-radius: 5px; }
+    pre { margin: 18px 0; padding: 18px 20px; background: var(--code); color: #dbeafe; border: 1px solid #202a43; border-radius: 12px; overflow: auto; font-size: 13px; line-height: 1.55; }
+    pre code { padding: 0; background: none; }
+    table { width: 100%; border-collapse: collapse; margin: 18px 0 8px; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 12px 13px; border-bottom: 1px solid var(--line); }
+    th { color: #f1f5f9; background: rgba(255,255,255,.025); }
+    td { color: #cbd5e1; }
+    ul, ol { padding-left: 23px; }
+    li { margin: 7px 0; }
+    .mermaid-wrap { background: #f8fafc; border-radius: 14px; padding: 20px; margin: 22px 0; overflow: auto; border: 1px solid #dbe4f0; }
+    .mermaid { min-width: 680px; }
+    .label { font-size: 12px; text-transform: uppercase; color: var(--accent-2); font-weight: 750; letter-spacing: .1em; margin-bottom: 9px; }
+    .principle { min-height: 155px; }
+    .principle strong { display: block; color: #fff; font-size: 18px; margin-bottom: 8px; }
+    .muted { color: var(--muted); }
+    .goodtxt { color: var(--good); }
+    .warntxt { color: var(--warn); }
+    .badtxt { color: var(--bad); }
+    blockquote { margin: 26px 0; padding: 6px 0 6px 22px; border-left: 2px solid var(--accent-2); color: #d6def1; font-size: 20px; }
+    .source { font-size: 13px; color: var(--muted); }
+    .source-list li { margin-bottom: 12px; }
+    footer { border-top: 1px solid var(--line); padding-top: 32px; color: var(--muted); font-size: 13px; }
+    .toolbar { position: fixed; right: 18px; bottom: 18px; z-index: 30; display: flex; gap: 8px; }
+    button { cursor: pointer; color: var(--text); background: rgba(17,24,44,.95); border: 1px solid var(--line); padding: 9px 12px; border-radius: 10px; box-shadow: var(--shadow); }
+    button:hover { border-color: #4b5d83; }
+    .checklist { list-style: none; padding-left: 0; }
+    .checklist li { padding-left: 28px; position: relative; }
+    .checklist li::before { content: "✓"; position: absolute; left: 0; color: var(--good); font-weight: 800; }
+    @media (max-width: 850px) {
+      .grid, .grid-3, .decision-grid { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; }
+      .shell { padding-left: 18px; padding-right: 18px; }
+      nav.toc { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; }
+      .mermaid { min-width: 820px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+    @media print {
+      :root { --bg:#fff; --panel:#fff; --panel-2:#fff; --text:#111827; --muted:#475569; --line:#cbd5e1; --code:#f8fafc; }
+      body { background:#fff; color:#111827; }
+      .shell { max-width:none; }
+      nav.toc, .toolbar { display:none; }
+      .card { box-shadow:none; }
+      a { color:#0369a1; }
+      pre { color:#111827; }
+      .mermaid-wrap { break-inside: avoid; }
+      section { break-inside: avoid-page; }
+    }
+  </style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<div class="shell">
+<header class="hero">
+<div class="eyebrow">AgentMemory architecture note · August 2026</div>
+<h1>Executable App Semantics &amp; Continuous Agent Learning</h1>
+<p class="lede">A consolidated design for extending AgentMemory with structural app models, executable agent skills, normalized experience capture, evidence-bounded learning, and safely validated behavioral improvement—while keeping the AgentMemory core local, inspectable, and intentionally boring.</p>
+<div class="pillrow">
+<span class="pill status">Proposed · reference slice available</span><span class="pill">AgentMemory</span><span class="pill">AppDefinition</span><span class="pill">Slack</span><span class="pill">Better Harness</span><span class="pill">Prime Agent</span><span class="pill">Pi</span><span class="pill">MCP</span><span class="pill">AX</span><span class="pill">Continuous Learning</span>
+</div>
+<p class="meta">Consolidates the design discussion around app layers, executable skills, session review, Better Harness, and Prime Agent.</p>
+</header>
+<nav aria-label="Architecture sections" class="toc" id="toc">
+<a href="#decisions">Decision brief</a>
+<a href="#thesis">Thesis</a>
+<a href="#baseline">AgentMemory baseline</a>
+<a href="#apps">Executable apps</a>
+<a href="#better-harness">Better Harness</a>
+<a href="#prime">Prime Agent</a>
+<a href="#architecture">Combined architecture</a>
+<a href="#contracts">Contracts</a>
+<a href="#learning">Learning protocol</a>
+<a href="#persistence">Persistence</a>
+<a href="#threats">Threat model</a>
+<a href="#mvp">MVP</a>
+<a href="#principles">Principles</a>
+<a href="#sources">Sources</a>
+</nav>
+<main id="main" tabindex="-1">
+<section id="decisions">
+<div class="label">Review outcome · start here</div>
+<h2>Proceed with a narrower, test-first vertical slice.</h2>
+<div class="decision-grid">
+<div class="card">
+<h3 style="margin-top:0">Verdict</h3>
+<p>The architecture has a sound center: keep AgentMemory small, represent app locality explicitly, treat sessions as evidence, and mutate behavior through reversible overlays. The original proposal was too broad to implement safely in one MVP and treated Slack threads as a universal parent. This revision corrects the scope model and puts delivery gates ahead of framework generation.</p>
+<div class="callout good"><strong>Build now:</strong> one deterministic Pi + Slack replay path from recurring correction to a validated, revision-checked policy candidate. Add live bindings and an LLM reviewer only after the replay suite is stable.</div>
+</div>
+<div class="card">
+<h3 style="margin-top:0">Design status</h3>
+<dl class="status-list">
+<dt>Status</dt><dd>Proposed; executable reference available</dd>
+<dt>Decision date</dt><dd><time datetime="2026-08-11">11 August 2026</time></dd>
+<dt>First host</dt><dd>Pi replay adapter</dd>
+<dt>First app</dt><dd>Slack operational scope</dd>
+<dt>First pattern</dt><dd>Recurring correction</dd>
+<dt>Core impact</dt><dd>None required for the first slice</dd>
+<dt>Concurrency</dt><dd>One local machine only</dd>
+</dl>
+</div>
+</div>
+<h3>Decision record</h3>
+<table>
+<thead><tr><th>Status</th><th>Decision</th><th>Reason / exit signal</th></tr></thead>
+<tbody>
+<tr><td><span class="badge accepted">Accepted</span></td><td>AgentMemory core remains an explicit durable-knowledge API.</td><td>No transcript ingestion, app ontology, or autonomous policy mutation in core.</td></tr>
+<tr><td><span class="badge accepted">Accepted</span></td><td>Slack uses a normalized <code>conversation</code> scope with <code>kind: channel | thread</code>.</td><td>Every message receives one valid operational path without pretending all messages belong to threads.</td></tr>
+<tr><td><span class="badge accepted">Accepted</span></td><td>Candidate evidence is allowlisted and policy application is revision checked.</td><td>Fabricated references and stale concurrent plans fail closed.</td></tr>
+<tr><td><span class="badge deferred">Deferred</span></td><td>General AppDefinition-to-SDK/SKILL compiler.</td><td>Revisit after two hand-authored apps expose stable repetition.</td></tr>
+<tr><td><span class="badge deferred">Deferred</span></td><td>LLM review and automatic canary promotion.</td><td>Revisit after deterministic fixtures, negative controls, and intervention metrics pass.</td></tr>
+<tr><td><span class="badge rejected">Rejected</span></td><td>Blind transcript promotion, generated executable code, or app/global auto-promotion.</td><td>Violates the ownership, trust, and reversibility boundaries.</td></tr>
+</tbody>
+</table>
+</section>
+<section id="thesis">
+<div class="label">Core thesis</div>
+<h2>The agent system learns without turning the base model—or AgentMemory core—into the learning engine.</h2>
+<div class="callout good"><p class="thesis"><strong>MCP exposes capabilities. App Skills encode executable application semantics. AgentMemory preserves durable knowledge. Observation preserves experience. Learning converts bounded evidence into candidate improvements. Evals and intervention ledgers decide what survives.</strong></p></div>
+<p>The crucial distinction is that application locality—such as Slack's <code>workspace → channel → conversation → message</code> operational path—is not merely metadata. It is an executable projection of the world the agent is operating in. That model should teach the LLM how to navigate context, select the right scope, invoke operations, and reason about locality without claiming to replace the application's complete domain ontology.</p>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart LR
+  CAP["Capability layer&lt;br/&gt;REST / MCP / CLI"] --&gt; SEM["Executable semantic layer&lt;br/&gt;AppDefinition + App Skill"]
+  SEM --&gt; AG["Agent / LLM"]
+  AG --&gt; EXP["Experience"]
+  EXP --&gt; OBS["Observation + evidence"]
+  OBS --&gt; LEARN["Learning protocol"]
+  LEARN --&gt; MEM["Knowledge state&lt;br/&gt;AgentMemory"]
+  LEARN --&gt; APP["World state&lt;br/&gt;App model overlays"]
+  LEARN --&gt; BEH["Behavior state&lt;br/&gt;Skills + policies"]
+  MEM --&gt; AG
+  APP --&gt; SEM
+  BEH --&gt; SEM
+    </pre></div>
+</section>
+<section id="baseline">
+<div class="label">1 · Preserve the original boundary</div>
+<h2>AgentMemory remains the durable knowledge substrate—not an autonomous platform.</h2>
+<p>The existing AgentMemory design is unusually compatible with this proposal because its core is deliberately small: inspectable Markdown remains authoritative, qmd is optional/disposable, information is separated by lifetime, and the intelligence around the files can be replaced without taking the memory with it.</p>
+<div class="grid">
+<div class="card"><h3>Core owns</h3><ul><li><code>MEMORY.md</code>: curated durable facts and decisions.</li><li><code>daily/YYYY-MM-DD.md</code>: append-oriented work evidence.</li><li><code>topics/*.md</code>: longer-lived threads with links to evidence.</li><li><code>SCRATCHPAD.md</code>: short-lived checklist state.</li><li>Read/write/search/context APIs and optional qmd retrieval.</li></ul></div>
+<div class="card"><h3>Core should not own</h3><ul><li>Automatic ingestion of every transcript.</li><li>Slack/GitHub/Gmail ontologies.</li><li>Autonomous mutation of skills.</li><li>Hosted databases or cloud replication.</li><li>Opaque semantic graphs required for correctness.</li><li>A daemon/agent runtime merely to make memory work.</li></ul></div>
+</div>
+<blockquote>The core should protect ownership. Intelligence should be optional.</blockquote>
+<p>A background reviewer, cron job, harness hook, or external learning package may review sessions, propose durable facts, prune stale entries, or learn better procedures—but that is an extension of AgentMemory, not a reason to make the core autonomous.</p>
+</section>
+<section id="apps">
+<div class="label">2 · Executable application semantics</div>
+<h2>Turn predefined app layers into code the LLM can actually use.</h2>
+<p>Slack's literal object graph branches: a top-level message belongs directly to a channel, while a reply belongs to a thread. A single-parent runtime path should therefore use a normalized <strong>conversation</strong> scope:</p>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart TD
+  W["Workspace"] --&gt; C["Channel"]
+  C --&gt; V["Conversation&lt;br/&gt;kind: channel | thread"]
+  V --&gt; M["Message"]
+  C -.-&gt;|top-level Slack messages| VC["channel conversation"]
+  C -.-&gt;|thread_ts| VT["thread conversation"]
+  VC -.-&gt; V
+  VT -.-&gt; V
+    </pre></div>
+<p>The operational hierarchy carries contextual priors: a thread conversation is normally more local and relevant than channel history; channel context is more local than workspace-wide knowledge. The source event still retains Slack's raw IDs. An LLM should not need to rediscover this routing rule from raw MCP tools every time.</p>
+<div class="callout warn"><strong>Do not encode a convenient falsehood.</strong> <code>workspace → channel → thread → message</code> rejects ordinary top-level messages or invents fake threads. The <code>conversation</code> projection gives retrieval and authorization one valid path for both cases.</div>
+<h3>2.1 AppDefinition</h3>
+<pre><code>export interface AppDefinition&lt;Event = unknown&gt; {
+  id: string
+  version: string
+
+  layers: LayerDefinition[]
+  operations: OperationDefinition[]
+  policies?: AppPolicy[]
+
+  normalize(input: unknown): Event
+  resolveScope(event: Event): ScopePath
+}
+
+export interface LayerDefinition {
+  id: string
+  parent?: string
+  identity: { fields: string[] }
+  searchable?: boolean
+  addressable?: boolean
+  terminal?: boolean
+}
+
+export interface ScopeRef {
+  app: string
+  layer: string
+  id: string
+  name?: string
+  parent?: { layer: string; id: string }
+}
+
+type ScopePath = ScopeRef[]</code></pre>
+<p>Slack becomes executable TypeScript rather than merely a schema:</p>
+<pre><code>export const slack = defineApp({
+  id: "slack",
+  version: "1.0",
+  layers: [
+    { id: "workspace", identity: { fields: ["team_id"] } },
+    { id: "channel", parent: "workspace", identity: { fields: ["channel_id"] } },
+    { id: "conversation", parent: "channel", identity: { fields: ["kind", "id"] } },
+    { id: "message", parent: "conversation", identity: { fields: ["ts"] }, terminal: true }
+  ],
+  normalize(raw) {
+    return {
+      ...raw,
+      conversation: raw.thread_ts
+        ? { kind: "thread", id: raw.thread_ts }
+        : { kind: "channel", id: `channel:${raw.channel_id}` }
+    }
+  },
+  resolveScope(event) {
+    return [
+      scope("workspace", event.team_id),
+      scope("channel", event.channel_id),
+      scope("conversation", event.conversation.id, { kind: event.conversation.kind }),
+      scope("message", event.ts)
+    ]
+  }
+})</code></pre>
+<h3>2.2 Scope and entity are different</h3>
+<p>Keep operational locality separate from semantic relationships. A conversation is structurally scoped to a channel and workspace but may semantically relate to a project, person, incident, customer, or service.</p>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart TD
+  W["Workspace"] --&gt; C["Channel"]
+  C --&gt; V["Conversation"]
+  V --&gt; M["Message"]
+  V -.-&gt;|semantic| P["Project"]
+  V -.-&gt;|semantic| U["Person"]
+  V -.-&gt;|semantic| I["Incident"]
+  V -.-&gt;|semantic| S["Service"]
+    </pre></div>
+<div class="callout"><strong>Scope = where something happened. Entity = what it is about. Memory = what should be remembered.</strong></div>
+<h3>2.3 Hand-author first; compile only proven repetition</h3>
+<p>The future target is two generated products, but a compiler is not part of the first slice. Hand-author the Slack definition, semantic façade, and progressive instructions. Revisit generation only after a second app demonstrates the same stable contract.</p>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart LR
+  DEF["AppDefinition"] --&gt; SKILL["Progressively disclosed SKILL.md&lt;br/&gt;How the app works"]
+  DEF --&gt; SDK["Executable semantic SDK&lt;br/&gt;How to operate in it"]
+  SKILL --&gt; LLM["LLM"]
+  SDK --&gt; LLM
+  SDK --&gt; BIND["Binding"]
+  BIND --&gt; MCP["MCP"]
+  BIND --&gt; REST["REST API"]
+  BIND --&gt; CLI["CLI / local tools"]
+    </pre></div>
+<p>The LLM-facing surface should look like app semantics rather than transport semantics:</p>
+<pre><code>import slack
+
+channel = await slack.channel("agent-memory")
+thread = await channel.thread("1754833021.123")
+
+context = await thread.context()
+decision = await thread.find_decision()
+await thread.reply("...")</code></pre>
+<p><code>thread.find_decision()</code> may internally combine Slack API calls, AgentMemory retrieval, pinned/canonical references, ranking, authorization checks at every widened scope, and structured result validation. The agent programs against Slack semantics; MCP or REST remains an interchangeable capability binding.</p>
+<h3>2.4 Customization through overlays</h3>
+<p>Distributed app definitions should be immutable base code. User and learned customization should be overlays:</p>
+<pre><code>extends: slack@1
+
+layers:
+  canvas:
+    action: add
+    parent: channel
+
+  huddle:
+    action: add
+    parent: channel
+
+  message:
+    action: update
+    searchable: false</code></pre>
+<p>“Delete” should normally mean disable rather than destroying the base definition. Precedence:</p>
+<pre><code>base package &lt; validated learned overlay &lt; explicit user override</code></pre>
+<p>A learning system must never silently outrank an explicit user choice.</p>
+</section>
+<section id="better-harness">
+<div class="label">3 · What Better Harness teaches us</div>
+<h2>Make the LLM one probabilistic stage inside a deterministic evidence protocol.</h2>
+<p>Better Harness contributes the strongest design ideas for <em>post-execution learning</em>. The main takeaway is to avoid a loose <code>session → LLM reflection → memory</code> pipeline.</p>
+<h3>3.1 Learn from Experience Episodes, not whole sessions</h3>
+<p>A single host session may contain multiple distinct tasks, app scopes, or goals. Normalize heterogeneous host events and segment them into versioned episodes.</p>
+<pre><code>interface ExperienceEpisode {
+  id: string
+  host: "pi" | "prime" | "claude" | "codex" | "cursor"
+  app?: string
+  scope?: ScopePath
+  intent?: string
+  events: AgentEvent[]
+  outcome: {
+    completed?: boolean
+    corrected?: boolean
+    validated?: boolean
+  }
+  evidenceRefs: EvidenceRef[]
+}</code></pre>
+<h3>3.2 Host adapters and AppDefinitions are orthogonal</h3>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart TD
+  PI["Pi"] --&gt; HA["HostAdapter"]
+  PR["Prime Agent"] --&gt; HA
+  CL["Claude"] --&gt; HA
+  CO["Codex"] --&gt; HA
+  HA --&gt; EV["Normalized execution events"]
+  EV --&gt; AD["AppDefinition scope resolver"]
+  AD --&gt; EP["Experience Episodes"]
+  S["Slack"] --&gt; AD
+  G["GitHub"] --&gt; AD
+  GM["Gmail"] --&gt; AD
+    </pre></div>
+<p><strong>HostAdapter:</strong> how to interpret an execution trace. <strong>AppDefinition:</strong> what world that execution happened in. This avoids an N×M integration explosion.</p>
+<h3>3.3 Observation Manifest</h3>
+<p>“Not observed” must never silently become “did not happen.” A learning run should record source availability, eligible episodes, analyzed episodes, sampling strategy, coverage, truncation, and warnings.</p>
+<pre><code>interface ObservationManifest {
+  sources: {
+    id: string
+    status: "observed" | "partial" | "unavailable"
+  }[]
+  eligibleEpisodes: number
+  analyzedEpisodes: number
+  selection: "all" | "stratified" | "latest"
+  coverage: "high" | "medium" | "low"
+  warnings: string[]
+}</code></pre>
+<h3>3.4 Bounded evidence packet + match/abstain</h3>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart LR
+  EP["Experience episodes"] --&gt; DET["Deterministic detectors / grouping"]
+  DET --&gt; PACK["Bounded ReviewPacket"]
+  PACK --&gt; LLM["LLM reviewer"]
+  LLM --&gt;|match| VAL["Deterministic validator"]
+  LLM --&gt;|abstain| STOP["No candidate"]
+  VAL --&gt; CAN["LearningCandidate"]
+    </pre></div>
+<p>The reviewer should only reference allowlisted episodes/evidence and should be able to abstain. Unsupported evidence references or unsupported pattern types should fail validation.</p>
+<h3>3.5 Durable owner routing</h3>
+<p>Memory is one possible output of learning, not learning itself.</p>
+<table>
+<thead><tr><th>Observed problem</th><th>Durable owner</th></tr></thead>
+<tbody>
+<tr><td>Repeatedly rediscovered fact or decision</td><td>AgentMemory</td></tr>
+<tr><td>Recurring behavioral correction</td><td>App policy / skill overlay</td></tr>
+<tr><td>Skill exists but is not invoked</td><td>Skill routing</td></tr>
+<tr><td>Existing memory is stale/conflicting</td><td>Memory supersede/update</td></tr>
+<tr><td>App world model is missing a structural concept</td><td>AppDefinition overlay</td></tr>
+<tr><td>New behavior could regress existing behavior</td><td>Eval</td></tr>
+<tr><td>Invariant that must never be violated</td><td>Deterministic gate</td></tr>
+</tbody>
+</table>
+<h3>3.6 Skill maturity is evidence-backed</h3>
+<pre><code>Present → Routed → Exercised → Validated → Outcome-supported</code></pre>
+<p>An app policy merely existing does not mean the model noticed it, applied it, applied it correctly, or improved outcomes. The post-session learner should diagnose <em>which stage failed</em>.</p>
+<h3>3.7 Intervention Ledger</h3>
+<p>A changed policy is not automatically “learning.” It is an intervention until comparable future evidence supports or rejects it.</p>
+<pre><code>interface Intervention {
+  id: string
+  candidateId: string
+  asset: string
+  baseline: MetricSnapshot
+  primaryMetric: MetricDefinition
+  guardrails: MetricDefinition[]
+  comparisonWindow: ComparisonWindow
+  revertCondition: Condition
+  result: "pending" | "improving" | "unchanged" | "regressing" | "outcome-supported"
+}</code></pre>
+<div class="callout good"><strong>Self-modification becomes experimental adaptation: baseline → candidate → canary → comparable evidence → retain or revert.</strong></div>
+</section>
+<section id="prime">
+<div class="label">4 · What Prime Agent teaches us</div>
+<h2>Represent the agent's operating state explicitly, mutate it transactionally, and keep execution runtime separate.</h2>
+<p>Prime Agent contributes the strongest ideas for <em>during-execution state</em>, programmatic integrations, long-horizon goals, mutation planning, rollback, and durable addressability.</p>
+<h3>4.1 Programmatic integration objects</h3>
+<p>Rather than exposing every external operation as a top-level tool, Prime's integrations can be discovered and used programmatically. This strongly supports the AppDefinition compiler producing an executable semantic SDK in addition to instructions.</p>
+<h3>4.2 Progressive disclosure</h3>
+<p>Only lightweight skill metadata needs to be present in default context. The full semantic instructions and executable APIs should load when the app or skill is relevant. This avoids bloated prompts as the number of known apps grows.</p>
+<h3>4.3 Immutable base + mutable supplemental state</h3>
+<p>Prime's refinement model distinguishes immutable base behavior from mutable supplemental prompt/memory/skill/subagent state. For AgentMemory apps, the analogous rule is:</p>
+<pre><code>Base AppDefinition = immutable package code
+Learned behavior   = mutable overlay
+User customization = mutable explicit override</code></pre>
+<h3>4.4 Plan → check → apply → rollback</h3>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart LR
+  C["LearningCandidate"] --&gt; P["PLAN candidate overlay&lt;br/&gt;no mutation"]
+  P --&gt; E["Run offline evals"]
+  E --&gt; R["Re-read current state"]
+  R --&gt; Q{"Base revision&lt;br/&gt;still matches?"}
+  Q --&gt;|no| X["Reject / re-plan"]
+  Q --&gt;|yes| A["APPLY transaction"]
+  A --&gt; H["Record before / after + evidence"]
+  H --&gt; I["Intervention Ledger"]
+  I --&gt; RB["Rollback available"]
+    </pre></div>
+<p>The planning LLM should never directly edit the durable state it used as its baseline. Application must happen through a deterministic transactional layer with revision checks.</p>
+<h3>4.5 Goal is separate from continuation</h3>
+<p>Prime distinguishes the durable goal from the policy deciding whether another autonomous turn should run. That improves learning evidence because “the agent stopped” is not the same as “the goal was completed successfully.”</p>
+<pre><code>interface EpisodeOutcome {
+  goal?: GoalRef
+  status: "completed" | "abandoned" | "failed" | "interrupted" | "unknown"
+  validations: ValidationResult[]
+  userAccepted?: boolean
+  userCorrected?: boolean
+}</code></pre>
+<h3>4.6 Bounded autonomy and gates</h3>
+<p>Long-horizon execution should be bounded by turns/tokens/time and can require explicit validation gates before successful completion. We should reuse the same idea for learned behavior: a candidate must pass eval gates, then a bounded canary, then future comparable outcomes.</p>
+<h3>4.7 Stable agent identity and communication topology</h3>
+<p>Prime's subagents have durable identities and bounded family communication. For future app-to-app or agent-to-agent systems, addressability and communication boundaries should be explicit state, not anonymous prompt calls.</p>
+<pre><code>interface AgentRef {
+  id: string
+  role: string
+  app?: string
+  scope?: ScopePath
+  capabilities: string[]
+}</code></pre>
+<h3>4.8 Negative lesson: do not copy weak mutable-state synchronization</h3>
+<div class="callout warn"><strong>A mutable JSON file plus mtime-based reload is not a sufficient multi-writer protocol.</strong> Learned state may be touched by observers, review workers, users, and runtime adapters. Use append-only events and revisioned compare-and-swap semantics from day one.</div>
+<h3>4.9 Reward hacking is a first-class design risk</h3>
+<p>A self-improving loop that retains anything that raises a scalar metric can learn to optimize the wrong thing. Promotion must require multiple dimensions:</p>
+<pre><code>Outcome satisfied
+AND policy compliance satisfied
+AND safety/provenance satisfied
+AND regression gates passed</code></pre>
+</section>
+<section id="architecture">
+<div class="label">5 · Combined architecture</div>
+<h2>Four standalone components around a deliberately small core.</h2>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart TB
+  subgraph Runtime [Execution runtimes]
+    PI["Pi"]
+    PRIME["Prime Agent"]
+    CLAUDE["Claude Code"]
+    CODEX["Codex"]
+    CURSOR["Cursor"]
+  end
+
+  subgraph Apps [Executable application semantics]
+    KIT["@agentmemory/app-kit"]
+    SLACK["@agentmemory/app-slack"]
+    GH["@agentmemory/app-github"]
+    CUSTOM["@agentmemory/app-custom"]
+    SLACK --&gt; KIT
+    GH --&gt; KIT
+    CUSTOM --&gt; KIT
+  end
+
+  subgraph Observe [Experience layer]
+    OBS["@agentmemory/observe"]
+    MIN["Minimize + sanitize + trust-label"]
+    LEDGER["Append-only Experience Ledger"]
+    EP["Experience Episodes"]
+    MAN["Observation Manifest + provenance"]
+    OBS --&gt; MIN --&gt; LEDGER --&gt; EP --&gt; MAN
+  end
+
+  subgraph Learn [Learning layer]
+    DET["Pattern detectors"]
+    PACK["Bounded evidence packets"]
+    REVIEW["LLM reviewer&lt;br/&gt;match / abstain"]
+    CAND["LearningCandidate"]
+    OWNER["Durable owner router"]
+    INT["Intervention Ledger"]
+    DET --&gt; PACK --&gt; REVIEW --&gt; CAND --&gt; OWNER
+    INT --&gt; OWNER
+  end
+
+  subgraph Memory [Durable knowledge]
+    AM["AgentMemory core"]
+    MD["Markdown&lt;br/&gt;MEMORY / daily / topics"]
+    QMD["Optional qmd index"]
+    AM --&gt; MD
+    QMD -.-&gt;|indexes| MD
+  end
+
+  Runtime --&gt; OBS
+  Runtime --&gt; KIT
+  KIT --&gt; Runtime
+  KIT --&gt; OBS
+  MAN --&gt; DET
+  OWNER --&gt;|facts| AM
+  OWNER --&gt;|app-policy| KIT
+  OWNER --&gt;|eval-gate| INT
+  KIT --&gt; INT
+  EP --&gt; INT
+    </pre></div>
+<h3>Recommended package boundaries</h3>
+<table>
+<thead><tr><th>Package</th><th>Responsibility</th><th>Does not own</th></tr></thead>
+<tbody>
+<tr><td><code>myagentmemory</code> / core</td><td>Local durable Markdown, lifetime separation, read/write/search/context</td><td>App semantics, transcripts, autonomous learning</td></tr>
+<tr><td><code>@agentmemory/app-kit</code></td><td>AppDefinition, layers, scopes, semantic operations, bindings, overlays, skill/SDK compiler</td><td>Host transcript parsing, durable memory store</td></tr>
+<tr><td><code>@agentmemory/app-*</code></td><td>Predefined executable app model and defaults</td><td>Global learning service</td></tr>
+<tr><td><code>@agentmemory/observe</code></td><td>Host adapters, normalized events, append-only experience ledger, episode builder, coverage/provenance</td><td>Deciding what should be learned</td></tr>
+<tr><td><code>@agentmemory/learn</code></td><td>Detection, review packets, candidate validation, owner routing, interventions, promotion/revert</td><td>Raw host execution or core memory persistence</td></tr>
+</tbody>
+</table>
+</section>
+<section id="contracts">
+<div class="label">6 · Core contracts</div>
+<h2>Define small contracts so each part can be replaced independently.</h2>
+<h3>6.1 HostAdapter</h3>
+<pre><code>interface HostAdapter {
+  id: string
+  discoverSessions(input: DiscoveryInput): AsyncIterable&lt;SessionRef&gt;
+  readSession(ref: SessionRef): Promise&lt;RawSession&gt;
+  normalize(raw: RawSession): AsyncIterable&lt;ExperienceEvent&gt;
+}</code></pre>
+<h3>6.2 ExperienceEvent</h3>
+<pre><code>interface ExperienceEvent {
+  schemaVersion: 1
+  id: string
+  idempotencyKey: string
+  occurredAt: string
+  ingestedAt: string
+  host: string
+  session: string
+  parentEvent?: string
+  app?: string
+  scope?: ScopePath
+  trust: "system" | "user-authored" | "app-content" | "derived"
+  type:
+    | "user"
+    | "assistant"
+    | "tool_call"
+    | "tool_result"
+    | "correction"
+    | "goal"
+    | "validation"
+    | "memory_read"
+    | "memory_write"
+  provenance: Provenance
+}</code></pre>
+<div class="callout"><strong>Ingestion invariant:</strong> minimize, redact, classify trust, and enforce retention <em>before</em> appending an event. Provenance records origin; it does not grant trust.</div>
+<h3>6.3 Protocol invariants</h3>
+<ul class="checklist">
+<li>Event IDs and idempotency keys are stable across replay; duplicate ingestion has no effect.</li>
+<li>Every persisted record declares a schema version and migration path.</li>
+<li>Every scope transition is validated against an AppDefinition and authorized by the binding.</li>
+<li>Reviewers may cite only evidence references present in their bounded ReviewPacket.</li>
+<li>Free-form app content may inform a proposal but never becomes generated executable code.</li>
+<li>User overrides always outrank learned state; app/global promotion always requires maintainer review.</li>
+</ul>
+<h3>6.4 LearningCandidate</h3>
+<pre><code>interface LearningCandidate {
+  id: string
+  pattern:
+    | "recurring-correction"
+    | "repeated-rediscovery"
+    | "routed-not-applied"
+    | "stale-memory"
+    | "skill-regression"
+  scope: LearningScope
+  brokenStage:
+    | "capture"
+    | "generalize"
+    | "codify"
+    | "route"
+    | "exercise"
+    | "evaluate"
+    | "maintain"
+  proposedOwner:
+    | "memory"
+    | "app-policy"
+    | "skill"
+    | "app-schema"
+    | "eval"
+    | "gate"
+  evidenceRefs: EvidenceRef[]
+  evidenceStats: {
+    independentSessions: number
+    matchingEpisodes: number
+    eligibleEpisodes: number
+  }
+  review: {
+    kind: "deterministic" | "ai-reviewed"
+    model?: string
+    promptVersion?: string
+  }
+}</code></pre>
+<p>A model's self-reported confidence is not an acceptance criterion. Promotion uses evidence floors, offline metrics, guardrails, and future comparable outcomes.</p>
+<h3>6.5 Field-level provenance</h3>
+<pre><code>type ProvenanceKind =
+  | "host-observed"
+  | "deterministic-derived"
+  | "ai-reviewed"
+
+interface Provenanced&lt;T&gt; {
+  value: T
+  provenance: ProvenanceKind
+  evidenceRefs?: EvidenceRef[]
+}</code></pre>
+<p>When a bad lesson appears, this lets us distinguish whether the source session stated it, deterministic code derived it incorrectly, or the model inferred it.</p>
+<h3>6.6 AgentMemoryBridge</h3>
+<pre><code>class AgentMemoryBridge {
+  async propose(candidate: LearningCandidate): Promise&lt;MemoryProposal&gt; {
+    return validateAndEncode(candidate) // no durable write
+  }
+
+  async applyApproved(proposal: MemoryProposal, approval: Approval) {
+    verifyApproval(proposal, approval)
+    return memoryWrite({ target: proposal.target, content: proposal.markdown })
+  }
+
+  async search(query: string) {
+    return memorySearch({ query, mode: "keyword" })
+  }
+}</code></pre>
+<p>The bridge separates proposal from application. The first slice does not auto-write long-term memory.</p>
+<h3>6.7 Provenance in core memory</h3>
+<p>The one eventual AgentMemory-core enhancement worth prioritizing is richer provenance preservation through the public write contract. It can remain plain Markdown:</p>
+<pre><code>&lt;!-- source: session://pi/abc123 --&gt;
+&lt;!-- app: slack --&gt;
+&lt;!-- scope: slack:conversation:thread:1754833021.123 --&gt;
+
+#decision #app/slack
+[[slack:workspace:T01]]
+[[slack:channel:C82]]
+[[slack:conversation:thread:1754833021.123]]
+
+Use thread-local retrieval before widening to channel/workspace.</code></pre>
+</section>
+<section id="learning">
+<div class="label">7 · Continuous learning protocol</div>
+<h2>Sessions are evidence, not memory.</h2>
+<p>The learning layer may read session traces, but it should never blindly promote raw transcript content into durable knowledge or executable behavior.</p>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart TB
+  RAW["Raw host sessions&lt;br/&gt;ephemeral"] --&gt; ADAPT["HostAdapter"]
+  ADAPT --&gt; SAN["Minimize + redact&lt;br/&gt;trust-label + retention"]
+  SAN --&gt; EVENTS["Normalized ExperienceEvents"]
+  EVENTS --&gt; LEDGER["Append-only Experience Ledger"]
+  LEDGER --&gt; SEG["Episode segmentation&lt;br/&gt;using goals + app scopes"]
+  SEG --&gt; EP["ExperienceEpisodes"]
+  EP --&gt; MAN["Observation Manifest"]
+  EP --&gt; DET["Deterministic pattern detectors"]
+  MAN --&gt; DET
+  DET --&gt; PACK["Bounded ReviewPacket"]
+  PACK --&gt; AI["AI reviewer&lt;br/&gt;match / abstain"]
+  AI --&gt; VALID["Deterministic output validator"]
+  VALID --&gt; CAND["LearningCandidate"]
+  CAND --&gt; ROUTE{"Durable owner"}
+  ROUTE --&gt;|knowledge| MEM["Proposed memory write"]
+  ROUTE --&gt;|behavior| OVER["Candidate policy / skill overlay"]
+  ROUTE --&gt;|structure| SCHEMA["Candidate app-schema overlay"]
+  ROUTE --&gt;|uncertainty| EVAL["Eval / gate"]
+  OVER --&gt; TEST["Offline evals"]
+  SCHEMA --&gt; TEST
+  TEST --&gt; CANARY["Bounded active-under-evaluation"]
+  CANARY --&gt; FUT["Future comparable episodes"]
+  FUT --&gt; CMP["Intervention comparison"]
+  CMP --&gt;|supported| KEEP["Promote to learned overlay"]
+  CMP --&gt;|regression| REV["Revert"]
+    </pre></div>
+<h3>7.1 Initial learning patterns</h3>
+<p>Implement <strong>recurring correction</strong> first. Add <strong>repeated rediscovery</strong> as the second MVP-exit demonstration only after the behavior path passes its negative controls.</p>
+<div class="grid">
+<div class="card"><h3>Repeated rediscovery</h3><p>The agent repeatedly spends effort reconstructing a durable fact or decision.</p><p><strong>Likely owner:</strong> AgentMemory.</p></div>
+<div class="card"><h3>Recurring correction</h3><p>The user repeatedly corrects the same behavioral mistake or routing choice.</p><p><strong>Likely owner:</strong> app policy or skill overlay.</p></div>
+</div>
+<h3>7.2 Example: Slack decision retrieval</h3>
+<pre><code>Experience:
+  User: "What did we decide?"
+  Agent: searches workspace first; returns wrong discussion.
+  User: "No, I mean the decision in this thread."
+
+Detector:
+  recurring-correction on target slack:decision-retrieval
+
+Candidate:
+  when intent = decision_lookup
+  when conversation.kind = thread
+  prefer conversation → channel → workspace
+
+Generated eval:
+  context has conversation { kind: thread, id: TH1 }
+  request = "What did we decide?"
+  expected first_search_scope = conversation
+
+Intervention:
+  baseline accuracy = measured
+  candidate enabled for bounded comparable episodes
+  guardrails include tool-call count and user corrections
+
+Outcome:
+  retain if supported; revert if regression</code></pre>
+<h3>7.3 Learning scope</h3>
+<p>Learning itself must be scoped so private local behavior does not contaminate distributed base apps.</p>
+<pre><code>instance      app-instance / workspace / channel specific
+user          behavior/preferences across one user's apps
+organization  organization-level conventions
+app           generic reusable behavior for Slack/GitHub/etc.
+global        generic agent behavior</code></pre>
+<p>Automatic promotion should normally stop at instance/user scope. App/global promotion should be deliberate maintainer action.</p>
+</section>
+<section id="persistence">
+<div class="label">8 · Persistence &amp; concurrency</div>
+<h2>Use a revisioned local journal with a concrete commit protocol—not mutable shared JSON.</h2>
+<p>Observation data and learned-state mutations benefit from the same property AgentMemory values: preserve history rather than silently overwrite it. The MVP supports concurrent processes on <strong>one local machine</strong>; it does not claim distributed consistency.</p>
+<h3>8.1 Experience ledger</h3>
+<pre><code>experience/
+  events.jsonl
+  episodes/
+  manifests/
+</code></pre>
+<h3>8.2 Learned overlay journal</h3>
+<pre><code>~/.config/agentmemory/apps/slack/
+  state/
+    events.jsonl
+    snapshot.json
+    snapshot.seq
+  candidates/
+  active/
+  learned.yaml
+  override.yaml
+  evals/
+</code></pre>
+<pre><code>{"seq":101,"op":"create","id":"candidate:p123",...}
+{"seq":102,"op":"activate","id":"candidate:p123",...}
+{"seq":103,"op":"promote","id":"candidate:p123",...}
+{"seq":104,"op":"revert","id":"candidate:p404",...}</code></pre>
+<h3>8.3 Compare-and-swap</h3>
+<pre><code>plan.baseRevision = 103
+
+apply(plan):
+  if currentRevision != 103:
+    reject conflict / re-plan
+  else:
+    append seq 104 atomically
+    materialize effective snapshot</code></pre>
+<p>CAS gives deterministic conflict detection, but safety also requires a real commit protocol:</p>
+<ol>
+<li>Acquire a per-app exclusive writer lock with stale-lock recovery.</li>
+<li>Re-read the current revision and validate the complete plan.</li>
+<li>Append one length-delimited, checksummed record; flush according to the documented durability mode.</li>
+<li>Materialize snapshots through temporary-file write + flush + atomic rename.</li>
+<li>On recovery, accept only complete checksummed records and rebuild the snapshot from the journal.</li>
+</ol>
+<p>This provides auditable single-machine multi-process writes. Network filesystems and multi-machine writers remain out of scope until the journal is replaced by a store with explicit distributed transaction semantics.</p>
+<h3>8.4 Privacy boundary</h3>
+<div class="mermaid-wrap"><pre class="mermaid">
+flowchart LR
+  RAW["Raw session&lt;br/&gt;ephemeral evidence"] --&gt; SAN["Sanitized normalized episode"]
+  SAN --&gt; REF["Bounded evidence references"]
+  REF --&gt; C["Learning candidate"]
+  C --&gt; D["Durable artifact"]
+    </pre></div>
+<p>Default policy: do not copy raw sessions; persist only schema-allowlisted fields; redact credentials before the ledger; keep free-form evidence for the shortest configured window; support deletion by subject/source with tombstones; and ensure derived candidates cannot outlive required evidence unless they retain an approved, sanitized summary.</p>
+</section>
+<section id="threats">
+<div class="label">9 · Threat model</div>
+<h2>Treat apps, transcripts, and learned state as separate trust zones.</h2>
+<table>
+<thead><tr><th>Risk</th><th>Required control</th><th>Fail-closed test</th></tr></thead>
+<tbody>
+<tr><td>Prompt injection in Slack or tool output</td><td>Trust labels; structured extraction; no generated executable code; reviewer sees bounded evidence.</td><td>Injection-like fixture text cannot appear in the policy object.</td></tr>
+<tr><td>Scope widening leaks private data</td><td>Local-to-broad policy plus binding-level authorization on every fetch; least-privilege credentials.</td><td>Unauthorized channel/workspace widening returns a typed denial, never partial data.</td></tr>
+<tr><td>Fabricated or stale evidence</td><td>Allowlisted evidence refs, source hashes, manifest coverage, retention checks.</td><td>Unknown, deleted, or modified evidence rejects the candidate.</td></tr>
+<tr><td>Replay and duplicate events</td><td>Stable idempotency keys and deterministic episode rebuilding.</td><td>Re-ingestion does not change counts or revisions.</td></tr>
+<tr><td>Poisoning through one anomalous session</td><td>Independent-session floors, negative controls, scope-limited candidates, human review for higher scopes.</td><td>One session produces no recurring-correction candidate.</td></tr>
+<tr><td>Concurrent or partial state writes</td><td>Writer lock, CAS, framed checksummed records, flush policy, crash recovery.</td><td>Stale plan and truncated-tail tests fail safely.</td></tr>
+<tr><td>Reward hacking / metric gaming</td><td>Primary outcome plus policy, safety, provenance, cost, and correction guardrails.</td><td>Any guardrail regression blocks promotion even if the primary metric rises.</td></tr>
+</tbody>
+</table>
+<div class="callout bad"><strong>Authorization is not part of AppDefinition inference.</strong> The semantic layer can request a wider scope; only the capability binding may authorize and execute it.</div>
+</section>
+<section id="mvp">
+<div class="label">10 · Recommended MVP</div>
+<h2>Prove one behavior path first; earn the broader framework.</h2>
+<p>The implementation order is intentionally narrower than the final architecture. It starts with deterministic replay and a single supported candidate shape, then adds persistence, live read-only bindings, and finally the knowledge-learning demonstration.</p>
+<div class="grid-3">
+<div class="card"><h3>Host</h3><p><strong>Pi replay</strong> first. Export only the allowlisted fields needed by the fixture schema; do not copy raw sessions into a new store.</p></div>
+<div class="card"><h3>App</h3><p><strong>Slack read-only</strong> first. Normalize channel and thread conversations, but keep authorization in the binding.</p></div>
+<div class="card"><h3>First pattern</h3><p><strong>Recurring correction</strong> only. Add repeated rediscovery after the policy path passes its negative controls.</p></div>
+</div>
+<h3>Executable reference slice</h3>
+<div class="callout good">
+<p><strong>A runnable proof now lives in <a href="ecosystem-reference/README.md"><code>ideas/ecosystem-reference/</code></a>.</strong> It requires no Slack credentials and no LLM:</p>
+<pre><code>npm run test:ecosystem
+
+8 pass
+0 fail
+41 assertions</code></pre>
+<p>It validates both Slack conversation shapes, independent-session evidence floors, injection-text isolation, evidence allowlisting, idempotent apply, and stale-revision rejection. It deliberately does not claim durable filesystem safety or automatic promotion.</p>
+</div>
+<h3>Delivery sequence and stop/go gates</h3>
+<table>
+<thead><tr><th>Stage</th><th>Deliverable</th><th>Exit gate</th></tr></thead>
+<tbody>
+<tr><td><strong>0 · Reference</strong></td><td>Hand-authored app/scope contract, synthetic episodes, deterministic detector, candidate validator, in-memory CAS overlay.</td><td><span class="badge accepted">Complete</span> Focused tests and strict type checks pass.</td></tr>
+<tr><td><strong>1 · Replay</strong></td><td>Pi adapter, schema versioning, pre-ledger minimization/redaction, idempotent episode builder, observation manifest.</td><td>Replaying the same input produces byte-equivalent episodes and no duplicate evidence; unavailable/truncated sources lower coverage.</td></tr>
+<tr><td><strong>2 · Local persistence</strong></td><td>Writer lock, framed checksummed journal, CAS, snapshot rebuild, deletion tombstones.</td><td>Concurrent writer, stale plan, process kill, truncated tail, and rebuild tests all fail closed.</td></tr>
+<tr><td><strong>3 · Live read-only Slack</strong></td><td>Least-privilege binding for conversation-first decision lookup; typed authorization denial; offline eval suite.</td><td>No write scopes; no unauthorized widening; all positive and negative retrieval fixtures pass.</td></tr>
+<tr><td><strong>4 · Intervention</strong></td><td><code>proposed → offline-passed → canary → promoted | rejected | reverted</code> state machine and guardrail metrics.</td><td>Regression triggers automatic revert; incomparable evidence cannot promote.</td></tr>
+<tr><td><strong>5 · MVP exit</strong></td><td>Repeated-rediscovery detector and approval-gated AgentMemory proposal bridge.</td><td>Both demonstrations succeed end to end; no automatic long-term write; a maintainer accepts the proposal.</td></tr>
+</tbody>
+</table>
+<h3>Acceptance criteria</h3>
+<ul class="checklist">
+<li>One correction session never qualifies as a recurring pattern; two independent matching sessions may qualify.</li>
+<li>Unknown, deleted, modified, or out-of-packet evidence rejects the candidate.</li>
+<li>App text—including prompt-injection-like text—cannot become executable policy or change owner routing.</li>
+<li>Conversation-first search widens monotonically and re-authorizes each scope.</li>
+<li>Duplicate event replay and duplicate plan application are idempotent.</li>
+<li>A stale plan, partial journal record, failed offline eval, or guardrail regression cannot mutate effective state.</li>
+<li>Every intervention can identify its baseline, candidate, evidence window, result, and exact revert operation.</li>
+<li>The first slice requires no AgentMemory core changes; any future core change gets a separate compatibility decision.</li>
+</ul>
+<h3>Two MVP-exit demonstrations</h3>
+<div class="grid">
+<div class="card"><h3>A · Learn behavior</h3><ol><li>Two independent episodes correct overly broad Slack search.</li><li>Detector creates a structured conversation-first candidate.</li><li>Validator proves evidence sufficiency and locality.</li><li>Offline eval passes; policy enters bounded canary.</li><li>Comparable outcomes either support promotion or trigger revert.</li></ol></div>
+<div class="card"><h3>B · Propose knowledge</h3><ol><li>Agent repeatedly reconstructs the same durable decision.</li><li>Detector links independent evidence and routes to AgentMemory.</li><li>Bridge produces sanitized Markdown with provenance—without writing it.</li><li>A user or configured approval policy accepts the proposal.</li><li>Next session retrieves the approved fact instead of reconstructing it.</li></ol></div>
+</div>
+<h3>Explicit non-goals for MVP</h3>
+<ul>
+<li>A general AppDefinition compiler, app marketplace, or generated SDK.</li>
+<li>Slack write operations, organization/app/global auto-promotion, or generated executable code.</li>
+<li>Multi-machine writers, cloud sync, or a hosted learning service.</li>
+<li>Proving behavior improvement from a scalar benchmark alone.</li>
+</ul>
+<h3>Open decisions with defaults</h3>
+<table>
+<thead><tr><th>Question</th><th>Default now</th><th>Decision trigger</th></tr></thead>
+<tbody>
+<tr><td>Journal implementation?</td><td>Prototype the contract behind an interface; benchmark SQLite versus a locked framed log.</td><td>Choose before Stage 2 using crash/concurrency tests, not aesthetic preference.</td></tr>
+<tr><td>How much event text is retained?</td><td>Allowlist structured fields; free-form text remains ephemeral unless a test explicitly requires a sanitized excerpt.</td><td>Security/privacy review before replaying real sessions.</td></tr>
+<tr><td>Who approves memory proposals?</td><td>Human approval.</td><td>Only consider low-risk policy approval after measured false-positive and rollback performance.</td></tr>
+<tr><td>When is compilation justified?</td><td>Not in MVP.</td><td>Two independently hand-authored app packages share stable definitions and generation saves more complexity than it creates.</td></tr>
+</tbody>
+</table>
+</section>
+<section id="principles">
+<div class="label">11 · Design principles</div>
+<h2>The guardrails that keep the architecture coherent.</h2>
+<div class="grid-3">
+<div class="card principle"><strong>Sessions are evidence, not memory.</strong><span class="muted">Review them externally. Promote only selected durable outputs.</span></div>
+<div class="card principle"><strong>App structure is executable.</strong><span class="muted">The LLM should be able to program against an app's semantics, not only raw tools.</span></div>
+<div class="card principle"><strong>Transport is replaceable.</strong><span class="muted">MCP, REST, CLI, or local bindings sit beneath a stable semantic operation layer.</span></div>
+<div class="card principle"><strong>The core stays boring.</strong><span class="muted">AgentMemory remains local Markdown + retrieval, not a daemon or autonomous platform.</span></div>
+<div class="card principle"><strong>Missing evidence is data.</strong><span class="muted">Coverage, truncation, unavailable sources, and sampling must be explicit.</span></div>
+<div class="card principle"><strong>The LLM may abstain.</strong><span class="muted">Bound evidence and validate output references rather than inviting unconstrained reflection.</span></div>
+<div class="card principle"><strong>Memory is one durable owner.</strong><span class="muted">Behavior may belong in skills, routing, app policy, app schema, evals, or gates instead.</span></div>
+<div class="card principle"><strong>Intervention is not learning.</strong><span class="muted">A candidate becomes learned behavior only after comparable outcome evidence supports it.</span></div>
+<div class="card principle"><strong>Base code is immutable.</strong><span class="muted">Learning generates overlays with explicit precedence and rollback.</span></div>
+<div class="card principle"><strong>Writes are revisioned.</strong><span class="muted">Use append-only journals and CAS; avoid shared mutable JSON and mtime-based synchronization.</span></div>
+<div class="card principle"><strong>Goals need real completion evidence.</strong><span class="muted">A stopped turn is not proof that the task succeeded.</span></div>
+<div class="card principle"><strong>Optimize under guardrails.</strong><span class="muted">Outcome improvement alone is insufficient; policy, safety, provenance, and regressions matter.</span></div>
+</div>
+<div class="callout good" style="margin-top:26px"><p class="thesis"><strong>Knowledge State</strong> answers “What do I know?” via AgentMemory. <strong>World/Semantic State</strong> answers “How is this application structured?” via AppDefinition. <strong>Behavioral State</strong> answers “How should I operate here?” via learned policies and skills.</p></div>
+</section>
+<section>
+<div class="label">12 · What to borrow—and what not to</div>
+<h2>Better Harness and Prime Agent are inputs, not templates.</h2>
+<table>
+<thead><tr><th>Project</th><th>Borrow</th><th>Do not blindly copy</th></tr></thead>
+<tbody>
+<tr><td><strong>Better Harness</strong></td><td>Episode normalization, observation coverage, provenance, bounded evidence packets, match/abstain review, candidate taxonomy, durable-owner routing, skill maturity states, intervention ledger.</td><td>Its coding-agent-specific ontology and the need for multiple independent analysis agents on every learning task.</td></tr>
+<tr><td><strong>Prime Agent</strong></td><td>Programmatic skill/integration objects, progressive disclosure, immutable base + refinable overlay, plan/apply/rollback, long-horizon goal state, gates, stable agent identity.</td><td>Turning AgentMemory into a daemon/runtime; shared mutable harness JSON synchronization; retaining behavior merely because a benchmark metric improves.</td></tr>
+<tr><td><strong>AgentMemory</strong></td><td>Local ownership, inspectable Markdown, lifetime separation, optional retrieval index, explicit writes, composability, removable intelligence.</td><td>Expanding the core until every host/app/learning feature must depend on it.</td></tr>
+</tbody>
+</table>
+</section>
+<section id="sources">
+<div class="label">Sources &amp; implementation references</div>
+<h2>Code and design references reviewed for this proposal.</h2>
+<ul class="source-list">
+<li><strong>AgentMemory field report / design notes</strong> — local Markdown as source of truth; core vs extension boundary; transcript-import boundary; evidence-first development discipline. User-provided library artifact: <code>agentmemory-field-report.html</code>.</li>
+<li><strong>Executable ecosystem reference</strong> — <a href="ecosystem-reference/README.md"><code>ideas/ecosystem-reference/</code></a>; synthetic Slack episodes plus deterministic contract, evidence, and revision tests.</li>
+<li><strong>AgentMemory repository</strong> — <a href="https://github.com/jayzeng/agentmemory">github.com/jayzeng/agentmemory</a>.</li>
+<li><strong>pi-memory repository</strong> — <a href="https://github.com/jayzeng/pi-memory">github.com/jayzeng/pi-memory</a>.</li>
+<li><strong>Better Harness repository</strong> — <a href="https://github.com/QoderAI/better-harness">github.com/QoderAI/better-harness</a>. Areas reviewed included session analysis, episode contracts, provider runner, observation manifest, learning-loop review packets/candidates, intervention ledger, and Better Harness skill design.</li>
+<li><strong>Prime Agent repository</strong> — <a href="https://github.com/PrimeIntellect-ai/prime-agent">github.com/PrimeIntellect-ai/prime-agent</a>. Areas reviewed included RLM/runtime docs, MCP integrations, skills, continual refinement, architecture, long-running agents, subagent state, and refinement persistence.</li>
+<li><strong>Prime Agent architecture articles/docs</strong> — <a href="https://www.primeintellect.ai/blog/prime-agent">primeintellect.ai/blog/prime-agent</a>.</li>
+</ul>
+<p class="source">This document intentionally describes a proposed AgentMemory ecosystem architecture. It distinguishes borrowed architectural patterns from behaviors that already exist in the current AgentMemory core.</p>
+</section>
+</main>
+<footer>
+<p><strong>Summary:</strong> AgentMemory remains the durable, user-owned knowledge substrate. AppDefinitions become executable semantic models. Observation turns heterogeneous host traces into immutable, scoped experience. Learning works through bounded evidence, validated candidates, interventions, and retain/revert decisions. The result is a self-improving agent system whose improvement remains inspectable and reversible.</p>
+</footer>
+</div>
+<div aria-label="Document actions" class="toolbar" role="group">
+<button onclick="window.print()" title="Print or save as PDF" type="button">Print</button>
+<button onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Back to top" type="button">Top</button>
+</div>
+<noscript><p class="shell">JavaScript is disabled. Diagram source remains readable as text; interactive section tracking and rendered Mermaid diagrams are unavailable.</p></noscript>
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+mermaid.initialize({
+  startOnLoad: false,
+  securityLevel: 'strict',
+  theme: 'neutral',
+  flowchart: {
+    htmlLabels: true,
+    curve: 'basis',
+    useMaxWidth: true
+  },
+  themeVariables: {
+    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+    primaryColor: '#eef6ff',
+    primaryTextColor: '#0f172a',
+    primaryBorderColor: '#64748b',
+    lineColor: '#64748b',
+    secondaryColor: '#f5f3ff',
+    tertiaryColor: '#ecfeff'
+  }
+});
+
+async function renderDiagrams() {
+  const blocks = [...document.querySelectorAll('.mermaid')];
+  for (let i = 0; i < blocks.length; i++) {
+    const el = blocks[i];
+    const wrap = el.closest('.mermaid-wrap');
+    const sectionTitle = el.closest('section')?.querySelector('h2')?.textContent?.trim() || 'architecture';
+    if (wrap) {
+      wrap.setAttribute('role', 'img');
+      wrap.setAttribute('aria-label', `Diagram ${i + 1}: ${sectionTitle}`);
+    }
+    const source = el.textContent.trim();
+    try {
+      // Parse first so an error is isolated to a single diagram.
+      await mermaid.parse(source);
+      const { svg, bindFunctions } = await mermaid.render(`mermaid-diagram-${i + 1}`, source);
+      el.innerHTML = svg;
+      if (bindFunctions) bindFunctions(el);
+    } catch (err) {
+      console.error(`Mermaid diagram ${i + 1} failed:`, err);
+      el.textContent = `Diagram ${i + 1} could not render.\n\n${source}`;
+      el.style.whiteSpace = 'pre-wrap';
+      el.style.color = '#7f1d1d';
+      el.style.background = '#fff7f7';
+      el.style.padding = '14px';
+      el.style.borderRadius = '10px';
+    }
+  }
+}
+
+renderDiagrams();
+
+const links = [...document.querySelectorAll('#toc a')];
+const targets = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+function setActiveLink(sectionId) {
+  links.forEach(a => {
+    const isActive = a.getAttribute('href') === `#${sectionId}`;
+    a.classList.toggle('active', isActive);
+    if (isActive) a.setAttribute('aria-current', 'location');
+    else a.removeAttribute('aria-current');
+  });
+}
+setActiveLink(location.hash.slice(1) || targets[0]?.id);
+links.forEach(link => {
+  link.addEventListener('click', () => setActiveLink(link.getAttribute('href').slice(1)));
+});
+window.addEventListener('hashchange', () => setActiveLink(location.hash.slice(1) || targets[0]?.id));
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) setActiveLink(entry.target.id);
+  });
+}, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+targets.forEach(t => observer.observe(t));
+</script>
+</body>
+</html>

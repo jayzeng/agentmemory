@@ -427,7 +427,15 @@ export function serializeScratchpad(items: ScratchpadItem[]): string {
 // Context builder
 // ---------------------------------------------------------------------------
 
-export function buildMemoryContext(searchResults?: string): string {
+export interface AdditionalContextSection {
+	label: string;
+	content: string;
+}
+
+export function buildMemoryContext(
+	searchResults?: string,
+	additionalSections: AdditionalContextSection[] = [],
+): string {
 	ensureDirs();
 	// Priority order: scratchpad > topics > today's daily > search results > MEMORY.md > yesterday's daily
 	const sections: string[] = [];
@@ -464,6 +472,13 @@ export function buildMemoryContext(searchResults?: string): string {
 			CONTEXT_DAILY_MAX_LINES,
 			CONTEXT_DAILY_MAX_CHARS,
 		);
+		if (section) sections.push(section);
+	}
+
+	for (const additional of additionalSections) {
+		const safeContent = filterMemoryForContext(additional.content);
+		if (!safeContent) continue;
+		const section = formatContextSection(additional.label, safeContent, "start", 80, 2_500);
 		if (section) sections.push(section);
 	}
 

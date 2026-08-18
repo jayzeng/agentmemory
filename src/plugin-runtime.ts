@@ -23,6 +23,9 @@ import {
 	type PluginCommandContextV1,
 	type PluginCommandResultV1,
 	type PluginCommandV1,
+	type PluginContextProviderContextV1,
+	type PluginContextProviderV1,
+	type PluginContextSectionV1,
 	type PluginEntitlementStatusV1,
 	type PluginMemoryCorrectionV1,
 	type PluginMemoryWriteV1,
@@ -130,6 +133,7 @@ export class InstalledPluginRuntimeV1 {
 	private readonly backend: PluginBootstrapBackendV1;
 	private readonly commands = new Map<string, RegisteredCommand>();
 	private readonly hooks: PluginSessionStartHookV1[] = [];
+	private readonly contextProviders: PluginContextProviderV1[] = [];
 	private loaded = false;
 
 	constructor(private readonly options: PluginRuntimeOptionsV1) {
@@ -172,6 +176,17 @@ export class InstalledPluginRuntimeV1 {
 				},
 			};
 		return registered.command.run(context);
+	}
+
+	async provideContext(context: PluginContextProviderContextV1): Promise<PluginContextSectionV1[]> {
+		if (!(await this.load()) || this.contextProviders.length === 0) return [];
+		const entitlement = await this.refreshEntitlement();
+		const sections: PluginContextSectionV1[] = [];
+		for (const provider of this.contextProviders) {
+			if (!isPluginCapabilityEnabled(entitlement, provider.requiredCapability)) continue;
+			sections.push(...(await provider.provide(context)));
+		}
+		return sections;
 	}
 
 	async runSessionStart(
@@ -242,6 +257,14 @@ export class InstalledPluginRuntimeV1 {
 					);
 				this.hooks.push(hook);
 			},
+			registerContextProvider: (provider) => {
+				if (!(manifest.capabilities ?? []).includes(provider.requiredCapability))
+					throw new PluginBootstrapFailure(
+						"plugin_context_provider_invalid",
+						`Plugin ${manifest.id} registered a context provider with an undeclared capability`,
+					);
+				this.contextProviders.push(provider);
+			},
 			getStateDirectory: () => stateDirectory,
 			getMemoryDirectory: () => {
 				assertPermission(manifest, "memory:read");
@@ -300,6 +323,7 @@ export function createInstalledBundleHealthCheck(
 				coreVersion,
 				registerCommand() {},
 				registerSessionStartHook() {},
+				registerContextProvider() {},
 				getStateDirectory: () => stateDirectory,
 				getMemoryDirectory: () => {
 					assertPermission(plugin.manifest, "memory:read");
