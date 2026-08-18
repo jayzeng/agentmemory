@@ -21,7 +21,7 @@ All notable changes to this project will be documented in this file.
 - Kept identity, billing, and browser activation out of the first-use path while preserving signed release verification and transactional installation.
 - Aligned the top-level command table and generated it from the CLI registry so Pro commands such as `dashboard` and the `help` command are always visible.
 - Preserved the upstream `pi-mem` MIT copyright notice in the distributed license.
-- Hardened release automation with immutable action pins and tokenless npm trusted publishing.
+- Hardened release automation with immutable action pins.
 
 ## [0.4.16] - 2026-08-17
 

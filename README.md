@@ -297,7 +297,7 @@ agent-memory install-skills
 
 ## Publishing (maintainers)
 
-Publication is tag-driven through `.github/workflows/publish-npm.yml`. Configure `jayzeng/agentmemory` and `publish-npm.yml` as the npm trusted publisher for `myagentmemory`, merge a versioned changelog/package update, and push the matching `v<version>` tag. The workflow uses short-lived OIDC credentials, runs the complete release gate, and publishes the public package with provenance. Do not publish this package from the private plugin workspace.
+Publication is tag-driven through `.github/workflows/publish-npm.yml`. Configure the repository's `NPM_TOKEN` secret with publish access to `myagentmemory`, merge a versioned changelog/package update, and push the matching `v<version>` tag. The workflow runs the complete release gate and publishes the public package. Do not publish this package from the private plugin workspace.
 
 ### Repository assets (maintainers)
 

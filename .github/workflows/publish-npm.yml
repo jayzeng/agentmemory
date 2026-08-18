@@ -50,3 +50,5 @@ jobs:
       - run: npm run test:eval
       - run: npm audit --audit-level=moderate
       - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
