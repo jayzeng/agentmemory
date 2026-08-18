@@ -2,7 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.4.17] - 2026-08-17
+
+### Added
+
+- Added the product-facing `agent-memory pro install|status|upgrade|manage` namespace and `agent-memory dashboard` alias while retaining low-level `plugin` and `web` compatibility commands.
+- Added a first-class Core/Pro section to the public site with outcome-based messaging and the no-account preview contract.
+
+### Changed
+
+- Replaced required pre-use email collection with a random anonymous installation identifier and a non-interactive free-preview access request.
+- Reframed Pro around coding-history recall, learning from repeated corrections, and the local Memory Dashboard.
+- Reconstructed the free policy as 10 device-local recalls and one device-local learning scan per day, with indexing and Dashboard access available and automatic background capture disabled.
+- Added a bounded, capability-gated plugin context-provider bridge so approved learned memory can appear in generated Core context.
+
+### Fixed
+
+- Kept identity, billing, and browser activation out of the first-use path while preserving signed release verification and transactional installation.
+- Aligned the top-level command table and generated it from the CLI registry so Pro commands such as `dashboard` and the `help` command are always visible.
+- Preserved the upstream `pi-mem` MIT copyright notice in the distributed license.
+- Hardened release automation with immutable action pins and tokenless npm trusted publishing.
 
 ## [0.4.16] - 2026-08-17
 

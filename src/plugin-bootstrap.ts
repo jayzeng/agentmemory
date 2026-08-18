@@ -195,8 +195,8 @@ const MISSING_ENTITLEMENT: PluginEntitlementStatusV1 = {
 };
 
 const OFFICIAL_PLUGINS = [
-	{ id: OFFICIAL_PLUGIN_IDS[0], name: "Session Intelligence" },
-	{ id: OFFICIAL_PLUGIN_IDS[1], name: "Web Console" },
+	{ id: OFFICIAL_PLUGIN_IDS[0], name: "Coding History Recall" },
+	{ id: OFFICIAL_PLUGIN_IDS[1], name: "Memory Dashboard" },
 ] as const;
 
 const PACKAGE_MAX_BYTES = 64 * 1024 * 1024;

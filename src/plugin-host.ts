@@ -131,11 +131,31 @@ export interface PluginStructuredErrorV1 {
 	retryable?: boolean;
 }
 
+export interface PluginContextSectionV1 {
+	id: string;
+	label: string;
+	content: string;
+	artifactPath?: string;
+	metadata?: Record<string, unknown>;
+}
+
+export interface PluginContextProviderV1 {
+	name: string;
+	requiredCapability: string;
+	provide(context: {
+		host: string;
+		cwd?: string;
+		query?: string;
+		signal: AbortSignal;
+	}): Promise<PluginContextSectionV1[]>;
+}
+
 export interface AgentMemoryPluginHostV1 {
 	apiVersion: 1;
 	coreVersion: string;
 	registerCommand(command: PluginCommandV1): void;
 	registerSessionStartHook(hook: PluginSessionStartHookV1): void;
+	registerContextProvider?(provider: PluginContextProviderV1): void;
 	getStateDirectory(): string;
 	getMemoryDirectory(): string;
 	getEntitlement(): Promise<PluginEntitlementStatusV1>;

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { COMMANDS } from "../src/cli-spec.js";
 import { generateCompletion } from "../src/completions.js";
 import {
 	_clearUpdateTimer,
@@ -586,7 +587,8 @@ describe("CLI subprocess", () => {
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory");
 		expect(out).toContain("Commands:");
-		expect(out).toContain("plugin");
+		for (const command of COMMANDS) expect(out).toMatch(new RegExp(`^  ${command}\\s{2,}`, "m"));
+		expect(out).not.toMatch(/^\t/m);
 	});
 
 	test("plugin discovery is structured and does not expose install paths", () => {
@@ -621,15 +623,15 @@ describe("CLI subprocess", () => {
 		});
 		expect(result.exitCode).toBe(0);
 		const stdout = result.stdout.toString();
-		expect(stdout).toContain("AgentMemory Pro includes:");
-		expect(stdout).toContain("Session Intelligence");
-		expect(stdout).toContain("Guided Learning");
-		expect(stdout).toContain("Local Web Console");
-		expect(stdout).toContain("Your session content stays on this device.");
-		expect(stdout).toContain("agent-memory plugin install");
+		expect(stdout).toContain("Core remembers what you save. Pro learns from what you do.");
+		expect(stdout).toContain("Recall coding history");
+		expect(stdout).toContain("Learn from corrections");
+		expect(stdout).toContain("Memory Dashboard");
+		expect(stdout).toContain("No account is required");
+		expect(stdout).toContain("agent-memory pro install");
 	});
 
-	test("non-interactive plugin install requires email activation without touching disk", () => {
+	test("non-interactive plugin install attempts anonymous preview access without requiring identity", () => {
 		const pluginDir = path.join(tmpDir, "plugin-install");
 		const result = Bun.spawnSync(
 			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "install", "--json"],
@@ -642,9 +644,9 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(1);
 		const out = JSON.parse(result.stdout.toString());
 		expect(out.ok).toBe(false);
-		expect(out.result).toBe("auth_required");
-		expect(out.error.code).toBe("auth_required");
-		expect(out.nextAction.url).toBe("https://jayzeng.github.io/agentmemory/");
+		expect(out.result).toBe("unavailable");
+		expect(out.error.code).not.toBe("auth_required");
+		expect(out.nextAction).toBeNull();
 		expect(fs.existsSync(pluginDir)).toBe(false);
 	});
 
@@ -712,7 +714,23 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory plugin install");
-		expect(out).toContain("free daily");
+		expect(out).toContain("10 recalls and one learning scan per local day");
+	});
+
+	test("Pro status delegates to the low-level bootstrap contract", () => {
+		const pluginDir = path.join(tmpDir, "plugin-install");
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "pro", "status", "--json"],
+			{
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.command).toBe("plugin.status");
+		expect(out.result).toBe("not_installed");
 	});
 
 	test("unknown command exits with error", async () => {
@@ -1135,6 +1153,9 @@ describe("npm package portability", () => {
 			const packedPaths = pack.files.map((file) => file.path);
 			expect(packedPaths).toContain("dist/cli.js");
 			expect(packedPaths).toContain("LICENSE");
+			const packedLicense = fs.readFileSync(path.join(repoRoot, "LICENSE"), "utf-8");
+			expect(packedLicense).toContain("Copyright (c) 2026 Jay Zeng");
+			expect(packedLicense).toContain("Copyright (c) 2026 jo-inc");
 			expect(packedPaths).toContain("docs/official-plugin-bootstrap.md");
 			expect(packedPaths).not.toContain("dist/agent-memory");
 			expect(packedPaths).not.toContain("dist/agent-memory.exe");

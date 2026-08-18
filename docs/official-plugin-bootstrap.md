@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted design on 2026-08-16 and revised on 2026-08-17. The public core implements host types, loopback email activation, live catalog and artifact retrieval, Ed25519 release verification, bounded package validation, transactional install, bundle health checks, paid-command dispatch, and SessionStart hook dispatch. The free plan grants a configurable number of agent sessions per normalized email and UTC day; durable account authentication, payment, renewal, and account management remain deferred.
+Accepted design on 2026-08-16 and revised on 2026-08-17. The public core implements host types, anonymous preview activation, live catalog and artifact retrieval, Ed25519 release verification, bounded package validation, transactional install, bundle health checks, paid-command dispatch, and SessionStart hook dispatch. The free preview grants 10 device-local recalls and one device-local learning scan per local day while keeping indexing and Memory Dashboard visibility available. Account authentication, payment, renewal, and account management remain deferred.
 
 The public `agentmemory` repository and `myagentmemory` npm package remain the free, MIT-licensed core. The public bootstrap client and host contracts are also MIT-licensed. Official commercial implementations and browser assets are built and distributed separately from the private `agent-memory-plugin` workspace under their own terms. Pricing, the billing provider, device limits, offline-grace duration, and Enterprise contract terms are intentionally not decided here. The temporary beta currently uses allowlisted `*.agentmemory.paperpilot.me` service origins; changing those origins is a public-client release change.
 
@@ -10,10 +10,10 @@ The public `agentmemory` repository and `myagentmemory` npm package remain the f
 
 The public core will provide a small bootstrap and host surface for signed first-party plugins. It will not contain paid implementations, browser assets, commercial entitlement logic, or a general third-party marketplace.
 
-The primary user command is:
+The primary product-facing command is:
 
 ```bash
-agent-memory plugin install
+agent-memory pro install
 ```
 
 `plugin install` is an idempotent reconcile operation:
@@ -23,11 +23,11 @@ agent-memory plugin install
 | Plugin absent | Active or grace | Install the compatible signed bundle |
 | Plugin older than the selected release | Active or grace | Upgrade atomically |
 | Plugin current | Active or grace | Report that it is current |
-| Any | Missing | Start loopback email activation in an interactive terminal |
+| Any | Missing | Request an anonymous free-preview entitlement and signed artifact grant |
 | Any | Expired | Direct the user to renewal; leave core available |
 | Incompatible bundle | Any | Leave the current version untouched and explain the required core version |
 
-An absent plugin cannot activate itself. The public bootstrap collects an email locally, obtains a server-issued usage credential and short-lived artifact grant, and verifies the release and artifact. The credential is persisted only after the service accepts activation. After installation, the public host reconstructs the free account-metered capability policy in core code and checks required capabilities before commands and hooks. Signed long-lived entitlements can extend this credential when authentication and payment ship.
+An absent plugin cannot activate itself. The public bootstrap creates a random installation identifier, obtains a server-issued free-preview policy and short-lived artifact grant, and verifies the release and artifact. A mode-0600 activation record is persisted only after the service accepts the request. After installation, the public host reconstructs the free capability policy in core code and checks required capabilities before commands and hooks. Signed long-lived paid entitlements can extend this record when authentication and payment ship.
 
 ## Ownership boundary
 
@@ -67,6 +67,12 @@ Core memory operations must continue to work when the service is unreachable, a 
 ### Bootstrap commands
 
 ```text
+agent-memory pro
+agent-memory pro install
+agent-memory pro status
+agent-memory pro upgrade
+agent-memory pro manage
+
 agent-memory plugin
 agent-memory plugin list
 agent-memory plugin status
@@ -76,6 +82,8 @@ agent-memory plugin uninstall [--yes]
 agent-memory plugin manage [--no-browser]
 ```
 
+The `pro` namespace is the user-facing surface. The `plugin` namespace remains supported for low-level administration and compatibility.
+
 - `plugin` with no subcommand prints a discovery summary and the next relevant command.
 - `list` reports known official plugins and whether each is installed and available. It does not download artifacts or inspect memory.
 - `status` is read-only. It reports the installed bundle, selected channel, compatibility, entitlement state, and update availability.
@@ -84,7 +92,7 @@ agent-memory plugin manage [--no-browser]
 - `uninstall` removes executable plugin material and the active receipt. It preserves core memory, plugin state, and the permission-restricted activation credential.
 - `manage` remains unavailable until authenticated account and billing management exists.
 
-Installed plugins contribute top-level commands such as `recall`, `learn`, `worker`, and `web`. Bootstrap command names are reserved by the core and cannot be replaced by a plugin.
+Installed plugins contribute top-level commands including `recall` and `learn`; `dashboard` is a product-facing alias for the lower-level `web` command. Bootstrap command names are reserved by the core and cannot be replaced by a plugin.
 
 The current private compatibility CLI uses `plugin install` and `plugin uninstall` for skill files only. During migration, those meanings move to `install-skills --plugin-only` and `uninstall-skills --plugin-only`; the bootstrap command names above become authoritative.
 
@@ -93,13 +101,13 @@ The current private compatibility CLI uses `plugin install` and `plugin uninstal
 After a successful interactive `agent-memory init`, the core may print one informational line:
 
 ```text
-Optional: AgentMemory Pro adds session recall and a local Web Console.
-Run: agent-memory plugin install
+Core remembers what you save. Pro learns from what you do.
+Run: agent-memory pro install
 ```
 
-Top-level help includes an `Optional official plugins` section. Human-readable `status` may include the same recommendation while no official plugin is installed. Routine `context`, `read`, `write`, `search`, and scratchpad commands never show commercial prompts.
+Top-level help includes a Pro section. Human-readable `status` may include the same recommendation while Pro is not installed. Routine `context`, `read`, `write`, `search`, and scratchpad commands never show commercial prompts.
 
-The core must not open a browser during package installation, `init`, `help`, `status`, or any normal memory operation. A browser may open only after an explicit interactive `plugin install`. `--no-browser`, non-interactive execution, and `--json` fail closed with `auth_required` when no activation record exists.
+The free preview does not open a browser or request identity. Browsers remain restricted to explicit `dashboard`, future `pro manage`, and future paid upgrade/authentication flows. Non-interactive and `--json` installs use the same anonymous access request and still fail closed when the commercial service is unavailable.
 
 ### Machine-readable output
 
@@ -133,17 +141,17 @@ Every bootstrap command supports `--json` and emits one JSON document with a ver
 
 `result` is one of `not_installed`, `installed`, `upgraded`, `current`, `update_available`, `uninstalled`, `auth_required`, `renewal_required`, or `unavailable`. Failures use `ok: false` plus a stable `error.code` and redacted `error.message`. Output must never contain access tokens, download credentials, signed entitlement contents, local memory paths, or URLs containing bearer credentials.
 
-## Free activation flow
+## Anonymous free-preview flow
 
-1. `agent-memory plugin install` starts an HTTP server bound to `127.0.0.1` on an ephemeral port.
-2. The CLI prints and opens a nonce-bearing local URL. The page accepts one email address with bounded input, an exact Host and nonce path, same-origin browser request validation, restrictive response headers, and a five-minute deadline.
-3. Submission returns a completion page but does not create a local credential yet.
-4. The waiting CLI sends the email plus core, installed-bundle, platform, architecture, release-channel, and consent-version fields to the private control plane. Its activation database stores none of the user's memory, session content, queries, repository paths, raw agent session identifiers, IP address, or user-agent string.
-5. The service normalizes the email, stores only a hash of a random usage credential, and returns the credential, a free account-metered entitlement, and a short-lived object-bound artifact grant. Only then does the CLI atomically write a mode-0600 activation record.
+1. `agent-memory pro install` creates a random installation identifier locally when no activation record exists.
+2. The CLI sends that identifier plus core, installed-bundle, platform, architecture, and release-channel fields to the private control plane. It sends no email, memory, session content, query, repository path, raw agent session identifier, IP address, or user-agent string.
+3. The service stores the pseudonymous identifier and only the hash of a random compatibility credential, then returns a free-preview capability policy and short-lived object-bound artifact grant.
+4. The CLI validates the explicit free policy: local indexing and Memory Dashboard access, 10 device-local recalls per day, one device-local learning scan per day, and no free automatic background worker.
+5. Only then does the CLI atomically write a mode-0600 activation record.
 6. The CLI verifies the Ed25519-signed release plus package digest and limits, imports it for health checks, and atomically activates the receipt.
-7. Each paid SessionStart hook reserves one opaque operation against the email's UTC-day allowance, commits after useful hook work, and releases on failure. Exhaustion skips paid hook work without affecting public-core context.
+7. Device-local quota operations reserve before work, commit after useful work, and release on abstention or failure. A zero-result recall does not consume allowance.
 
-Email ownership is not verified in this free flow. Authentication, payment, renewal, account management, and signed paid entitlements are not implemented yet.
+Authentication, payment, renewal, account management, and signed paid entitlements are not implemented yet.
 
 ## Future authentication and purchase flow
 
@@ -163,12 +171,12 @@ An Enterprise administrator may pre-provision an organization entitlement or man
 
 The service exposes:
 
-- `POST /v1/plugin/access` for a free account-metered entitlement, a usage credential, and a short-lived artifact grant;
-- `POST /v1/plugin/sessions/reserve|commit|release` for atomic daily allowance enforcement;
+- `POST /v1/plugin/access` for an anonymous free-preview policy, compatibility credential, and short-lived artifact grant;
+- `POST /v1/plugin/sessions/reserve|commit|release` for migration compatibility with activation-v2 clients;
 - `GET /v1/plugin/releases` for an Ed25519-signed release selected from the private R2 catalog;
 - `GET|HEAD /v1/artifacts/download` for the exact content-addressed object authorized by the bearer grant.
 
-The access request contains the submitted email plus the bounded core, bundle, platform, architecture, release-channel, and consent-version fields described above. Session metering sends only a random operation ID and bearer credential; D1 associates those values with a normalized email and UTC-day counter. Application payloads contain no memory content, search query, session content, path, repository name, raw agent session identifier, qmd data, IP address, or user-agent string. The activation database stores neither IP addresses nor user-agent strings. Future authenticated service responsibilities include:
+The access request contains a random installation identifier plus the bounded core, bundle, platform, architecture, and release-channel fields described above. Application payloads contain no email, memory content, search query, session content, path, repository name, raw agent session identifier, qmd data, IP address, or user-agent string. The activation database stores neither IP addresses nor user-agent strings. Future authenticated service responsibilities include:
 
 - create and poll a device authorization;
 - read the authenticated principal's effective entitlement;

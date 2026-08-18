@@ -23,6 +23,10 @@ export const COMMANDS = [
 	"install-hooks",
 	"uninstall-hooks",
 	"completion",
+	"pro",
+	"recall",
+	"learn",
+	"dashboard",
 	"plugin",
 	"version",
 	"help",
@@ -48,9 +52,13 @@ export const COMMAND_DESCRIPTIONS: Record<(typeof COMMANDS)[number], string> = {
 	"install-hooks": "install automatic SessionStart indexing and context hooks",
 	"uninstall-hooks": "remove only SessionStart hooks managed by agent-memory",
 	completion: "install or print Bash, Zsh, Fish, or PowerShell completion",
-	plugin: "index, recall, learn from, and evaluate prior agent sessions",
+	pro: "install, inspect, or upgrade AgentMemory Pro",
+	recall: "recall decisions and context from prior coding sessions with Pro",
+	learn: "find repeated corrections worth remembering with Pro",
+	dashboard: "open the private local Memory Dashboard",
+	plugin: "discover, install, update, or remove optional official plugins",
 	version: "print the installed agent-memory version",
-	help: "show top-level, command, or nested plugin help",
+	help: "show this command overview",
 };
 
 export const PLUGIN_COMMAND_DESCRIPTIONS: Record<(typeof PLUGIN_COMMANDS)[number], string> = {
@@ -89,6 +97,10 @@ export const COMMAND_OPTIONS: Record<string, readonly string[]> = {
 	"install-hooks": ["--yes", "--all", "--only"],
 	"uninstall-hooks": ["--only"],
 	completion: ["--stdout"],
+	pro: [],
+	recall: ["--scope", "--cwd", "--limit", "--context"],
+	learn: [],
+	dashboard: ["--no-browser"],
 	version: [],
 	help: [],
 };

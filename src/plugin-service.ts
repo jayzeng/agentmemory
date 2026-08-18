@@ -29,12 +29,12 @@ const MISSING_ENTITLEMENT: PluginEntitlementStatusV1 = {
 	state: "missing",
 	features: [],
 	capabilities: {},
-	reason: "Enter an email address to activate the free daily session allowance",
+	reason: "Install the no-account Pro preview to activate local recall and learning",
 };
 
 interface TemporaryActivationV1 {
-	schemaVersion: 2;
-	email: string;
+	schemaVersion: 3;
+	installationId: string;
 	activatedAt: string;
 	usageCredential: string;
 	dailySessionLimit: number;
@@ -54,24 +54,23 @@ function cloneEntitlement(value: PluginEntitlementStatusV1): PluginEntitlementSt
 	return structuredClone(value);
 }
 
-function freeEntitlement(dailySessionLimit: number): PluginEntitlementStatusV1 {
+function freeEntitlement(): PluginEntitlementStatusV1 {
 	return {
 		plan: "free",
 		state: "active",
 		features: ["session-intelligence", "web-console"],
 		capabilities: {
 			"session-index": { enabled: true },
-			"session-worker": {
-				enabled: true,
-				quota: { limit: dailySessionLimit, window: "day", scope: "account" },
-			},
-			learning: { enabled: true },
+			recall: { enabled: true, quota: { limit: 10, window: "day", scope: "device" } },
+			"session-worker": { enabled: false },
+			learning: { enabled: true, quota: { limit: 1, window: "day", scope: "device" } },
 			"retrieval-evaluation": { enabled: true },
 			"operational-metrics": { enabled: true },
 			"web-console": { enabled: true },
 			"memory-explorer": { enabled: true },
 		},
-		reason: `${dailySessionLimit} free agent sessions per UTC day`,
+		reason:
+			"Free preview: 10 recalls and 1 learning scan per local day; indexing and dashboard access remain available",
 	};
 }
 
@@ -388,12 +387,12 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 		this.artifactOrigin = options.artifactOrigin ?? ARTIFACT_ORIGIN;
 		this.fetchImplementation = options.fetch ?? globalThis.fetch;
 		this.openUrl = options.openUrl ?? openLoopbackUrl;
-		this.activate = options.activate ?? (() => collectTemporaryActivation(this.openUrl));
+		this.activate = options.activate ?? (async () => `am_install_${randomBytes(24).toString("base64url")}`);
 	}
 
 	async getLocalEntitlement(): Promise<PluginEntitlementStatusV1> {
 		const activation = this.readActivation();
-		return activation ? freeEntitlement(activation.dailySessionLimit) : cloneEntitlement(MISSING_ENTITLEMENT);
+		return activation ? freeEntitlement() : cloneEntitlement(MISSING_ENTITLEMENT);
 	}
 
 	async resolveAccess(request: {
@@ -403,33 +402,19 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 		allowAuthentication: boolean;
 	}): Promise<PluginAccessDecisionV1> {
 		const activation = this.readActivation();
-		let email = activation?.email;
-		if (!email) {
-			if (!request.allowAuthentication)
-				return {
-					kind: "auth_required",
-					entitlement: cloneEntitlement(MISSING_ENTITLEMENT),
-					nextAction: {
-						kind: "authenticate",
-						url: "https://jayzeng.github.io/agentmemory/",
-						message: "Run plugin install in an interactive terminal to enter an email address",
-					},
-				};
-			email = await this.activate();
-		}
+		const installationId = activation?.installationId ?? (await this.activate());
 		const response = await this.request(`${this.apiOrigin}/v1/plugin/access`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				schemaVersion: 1,
-				email,
+				schemaVersion: 2,
+				installationId,
 				bundleId: request.bundleId,
 				installedVersion: request.installedVersion ?? null,
 				coreVersion: this.coreVersion,
 				channel: request.channel,
 				platform: process.platform,
 				architecture: process.arch,
-				consentVersion: "activation-v2",
 			}),
 		});
 		const value = (await readJson(response)) as {
@@ -445,16 +430,22 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 				"service_response_invalid",
 				"The access response omitted its usage credential",
 			);
-		const freeQuota = value.entitlement.capabilities["session-worker"]?.quota;
+		const recallQuota = value.entitlement.capabilities.recall?.quota;
+		const learningQuota = value.entitlement.capabilities.learning?.quota;
 		if (
 			value.entitlement.plan !== "free" ||
 			value.entitlement.state !== "active" ||
-			!freeQuota ||
-			freeQuota.scope !== "account" ||
-			freeQuota.window !== "day"
+			!recallQuota ||
+			recallQuota.scope !== "device" ||
+			recallQuota.window !== "day" ||
+			!learningQuota ||
+			learningQuota.scope !== "device" ||
+			learningQuota.window !== "day" ||
+			value.entitlement.capabilities["session-index"]?.enabled !== true ||
+			value.entitlement.capabilities["web-console"]?.enabled !== true
 		)
-			throw new PluginBootstrapFailure("service_response_invalid", "The free session policy is invalid");
-		this.writeActivation(email, value.usageCredential, freeQuota.limit);
+			throw new PluginBootstrapFailure("service_response_invalid", "The free preview policy is invalid");
+		this.writeActivation(installationId, value.usageCredential, 1);
 		return { kind: "granted", entitlement: value.entitlement, artifactGrant: value.artifactGrant };
 	}
 
@@ -523,8 +514,9 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 				return null;
 			const value = JSON.parse(fs.readFileSync(activationPath, "utf-8")) as TemporaryActivationV1;
 			if (
-				value.schemaVersion !== 2 ||
-				!isEmail(value.email) ||
+				value.schemaVersion !== 3 ||
+				typeof value.installationId !== "string" ||
+				!/^am_install_[A-Za-z0-9_-]{32}$/.test(value.installationId) ||
 				!Number.isFinite(Date.parse(value.activatedAt)) ||
 				!ACTIVATION_CREDENTIAL.test(value.usageCredential) ||
 				!Number.isSafeInteger(value.dailySessionLimit) ||
@@ -538,8 +530,9 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 		}
 	}
 
-	private writeActivation(email: string, usageCredential: string, dailySessionLimit: number): void {
-		if (!isEmail(email)) throw new PluginBootstrapFailure("email_invalid", "Enter a valid email address");
+	private writeActivation(installationId: string, usageCredential: string, dailySessionLimit: number): void {
+		if (!/^am_install_[A-Za-z0-9_-]{32}$/.test(installationId))
+			throw new PluginBootstrapFailure("activation_failed", "The installation identifier is invalid");
 		if (!ACTIVATION_CREDENTIAL.test(usageCredential))
 			throw new PluginBootstrapFailure("activation_failed", "The activation credential is invalid");
 		if (!Number.isSafeInteger(dailySessionLimit) || dailySessionLimit <= 0 || dailySessionLimit > 10_000)
@@ -558,7 +551,13 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 		fs.writeFileSync(
 			temporary,
 			`${JSON.stringify(
-				{ schemaVersion: 2, email, activatedAt: new Date().toISOString(), usageCredential, dailySessionLimit },
+				{
+					schemaVersion: 3,
+					installationId,
+					activatedAt: new Date().toISOString(),
+					usageCredential,
+					dailySessionLimit,
+				},
 				null,
 				2,
 			)}\n`,

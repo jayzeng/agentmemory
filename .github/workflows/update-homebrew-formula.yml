@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
@@ -88,7 +88,7 @@ jobs:
           PY
 
       - name: Commit and push
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6
         with:
           commit-message: "chore: update Homebrew formula for ${{ steps.meta.outputs.tag }}"
           title: "chore: update Homebrew formula for ${{ steps.meta.outputs.tag }}"

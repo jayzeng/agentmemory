@@ -2392,7 +2392,7 @@ describe("temporary plugin activation and runtime", () => {
 		expect(email).toBe("beta@example.invalid");
 	});
 
-	test("persists a metered free activation only after the service grants access", async () => {
+	test("persists an anonymous free-preview activation only after the service grants access", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-activation-"));
 		try {
 			const entitlement: PluginEntitlementStatusV1 = {
@@ -2400,8 +2400,10 @@ describe("temporary plugin activation and runtime", () => {
 				state: "active",
 				features: ["session-intelligence", "web-console"],
 				capabilities: {
-					learning: { enabled: true },
-					"session-worker": { enabled: true, quota: { limit: 3, window: "day", scope: "account" } },
+					"session-index": { enabled: true },
+					recall: { enabled: true, quota: { limit: 10, window: "day", scope: "device" } },
+					learning: { enabled: true, quota: { limit: 1, window: "day", scope: "device" } },
+					"session-worker": { enabled: false },
 					"web-console": { enabled: true },
 				},
 			};
@@ -2412,7 +2414,7 @@ describe("temporary plugin activation and runtime", () => {
 				coreVersion: "0.4.15",
 				activate: async () => {
 					activations++;
-					return "beta@example.invalid";
+					return "am_install_abcdefghijklmnopqrstuvwxyz012345";
 				},
 				fetch: (async (input, init) => {
 					if (String(input).includes("/v1/plugin/sessions/"))
@@ -2453,17 +2455,17 @@ describe("temporary plugin activation and runtime", () => {
 			expect((await backend.getLocalEntitlement()).capabilities.learning.enabled).toBe(true);
 			const record = path.join(root, "credentials", "temporary-access.json");
 			expect(fs.statSync(record).mode & 0o777).toBe(0o600);
-			expect(fs.readFileSync(record, "utf-8")).toContain("beta@example.invalid");
+			expect(fs.readFileSync(record, "utf-8")).toContain("am_install_abcdefghijklmnopqrstuvwxyz012345");
+			expect(fs.readFileSync(record, "utf-8")).not.toContain("email");
 			expect(accessRequest).toMatchObject({
-				schemaVersion: 1,
-				email: "beta@example.invalid",
+				schemaVersion: 2,
+				installationId: "am_install_abcdefghijklmnopqrstuvwxyz012345",
 				bundleId: OFFICIAL_BUNDLE_ID,
 				installedVersion: null,
 				coreVersion: "0.4.15",
 				channel: "stable",
 				platform: process.platform,
 				architecture: process.arch,
-				consentVersion: "activation-v2",
 			});
 			expect(await backend.reserveSession("session-1")).toMatchObject({ allowed: true, limit: 3, remaining: 2 });
 			if (process.platform !== "win32") {
@@ -2509,7 +2511,7 @@ describe("temporary plugin activation and runtime", () => {
 				plugins: ["agentmemory.runtime-test"],
 			};
 			const source = Buffer.from(
-				`const manifest=${JSON.stringify(manifest)};export default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.runtime-test",name:"Runtime Test",version:"1.0.0",description:"Runtime test",engine:">=0.4.0",entitlement:"commercial",commands:[{name:"runtime-ping",description:"Ping",requiredCapability:"learning"}],permissions:[],capabilities:["learning"]},async activate(host){host.registerCommand({name:"runtime-ping",description:"Ping",requiredCapability:"learning",async run(context){return {ok:true,data:{args:context.args}}}})},async healthCheck(){return {ok:true}}}]};\n`,
+				`const manifest=${JSON.stringify(manifest)};export default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.runtime-test",name:"Runtime Test",version:"1.0.0",description:"Runtime test",engine:">=0.4.0",entitlement:"commercial",commands:[{name:"runtime-ping",description:"Ping",requiredCapability:"learning"}],permissions:[],capabilities:["learning"]},async activate(host){host.registerCommand({name:"runtime-ping",description:"Ping",requiredCapability:"learning",async run(context){return {ok:true,data:{args:context.args}}}});host.registerContextProvider?.({name:"runtime-context",requiredCapability:"learning",async provide(context){return [{id:"runtime-section",label:"## Runtime context",content:context.query??"none"}]}})},async healthCheck(){return {ok:true}}}]};\n`,
 			);
 			const artifact = encodePluginPackage({
 				schemaVersion: 1,
@@ -2531,8 +2533,19 @@ describe("temporary plugin activation and runtime", () => {
 			const runtime = new InstalledPluginRuntimeV1({ coreVersion: "0.4.13", store, backend });
 			const context = { args: ["one"], flags: {}, signal: new AbortController().signal };
 			expect(await runtime.run("runtime-ping", context)).toEqual({ ok: true, data: { args: ["one"] } });
+			expect(
+				await runtime.provideContext({
+					host: "codex",
+					cwd: "/tmp/project",
+					query: "remember this",
+					signal: context.signal,
+				}),
+			).toEqual([{ id: "runtime-section", label: "## Runtime context", content: "remember this" }]);
 			backend.entitlement.capabilities.learning.enabled = false;
 			expect((await runtime.run("runtime-ping", context))?.error?.code).toBe("plugin_capability_denied");
+			expect(await runtime.provideContext({ host: "codex", cwd: "/tmp/project", signal: context.signal })).toEqual(
+				[],
+			);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}

@@ -25,6 +25,7 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 
+import { COMMAND_DESCRIPTIONS, COMMANDS } from "./cli-spec.js";
 import { type CompletionShell, detectCompletionShell, generateCompletion, installCompletion } from "./completions.js";
 
 import {
@@ -73,6 +74,7 @@ import {
 	PluginBootstrapFailure,
 	type PluginBootstrapResultV1,
 } from "./plugin-bootstrap.js";
+import type { PluginContextSectionV1 } from "./plugin-host.js";
 import { InstalledPluginRuntimeV1 } from "./plugin-runtime.js";
 
 declare const __VERSION__: string;
@@ -186,21 +188,23 @@ function openExternalUrl(url: string): boolean {
 
 function printProOverview(installed: boolean): void {
 	console.log("");
-	console.log("AgentMemory Pro includes:");
-	console.log("  Session Intelligence  Recall decisions and context across Pi, Codex, and Claude Code sessions.");
-	console.log("  Guided Learning       Turn repeated corrections into reviewable, reversible memory.");
-	console.log("  Local Web Console     Inspect memories, activity, health, and settings in your browser.");
+	console.log("Core remembers what you save. Pro learns from what you do.");
 	console.log("");
-	console.log("Your session content stays on this device.");
+	console.log("AgentMemory Pro:");
+	console.log("  Recall coding history       Find decisions and context across Pi, Codex, and Claude Code sessions.");
+	console.log("  Learn from corrections      Turn repeated fixes into reviewable, reversible memory.");
+	console.log("  See and control learning    Inspect what AgentMemory remembers and why in the Memory Dashboard.");
+	console.log("");
+	console.log("No account is required for the free preview. Your coding history stays on this device.");
 	console.log("");
 	if (installed) {
 		console.log("Try it:");
 		console.log('  agent-memory recall "what did we decide about authentication?"');
 		console.log("  agent-memory learn");
-		console.log("  agent-memory web");
+		console.log("  agent-memory dashboard");
 	} else {
-		console.log("Start your Pro beta:");
-		console.log("  agent-memory plugin install");
+		console.log("Start your free Pro preview:");
+		console.log("  agent-memory pro install");
 	}
 }
 
@@ -241,12 +245,10 @@ function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allow
 				break;
 			case "not_installed":
 				console.log("AgentMemory Pro is not installed.");
-				console.log("Run: agent-memory plugin install");
+				console.log("Run: agent-memory pro install");
 				break;
 			case "auth_required":
-				console.log(
-					"Run this command in an interactive terminal to enter an email and activate free daily access.",
-				);
+				console.log("Run agent-memory pro install to activate the free preview.");
 				break;
 			case "renewal_required":
 				console.log("Renew AgentMemory Pro to continue using paid capabilities.");
@@ -280,10 +282,23 @@ async function cmdContext(flags: Record<string, string | boolean>) {
 	ensureDirs();
 	if (!noSearch && query) await ensureQmdAvailableForSync();
 	const searchResults = noSearch ? "" : await searchRelevantMemories(query);
-	const context = buildMemoryContext(searchResults);
+	const coreContext = buildMemoryContext(searchResults);
+	let pluginSections: PluginContextSectionV1[] = [];
+	try {
+		pluginSections = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).provideContext({
+			host: "agent-memory-cli",
+			cwd: process.cwd(),
+			query: query || undefined,
+			signal: new AbortController().signal,
+		});
+	} catch {
+		// Optional Pro context must never make public-core context unavailable.
+	}
+	const pluginContext = pluginSections.map((section) => `${section.label}\n\n${section.content}`).join("\n\n");
+	const context = [coreContext, pluginContext].filter(Boolean).join("\n\n");
 
 	if (json) {
-		output({ context, directory: getMemoryDir() }, true);
+		output({ context, directory: getMemoryDir(), ...(pluginSections.length ? { pluginSections } : {}) }, true);
 	} else {
 		if (context) {
 			process.stdout.write(context);
@@ -811,8 +826,8 @@ async function cmdInit(flags: Record<string, string | boolean>) {
 				const plugin = await createDefaultPluginBootstrap(VERSION).list();
 				if (plugin.result === "not_installed") {
 					console.log("");
-					console.log("Optional: AgentMemory Pro adds session recall and a local Web Console.");
-					console.log("Run: agent-memory plugin install");
+					console.log("Optional: Pro recalls coding history and learns from repeated corrections.");
+					console.log("Try it without an account: agent-memory pro install");
 				}
 			} catch {
 				// Commercial discovery must never make core initialization fail.
@@ -957,8 +972,8 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 		}
 		if (!officialPlugin.installed) {
 			console.log("");
-			console.log("Optional official plugins: not installed");
-			console.log("  run: agent-memory plugin install");
+			console.log("AgentMemory Pro: not installed");
+			console.log("  try without an account: agent-memory pro install");
 		}
 	}
 }
@@ -1001,9 +1016,10 @@ Usage:
   agent-memory plugin uninstall --yes
   agent-memory plugin manage [--no-browser]
 
-The public core remains fully usable without AgentMemory Pro. Interactive install
-opens a loopback website for email activation and a configurable free daily
-agent-session allowance. Memory and session content stay on this device.`);
+The public core remains fully usable without AgentMemory Pro. Install uses a random
+installation identifier and requires no account or email. The free preview includes
+10 recalls and one learning scan per local day; indexing and the Memory Dashboard
+remain available. Memory and session content stay on this device.`);
 }
 
 function pluginCommandFailure(command: string, error: unknown): PluginBootstrapResultV1 {
@@ -1028,24 +1044,24 @@ function pluginCommandFailure(command: string, error: unknown): PluginBootstrapR
 	};
 }
 
-async function cmdPlugin(flags: Record<string, string | boolean>, positional: string[]): Promise<void> {
+async function cmdPlugin(
+	flags: Record<string, string | boolean>,
+	positional: string[],
+): Promise<PluginBootstrapResultV1 | null> {
 	const json = hasFlag(flags, "json");
 	const subcommand = positional[0] ?? "list";
 	if (subcommand === "help" || hasFlag(flags, "help")) {
 		printPluginUsage();
-		return;
+		return null;
 	}
 	const channel = getFlag(flags, "channel") ?? "stable";
 	if (channel !== "stable") {
-		printPluginResult(
-			pluginCommandFailure(
-				subcommand,
-				new PluginBootstrapFailure("channel_invalid", "--channel supports only 'stable'"),
-			),
-			json,
-			false,
+		const failure = pluginCommandFailure(
+			subcommand,
+			new PluginBootstrapFailure("channel_invalid", "--channel supports only 'stable'"),
 		);
-		return;
+		printPluginResult(failure, json, false);
+		return failure;
 	}
 	const allowBrowser = !json && !hasFlag(flags, "no-browser") && Boolean(process.stdin.isTTY && process.stdout.isTTY);
 	const manager = createDefaultPluginBootstrap(VERSION);
@@ -1098,6 +1114,55 @@ async function cmdPlugin(flags: Record<string, string | boolean>, positional: st
 		result = pluginCommandFailure(subcommand, error);
 	}
 	printPluginResult(result, json, allowBrowser && (subcommand === "install" || subcommand === "manage"));
+	return result;
+}
+
+async function printFirstRunProof(): Promise<void> {
+	try {
+		const result = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).run("index", {
+			args: [],
+			flags: {},
+			signal: new AbortController().signal,
+		});
+		if (!result?.ok || !result.data || typeof result.data !== "object") return;
+		const stats = (result.data as { stats?: { discovered?: Record<string, number>; selected?: number } }).stats;
+		if (!stats?.discovered) return;
+		const hosts = [
+			["Claude Code", stats.discovered.claude ?? 0],
+			["Codex", stats.discovered.codex ?? 0],
+			["Pi", stats.discovered.pi ?? 0],
+		] as const;
+		console.log("");
+		console.log("Found local coding history:");
+		for (const [label, count] of hosts) console.log(`  ${label.padEnd(13)} ${count} sessions`);
+		console.log("");
+		console.log(`${stats.selected ?? 0} sessions available for local recall. Nothing was uploaded.`);
+		console.log("");
+		console.log('Try: agent-memory recall "what did we decide about authentication?"');
+		console.log("Open: agent-memory dashboard");
+	} catch {
+		// Personalized proof is helpful but must never turn a successful install into a failure.
+	}
+}
+
+async function cmdPro(flags: Record<string, string | boolean>, positional: string[]): Promise<void> {
+	const subcommand = positional[0];
+	if (!subcommand) {
+		await cmdPlugin(flags, ["list"]);
+		return;
+	}
+	const mapped = subcommand === "upgrade" ? "update" : subcommand;
+	if (!["install", "status", "update", "manage"].includes(mapped)) {
+		const json = hasFlag(flags, "json");
+		const message = `Unknown Pro command: ${subcommand}. Available commands: install, status, upgrade, manage.`;
+		if (json) console.log(JSON.stringify({ error: message }));
+		else console.error(`Error: ${message}`);
+		process.exitCode = 1;
+		return;
+	}
+	const result = await cmdPlugin(flags, [mapped]);
+	if (!hasFlag(flags, "json") && mapped === "install" && ["installed", "upgraded"].includes(result?.result ?? ""))
+		await printFirstRunProof();
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,28 +1170,18 @@ async function cmdPlugin(flags: Record<string, string | boolean>, positional: st
 // ---------------------------------------------------------------------------
 
 function printUsage() {
+	const commandWidth = Math.max(...COMMANDS.map((command) => command.length));
+	const commandList = COMMANDS.map(
+		(command) => `  ${command.padEnd(commandWidth)}  ${COMMAND_DESCRIPTIONS[command]}`,
+	).join("\n");
+
 	console.log(`agent-memory — persistent memory for coding agents
 
 Usage:
   agent-memory <command> [options]
 
 Commands:
-  version     Show binary version
-  install-skills  Install (or --uninstall) bundled skills
-  uninstall-skills  Uninstall bundled skills
-  context     Build context; optionally retrieve memories with --query
-  write       Write to memory files (default: daily; optional --source-uri)
-  read        Read memory files
-  scratchpad  Manage checklist items
-  search      Search across memory files (requires qmd)
-  distil      Generate compact MEMORY.md index from daily logs + topics
-  sync        Re-index and embed all files (requires qmd)
-  init        Initialize memory directory and qmd collection
-  status      Show configuration and status (--probe for a live embeddings check)
-  completion  Install or print shell completion
-  install-hooks  Install managed SessionStart hooks
-  uninstall-hooks  Remove only managed SessionStart hooks
-  plugin      Discover, install, update, or remove optional official plugins
+${commandList}
 
 Global flags:
   --dir <path>   Override memory directory
@@ -1152,8 +1207,10 @@ Examples:
   agent-memory status --json
   agent-memory completion zsh
   agent-memory install-hooks --yes
-  agent-memory plugin status
-  agent-memory plugin install`);
+  agent-memory pro status
+  agent-memory pro install
+  agent-memory recall "what did we decide about authentication?"
+  agent-memory dashboard`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1245,18 +1302,22 @@ async function main() {
 		case "plugin":
 			await cmdPlugin(flags, positional);
 			break;
+		case "pro":
+			await cmdPro(flags, positional);
+			break;
 		default: {
 			const controller = new AbortController();
 			const abort = () => controller.abort();
 			process.once("SIGINT", abort);
 			try {
-				const result = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).run(command, {
+				const pluginCommand = command === "dashboard" ? "web" : command;
+				const result = await new InstalledPluginRuntimeV1({ coreVersion: VERSION }).run(pluginCommand, {
 					args: positional,
 					flags,
 					signal: controller.signal,
 				});
 				if (!result) exitError(`Unknown command: ${command}. Run 'agent-memory help' for usage.`, json);
-				if (!result.ok) exitError(result.error?.message ?? `Plugin command ${command} failed`, json);
+				if (!result.ok) exitError(result.error?.message ?? `Plugin command ${pluginCommand} failed`, json);
 				output(result.data ?? { ok: true }, json);
 			} finally {
 				process.removeListener("SIGINT", abort);

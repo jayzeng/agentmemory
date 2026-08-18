@@ -28,9 +28,18 @@ Coding-agent sessions preserve activity. They do not decide which facts, decisio
 
 AgentMemory is free, open-source software under the MIT License. The core is a local Markdown store with a CLI, optional qmd search, and agent skills, and it remains fully usable without an account or commercial plugin. It does not automatically import every vendor transcript or silently decide what becomes durable. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
 
-### Optional official plugins
+### AgentMemory Pro preview
 
-The MIT-licensed core can discover and host separately distributed, signed first-party plugins while remaining fully useful on its own. Optional plugins may use their own license and distribution terms; their implementation and browser assets are not part of the `myagentmemory` package. `agent-memory plugin list` and `plugin status` report local state. In an interactive terminal, `agent-memory plugin install` opens a nonce-bound loopback page for an email address, resumes the waiting command, verifies signed release metadata and the downloaded bundle, and installs atomically. The free plan uses a configurable daily agent-session allowance keyed by normalized email. D1 stores bounded activation metadata, a credential hash, and opaque SessionStart usage operations; it never receives memory, session content, queries, repository paths, raw agent session identifiers, IP addresses, or user-agent strings. Authentication and payment can extend this free activation flow later. See the [official plugin bootstrap and host contract](docs/official-plugin-bootstrap.md).
+**Core remembers what you save. Pro learns from what you do.** Core remains free, MIT-licensed, and useful forever. Pro is a separately distributed commercial bundle that recalls prior coding sessions, finds repeated corrections, and shows what it learned and why in a private local Memory Dashboard.
+
+```bash
+agent-memory pro install
+agent-memory recall "what did we decide about authentication?"
+agent-memory learn
+agent-memory dashboard
+```
+
+The preview requires no account, email, or payment method. It includes 10 useful recalls and one learning scan per local day; local indexing and the Memory Dashboard remain available. Coding history, memories, queries, repository paths, and raw session identifiers stay on the device. Installation sends only a random installation identifier plus bounded compatibility metadata to obtain the signed release. Paying will remove limits; it will not unlock access to the user's own local data. Low-level `agent-memory plugin` commands remain available for administration and scripting. See [how local privacy, signing, installation, and capability enforcement work](docs/official-plugin-bootstrap.md).
 
 ## Installation
 
@@ -149,6 +158,10 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 | `agent-memory uninstall-hooks [--only <agents>]` | Remove only hooks managed by AgentMemory |
 | `agent-memory init` | Create dirs, detect qmd, setup collection |
 | `agent-memory status` | Show config, qmd status, file counts |
+| `agent-memory pro <install\|status\|upgrade\|manage>` | Install and manage the no-account AgentMemory Pro preview |
+| `agent-memory recall <query>` | Recall decisions and context from prior coding sessions with Pro |
+| `agent-memory learn` | Find repeated corrections worth remembering with Pro |
+| `agent-memory dashboard` | Open the private local Memory Dashboard |
 | `agent-memory plugin <list\|status\|install\|update\|uninstall\|manage>` | Discover and manage optional signed first-party plugins |
 
 Global flags: `--dir <path>` (override directory), `--json` (machine output)
@@ -294,7 +307,7 @@ Publication is tag-driven through `.github/workflows/publish-npm.yml`. Configure
 
 ## Acknowledgments
 
-Inspired by [skyfallsin/pi-mem](https://github.com/skyfallsin/pi-mem). Semantic search is powered by [qmd](https://github.com/tobi/qmd).
+AgentMemory contains portions adapted from [pi-mem](https://github.com/jo-inc/pi-mem), used under its MIT License; the upstream copyright notice is preserved in [LICENSE](LICENSE). Semantic search is powered by [qmd](https://github.com/tobi/qmd).
 
 ## Changelog
 

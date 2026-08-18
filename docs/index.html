@@ -365,6 +365,27 @@
 			box-shadow: 0 14px 30px -24px rgba(13, 155, 122, 0.55);
 		}
 
+		.pro-section {
+			margin-top: 22px;
+			padding: 28px;
+			background: linear-gradient(145deg, #172033, #24344c);
+			border-radius: 20px;
+			color: #f7fffc;
+			box-shadow: var(--card-shadow);
+		}
+
+		.pro-section .kicker { color: #7ee0c6; }
+		.pro-section h2 { margin: 0; font-size: clamp(1.55rem, 3vw, 2.2rem); }
+		.pro-lede { max-width: 760px; margin: 10px 0 0; color: #cbd5e3; }
+		.pro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+		.pro-card { padding: 18px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; background: rgba(255, 255, 255, 0.06); }
+		.pro-card h3 { margin: 0; font-size: 1.08rem; }
+		.pro-card p { margin: 8px 0 0; color: #cbd5e3; }
+		.pro-card ul { margin: 12px 0 0; padding-left: 1.2rem; color: #e8eef7; }
+		.pro-command { margin-top: 20px; }
+		.pro-trust { margin: 14px 0 0; color: #cbd5e3; font-size: 0.88rem; }
+		.pro-trust a { color: #fff; }
+
 		.field-report h2 {
 			margin: 0;
 			font-size: clamp(1.35rem, 2.6vw, 1.9rem);
@@ -534,6 +555,8 @@
 			.why-grid {
 				grid-template-columns: 1fr;
 			}
+
+			.pro-grid { grid-template-columns: 1fr; }
 		}
 
 		@media (max-width: 860px) {
@@ -571,6 +594,7 @@
 				<span>agentmemory</span>
 			</div>
 			<nav class="nav">
+				<a href="#pro">Pro</a>
 				<a href="https://github.com/jayzeng/agentmemory">GitHub</a>
 				<a href="https://www.jayzeng.com/writing/agentmemory-field-report/">Field report</a>
 				<a href="https://github.com/jayzeng/agentmemory#installation">Install</a>
@@ -602,6 +626,44 @@
 				<span class="agent-pill">Cursor</span>
 				<span class="agent-pill">Agent CLI</span>
 			</div>
+		</section>
+
+		<section class="pro-section reveal" id="pro" aria-labelledby="pro-title">
+			<p class="kicker">AgentMemory Core and Pro</p>
+			<h2 id="pro-title">Core remembers what you save. Pro learns from what you do.</h2>
+			<p class="pro-lede">
+				Core gives durable memory an inspectable home. Pro recalls prior coding sessions, spots repeated
+				corrections, and lets you review what it learned locally.
+			</p>
+			<div class="pro-grid">
+				<article class="pro-card">
+					<h3>Core — free and open source</h3>
+					<p>You choose what to remember in local Markdown that works across coding agents.</p>
+					<ul>
+						<li>Scratch, daily, topic, and durable memory</li>
+						<li>Explicit retrieval with optional qmd search</li>
+						<li>No account and no commercial dependency</li>
+					</ul>
+				</article>
+				<article class="pro-card">
+					<h3>Pro — local recall and learning</h3>
+					<p>Find decisions in prior sessions and turn repeated evidence into reviewable memory.</p>
+					<ul>
+						<li>Recall coding history across supported agents</li>
+						<li>Learn from repeated corrections and rediscovery</li>
+						<li>See what it learned and why in the Memory Dashboard</li>
+					</ul>
+				</article>
+			</div>
+			<div class="command pro-command">
+				<code id="cmd-pro">agent-memory pro install</code>
+				<button class="copy" type="button" data-copy="cmd-pro">Copy</button>
+			</div>
+			<p class="pro-trust">
+				<strong>Try Pro — no account required.</strong> The free preview includes 10 recalls and one learning scan per day.
+				Indexing and the Memory Dashboard remain available; coding history stays on this computer.
+				<a href="https://github.com/jayzeng/agentmemory/blob/main/docs/official-plugin-bootstrap.md">How local privacy works</a>.
+			</p>
 		</section>
 
 		<section class="field-report reveal" aria-labelledby="field-report-title">

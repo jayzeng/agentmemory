@@ -23,6 +23,8 @@ import {
 	type PluginCommandContextV1,
 	type PluginCommandResultV1,
 	type PluginCommandV1,
+	type PluginContextProviderV1,
+	type PluginContextSectionV1,
 	type PluginEntitlementStatusV1,
 	type PluginMemoryCorrectionV1,
 	type PluginMemoryWriteV1,
@@ -35,6 +37,11 @@ import { TemporaryPluginBackend } from "./plugin-service.js";
 
 interface RegisteredCommand {
 	command: PluginCommandV1;
+	pluginId: string;
+}
+
+interface RegisteredContextProvider {
+	provider: PluginContextProviderV1;
 	pluginId: string;
 }
 
@@ -130,6 +137,7 @@ export class InstalledPluginRuntimeV1 {
 	private readonly backend: PluginBootstrapBackendV1;
 	private readonly commands = new Map<string, RegisteredCommand>();
 	private readonly hooks: PluginSessionStartHookV1[] = [];
+	private readonly contextProviders: RegisteredContextProvider[] = [];
 	private loaded = false;
 
 	constructor(private readonly options: PluginRuntimeOptionsV1) {
@@ -202,6 +210,49 @@ export class InstalledPluginRuntimeV1 {
 		}
 	}
 
+	async provideContext(context: {
+		host: string;
+		cwd?: string;
+		query?: string;
+		signal: AbortSignal;
+	}): Promise<PluginContextSectionV1[]> {
+		if (!(await this.load()) || this.contextProviders.length === 0) return [];
+		const entitlement = await this.refreshEntitlement();
+		const sections: PluginContextSectionV1[] = [];
+		for (const registered of this.contextProviders) {
+			if (!isPluginCapabilityEnabled(entitlement, registered.provider.requiredCapability)) continue;
+			const provided = await registered.provider.provide(context);
+			if (!Array.isArray(provided) || provided.length > 16)
+				throw new PluginBootstrapFailure(
+					"plugin_context_invalid",
+					`Plugin ${registered.pluginId} returned invalid context sections`,
+				);
+			for (const section of provided) {
+				if (
+					!section ||
+					typeof section.id !== "string" ||
+					section.id.length === 0 ||
+					section.id.length > 256 ||
+					typeof section.label !== "string" ||
+					section.label.length === 0 ||
+					section.label.length > 256 ||
+					typeof section.content !== "string" ||
+					Buffer.byteLength(section.content, "utf-8") > 64 * 1024 ||
+					(section.artifactPath !== undefined &&
+						(typeof section.artifactPath !== "string" || section.artifactPath.length > 4_096)) ||
+					(section.metadata !== undefined &&
+						(!section.metadata || typeof section.metadata !== "object" || Array.isArray(section.metadata)))
+				)
+					throw new PluginBootstrapFailure(
+						"plugin_context_invalid",
+						`Plugin ${registered.pluginId} returned an invalid context section`,
+					);
+				sections.push(structuredClone(section));
+			}
+		}
+		return sections;
+	}
+
 	private createHost(manifest: AgentMemoryPluginManifestV1): AgentMemoryPluginHostV1 {
 		const descriptors = new Map(manifest.commands.map((command) => [command.name, command]));
 		const stateRoot = path.join(this.store.root, "state");
@@ -241,6 +292,19 @@ export class InstalledPluginRuntimeV1 {
 						`Plugin ${manifest.id} registered a hook with an undeclared capability`,
 					);
 				this.hooks.push(hook);
+			},
+			registerContextProvider: (provider) => {
+				if (!(manifest.capabilities ?? []).includes(provider.requiredCapability))
+					throw new PluginBootstrapFailure(
+						"plugin_context_invalid",
+						`Plugin ${manifest.id} registered a context provider with an undeclared capability`,
+					);
+				if (!provider.name || this.contextProviders.some((item) => item.provider.name === provider.name))
+					throw new PluginBootstrapFailure(
+						"plugin_context_invalid",
+						`Plugin context provider ${provider.name || "(unnamed)"} is invalid or already registered`,
+					);
+				this.contextProviders.push({ provider, pluginId: manifest.id });
 			},
 			getStateDirectory: () => stateDirectory,
 			getMemoryDirectory: () => {
