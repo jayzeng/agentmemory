@@ -634,7 +634,15 @@ describe("CLI subprocess", () => {
 	test("non-interactive plugin install attempts anonymous preview access without requiring identity", () => {
 		const pluginDir = path.join(tmpDir, "plugin-install");
 		const result = Bun.spawnSync(
-			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "plugin", "install", "--json"],
+			[
+				"bun",
+				"--preload",
+				path.join(__dirname, "fixtures", "plugin-service-unavailable.ts"),
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"plugin",
+				"install",
+				"--json",
+			],
 			{
 				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
 				stdout: "pipe",
