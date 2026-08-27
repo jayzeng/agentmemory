@@ -986,6 +986,13 @@ export function installSkills(): InstallSkillsReport {
 			homeMarker: path.join(homeDir, ".cursor"),
 		},
 		{
+			label: "pi extension",
+			srcDir: path.join(skillsDir, "pi"),
+			destDir: path.join(homeDir, ".pi", "extensions"),
+			homeMarker: path.join(homeDir, ".pi"),
+			detectCommand: "pi",
+		},
+		{
 			label: "Qoder skill",
 			srcDir: path.join(skillsDir, "qoder"),
 			destDir: path.join(homeDir, ".qoder", "skills", "agent-memory"),
@@ -1027,15 +1034,17 @@ export function installSkills(): InstallSkillsReport {
 		detected.push({ label: target.label, homeMarker: target.homeMarker });
 		checked.push({ label: target.label, status: "detected" });
 
-		const skillFile = path.join(target.srcDir, "SKILL.md");
+		const isPiExt = target.label === "pi extension";
+		const skillFile = path.join(target.srcDir, isPiExt ? "extension.ts" : "SKILL.md");
 		if (!fs.existsSync(skillFile)) {
 			skipped.push({ label: target.label, reason: `${skillFile} not found` });
 			continue;
 		}
 
 		fs.mkdirSync(target.destDir, { recursive: true });
-		fs.copyFileSync(skillFile, path.join(target.destDir, "SKILL.md"));
-		installed.push({ label: target.label, path: path.join(target.destDir, "SKILL.md") });
+		const destFile = path.join(target.destDir, isPiExt ? "agent-memory.ts" : "SKILL.md");
+		fs.copyFileSync(skillFile, destFile);
+		installed.push({ label: target.label, path: destFile });
 	}
 
 	return {

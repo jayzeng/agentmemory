@@ -101,10 +101,9 @@ function hookTargets(homeDir: string): HookTargetInfo[] {
 			key: "pi",
 			label: "pi",
 			homeMarker: path.join(homeDir, ".pi"),
-			detectFiles: [],
+			detectFiles: [path.join(homeDir, ".pi", "extensions")],
 			detectCommand: "pi",
-			supported: false,
-			unsupportedReason: "no documented SessionStart hook mechanism",
+			supported: true,
 		},
 		{
 			key: "qoder",
@@ -316,6 +315,52 @@ function installOpencodeInstructions(homeDir: string): HookInstallResult {
 	return { key: "opencode", label: "opencode", installed: true, path: configPath, backup };
 }
 
+const PI_EXTENSION_SOURCE = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+/**
+ * AgentMemory extension for Pi Coding Agent.
+ *
+ * Subscribes to session_start and runs \`agent-memory context\` to inject
+ * persistent memory at the start of every session.
+ */
+export default function (pi: ExtensionAPI) {
+  pi.on("session_start", async (_event, ctx) => {
+    try {
+      const result = await pi.exec("agent-memory", ["context"], {
+        timeout: 10000,
+      });
+      if (result.stdout?.trim()) {
+        ctx.ui.notify(
+          \`Memory loaded: \${result.stdout.split("\\n").length} lines\`,
+          "info",
+        );
+      }
+    } catch {
+      // agent-memory not installed or not on PATH — skip silently
+    }
+  });
+}`;
+
+function installPiExtension(homeDir: string): HookInstallResult {
+	const extDir = path.join(homeDir, ".pi", "extensions");
+	const destPath = path.join(extDir, "agent-memory.ts");
+	if (fs.existsSync(destPath)) {
+		return { key: "pi", label: "pi", installed: false, path: destPath, reason: "already installed" };
+	}
+	fs.mkdirSync(extDir, { recursive: true });
+	fs.writeFileSync(destPath, PI_EXTENSION_SOURCE, "utf-8");
+	return { key: "pi", label: "pi", installed: true, path: destPath };
+}
+
+function uninstallPiExtension(homeDir: string): HookInstallResult {
+	const destPath = path.join(homeDir, ".pi", "extensions", "agent-memory.ts");
+	if (!fs.existsSync(destPath)) {
+		return { key: "pi", label: "pi", installed: false, reason: "not installed" };
+	}
+	fs.unlinkSync(destPath);
+	return { key: "pi", label: "pi", installed: true, path: destPath };
+}
+
 function installQoderHook(homeDir: string): HookInstallResult {
 	const settingsPath = path.join(homeDir, ".qoder", "settings.json");
 	const backup = backupOnce(settingsPath);
@@ -435,6 +480,7 @@ export function installHooks(agents: Set<HookAgentKey>): InstallHooksReport {
 			else if (target.key === "cursor") results.push(installCursorRule(homeDir));
 			else if (target.key === "opencode") results.push(installOpencodeInstructions(homeDir));
 			else if (target.key === "qoder") results.push(installQoderHook(homeDir));
+			else if (target.key === "pi") results.push(installPiExtension(homeDir));
 		} catch (err) {
 			results.push({
 				key: target.key,
@@ -557,7 +603,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 			error: "Home directory not found. Set HOME (or USERPROFILE on Windows) and retry.",
 		};
 	}
-	const keys: HookAgentKey[] = ["claude", "codex", "cursor", "opencode", "qoder"];
+	const keys: HookAgentKey[] = ["claude", "codex", "cursor", "opencode", "qoder", "pi"];
 	const results: HookInstallResult[] = [];
 	for (const key of keys) {
 		if (agents && !agents.has(key)) continue;
@@ -567,6 +613,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 			else if (key === "cursor") results.push(uninstallCursorRule(homeDir));
 			else if (key === "opencode") results.push(uninstallOpencodeInstructions(homeDir));
 			else if (key === "qoder") results.push(uninstallQoderHook(homeDir));
+			else if (key === "pi") results.push(uninstallPiExtension(homeDir));
 		} catch (err) {
 			results.push({
 				key,

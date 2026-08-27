@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install (or uninstall) agent-memory skills for Claude Code, Codex, Cursor, and Agent CLI.
+# Install (or uninstall) agent-memory skills for Claude Code, Codex, Cursor, Agent CLI, pi, and Qoder.
 # Usage: bash scripts/install-skills.sh [--uninstall]
 
 set -euo pipefail
@@ -70,6 +70,7 @@ SKILL_LABELS=(
   "Codex skill"
   "Cursor skill"
   "Agent CLI skill"
+  "Qoder skill"
 )
 
 if $UNINSTALL; then
@@ -78,6 +79,13 @@ if $UNINSTALL; then
   for i in "${!SKILL_DIRS[@]}"; do
     uninstall_skill "${SKILL_LABELS[$i]}" "${SKILL_DIRS[$i]}"
   done
+  # pi extension (has .ts not .md)
+  if [ -f "$HOME/.pi/extensions/agent-memory.ts" ]; then
+    rm "$HOME/.pi/extensions/agent-memory.ts"
+    echo "Uninstalled pi extension: $HOME/.pi/extensions/agent-memory.ts"
+  else
+    echo "Skipping pi extension (not installed)"
+  fi
   echo ""
   echo "Done."
 else
@@ -86,6 +94,24 @@ else
   install_skill "Cursor skill" "$PROJECT_DIR/skills/cursor" "$HOME/.cursor/skills/agent-memory" "$HOME/.cursor"
   install_skill "Agent CLI skill" "$PROJECT_DIR/skills/agent" "$HOME/.agents/skills/agent-memory" "$HOME/.agents"
   install_skill "Qoder skill" "$PROJECT_DIR/skills/qoder" "$HOME/.qoder/skills/agent-memory" "$HOME/.qoder" '[ -f "$HOME/.qoder/settings.json" ] || [ -f "$HOME/.qoder/settings.local.json" ] || command_exists qoder'
+
+  # pi extension (copies extension.ts → agent-memory.ts)
+  echo "Detecting pi extension..."
+  if [ ! -d "$HOME/.pi" ]; then
+    echo "Not found ($HOME/.pi not found)"
+  elif [ -z "$(command_exists pi)" ] && [ ! -d "$HOME/.pi/extensions" ]; then
+    echo "Not found (not detected)"
+  else
+    echo "Found"
+    if [ -d "$PROJECT_DIR/skills/pi" ]; then
+      mkdir -p "$HOME/.pi/extensions"
+      cp "$PROJECT_DIR/skills/pi/extension.ts" "$HOME/.pi/extensions/agent-memory.ts"
+      echo "Installed pi extension: $HOME/.pi/extensions/agent-memory.ts"
+    else
+      echo "Skipping pi extension ($PROJECT_DIR/skills/pi not found)"
+    fi
+  fi
+
   echo ""
   echo "Done."
 fi
