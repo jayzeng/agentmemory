@@ -36,7 +36,7 @@ function commandExists(command: string): boolean {
 // Hook installers (SessionStart auto-injection)
 // ---------------------------------------------------------------------------
 
-export type HookAgentKey = "claude" | "codex" | "cursor" | "opencode" | "pi";
+export type HookAgentKey = "claude" | "codex" | "cursor" | "opencode" | "pi" | "qoder";
 
 export interface HookTargetInfo {
 	key: HookAgentKey;
@@ -105,6 +105,17 @@ function hookTargets(homeDir: string): HookTargetInfo[] {
 			detectCommand: "pi",
 			supported: false,
 			unsupportedReason: "no documented SessionStart hook mechanism",
+		},
+		{
+			key: "qoder",
+			label: "Qoder",
+			homeMarker: path.join(homeDir, ".qoder"),
+			detectFiles: [
+				path.join(homeDir, ".qoder", "settings.json"),
+				path.join(homeDir, ".qoder", "settings.local.json"),
+			],
+			detectCommand: "qoder",
+			supported: true,
 		},
 	];
 }
@@ -305,6 +316,88 @@ function installOpencodeInstructions(homeDir: string): HookInstallResult {
 	return { key: "opencode", label: "opencode", installed: true, path: configPath, backup };
 }
 
+function installQoderHook(homeDir: string): HookInstallResult {
+	const settingsPath = path.join(homeDir, ".qoder", "settings.json");
+	const backup = backupOnce(settingsPath);
+	const settings = readJsonConfig(settingsPath);
+	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
+	const sessionStart = Array.isArray(hooks.SessionStart) ? [...(hooks.SessionStart as unknown[])] : [];
+
+	const command = "agent-memory context";
+	let managed = 0;
+	let updated = 0;
+	for (const group of sessionStart) {
+		if (!group || typeof group !== "object") continue;
+		const g = group as Record<string, unknown>;
+		const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
+		for (const hook of list) {
+			if (!hook || typeof hook !== "object") continue;
+			const managedHook = hook as Record<string, unknown>;
+			if (managedHook[HOOK_MARKER_JSON] !== true) continue;
+			managed++;
+			if (managedHook.command !== command) {
+				managedHook.command = command;
+				updated++;
+			}
+		}
+	}
+	if (managed && !updated) {
+		return { key: "qoder", label: "Qoder", installed: false, path: settingsPath, reason: "already installed" };
+	}
+	if (updated) {
+		hooks.SessionStart = sessionStart;
+		settings.hooks = hooks;
+		writeJson(settingsPath, settings);
+		return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup, reason: "updated" };
+	}
+
+	sessionStart.push({
+		hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }],
+	});
+	hooks.SessionStart = sessionStart;
+	settings.hooks = hooks;
+	writeJson(settingsPath, settings);
+	return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup };
+}
+
+function uninstallQoderHook(homeDir: string): HookInstallResult {
+	const settingsPath = path.join(homeDir, ".qoder", "settings.json");
+	if (!fs.existsSync(settingsPath)) {
+		return { key: "qoder", label: "Qoder", installed: false, reason: "not installed" };
+	}
+	const settings = readJsonConfig(settingsPath);
+	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
+	const sessionStart = Array.isArray(hooks.SessionStart) ? (hooks.SessionStart as unknown[]) : [];
+	let removed = 0;
+	const filtered = sessionStart
+		.map((group) => {
+			if (!group || typeof group !== "object") return group;
+			const g = { ...(group as Record<string, unknown>) };
+			const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
+			const kept = list.filter((h) => {
+				const isOurs = h && typeof h === "object" && (h as Record<string, unknown>)[HOOK_MARKER_JSON] === true;
+				if (isOurs) removed++;
+				return !isOurs;
+			});
+			g.hooks = kept;
+			return g;
+		})
+		.filter((group) => {
+			if (!group || typeof group !== "object") return true;
+			const g = group as Record<string, unknown>;
+			return Array.isArray(g.hooks) && (g.hooks as unknown[]).length > 0;
+		});
+	if (removed === 0) {
+		return { key: "qoder", label: "Qoder", installed: false, reason: "not installed" };
+	}
+	hooks.SessionStart = filtered;
+	if (filtered.length === 0) delete (hooks as Record<string, unknown>).SessionStart;
+	if (Object.keys(hooks).length === 0) delete (settings as Record<string, unknown>).hooks;
+	else settings.hooks = hooks;
+	writeJson(settingsPath, settings);
+	return { key: "qoder", label: "Qoder", installed: true, path: settingsPath };
+}
+
 export function installHooks(agents: Set<HookAgentKey>): InstallHooksReport {
 	const { homeDir, targets } = detectHookAgents();
 	if (!homeDir) {
@@ -341,6 +434,7 @@ export function installHooks(agents: Set<HookAgentKey>): InstallHooksReport {
 			else if (target.key === "codex") results.push(installCodexHook(homeDir));
 			else if (target.key === "cursor") results.push(installCursorRule(homeDir));
 			else if (target.key === "opencode") results.push(installOpencodeInstructions(homeDir));
+			else if (target.key === "qoder") results.push(installQoderHook(homeDir));
 		} catch (err) {
 			results.push({
 				key: target.key,
@@ -463,7 +557,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 			error: "Home directory not found. Set HOME (or USERPROFILE on Windows) and retry.",
 		};
 	}
-	const keys: HookAgentKey[] = ["claude", "codex", "cursor", "opencode"];
+	const keys: HookAgentKey[] = ["claude", "codex", "cursor", "opencode", "qoder"];
 	const results: HookInstallResult[] = [];
 	for (const key of keys) {
 		if (agents && !agents.has(key)) continue;
@@ -472,6 +566,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 			else if (key === "codex") results.push(uninstallCodexHook(homeDir));
 			else if (key === "cursor") results.push(uninstallCursorRule(homeDir));
 			else if (key === "opencode") results.push(uninstallOpencodeInstructions(homeDir));
+			else if (key === "qoder") results.push(uninstallQoderHook(homeDir));
 		} catch (err) {
 			results.push({
 				key,

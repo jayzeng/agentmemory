@@ -986,6 +986,17 @@ export function installSkills(): InstallSkillsReport {
 			homeMarker: path.join(homeDir, ".cursor"),
 		},
 		{
+			label: "Qoder skill",
+			srcDir: path.join(skillsDir, "qoder"),
+			destDir: path.join(homeDir, ".qoder", "skills", "agent-memory"),
+			homeMarker: path.join(homeDir, ".qoder"),
+			detectFiles: [
+				path.join(homeDir, ".qoder", "settings.json"),
+				path.join(homeDir, ".qoder", "settings.local.json"),
+			],
+			detectCommand: "qoder",
+		},
+		{
 			label: "Agent CLI skill",
 			srcDir: path.join(skillsDir, "agent"),
 			destDir: path.join(homeDir, ".agents", "skills", "agent-memory"),
