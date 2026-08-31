@@ -63,7 +63,7 @@ function freeEntitlement(): PluginEntitlementStatusV1 {
 		capabilities: {
 			"session-index": { enabled: true },
 			recall: { enabled: true, quota: { limit: 20, window: "day", scope: "device" } },
-			"session-worker": { enabled: true },
+			"session-worker": { enabled: false },
 			learning: { enabled: true, quota: { limit: 5, window: "day", scope: "device" } },
 			"retrieval-evaluation": { enabled: true },
 			"operational-metrics": { enabled: true },
@@ -71,7 +71,7 @@ function freeEntitlement(): PluginEntitlementStatusV1 {
 			"memory-explorer": { enabled: true },
 		},
 		reason:
-			"Included at no cost: 20 recalls and 5 learning scans per local day; local indexing, worker, and dashboard access remain available",
+			"Included at no cost: 20 recalls and 5 learning scans per local day; local indexing and dashboard access remain available",
 	};
 }
 
@@ -457,13 +457,18 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 		if (
 			value.entitlement.plan !== "free" ||
 			value.entitlement.state !== "active" ||
+			value.entitlement.capabilities.recall?.enabled !== true ||
 			!recallQuota ||
+			recallQuota.limit !== 20 ||
 			recallQuota.scope !== "device" ||
 			recallQuota.window !== "day" ||
+			value.entitlement.capabilities.learning?.enabled !== true ||
 			!learningQuota ||
+			learningQuota.limit !== 5 ||
 			learningQuota.scope !== "device" ||
 			learningQuota.window !== "day" ||
 			value.entitlement.capabilities["session-index"]?.enabled !== true ||
+			value.entitlement.capabilities["session-worker"]?.enabled !== false ||
 			value.entitlement.capabilities["web-console"]?.enabled !== true
 		)
 			throw new PluginBootstrapFailure("service_response_invalid", "The free preview policy is invalid");

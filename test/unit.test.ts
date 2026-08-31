@@ -2538,8 +2538,8 @@ describe("temporary plugin activation and runtime", () => {
 				features: ["session-intelligence", "web-console"],
 				capabilities: {
 					"session-index": { enabled: true },
-					recall: { enabled: true, quota: { limit: 10, window: "day", scope: "device" } },
-					learning: { enabled: true, quota: { limit: 1, window: "day", scope: "device" } },
+					recall: { enabled: true, quota: { limit: 20, window: "day", scope: "device" } },
+					learning: { enabled: true, quota: { limit: 5, window: "day", scope: "device" } },
 					"session-worker": { enabled: false },
 					"web-console": { enabled: true },
 				},
@@ -2582,13 +2582,23 @@ describe("temporary plugin activation and runtime", () => {
 					);
 				}) as typeof fetch,
 			});
+			entitlement.capabilities["session-worker"] = { enabled: true };
+			await expect(
+				backend.resolveAccess({
+					bundleId: OFFICIAL_BUNDLE_ID,
+					channel: "stable",
+					allowAuthentication: true,
+				}),
+			).rejects.toMatchObject({ code: "service_response_invalid" });
+			expect(fs.existsSync(path.join(root, "credentials", "activation.json"))).toBe(false);
+			entitlement.capabilities["session-worker"] = { enabled: false };
 			const access = await backend.resolveAccess({
 				bundleId: OFFICIAL_BUNDLE_ID,
 				channel: "stable",
 				allowAuthentication: true,
 			});
 			expect(access.kind).toBe("granted");
-			expect(activations).toBe(1);
+			expect(activations).toBe(2);
 			expect((await backend.getLocalEntitlement()).capabilities.learning.enabled).toBe(true);
 			const record = path.join(root, "credentials", "activation.json");
 			expect(fs.statSync(record).mode & 0o777).toBe(0o600);

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- Enforced the documented free-preview contract in trusted Core code: 20 recalls and 5 learning scans per device-local day, with automatic background capture disabled.
+
 ## [0.5.0] - 2026-08-30
 
 ### Added

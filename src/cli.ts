@@ -1895,7 +1895,7 @@ function printProPitch(mode: "first-run" | "reinstall"): void {
 		`  ${colorize("Private by default", "cyan")}       Memory and session content stay on this device — no account required.`,
 	);
 	console.log(
-		`  ${colorize("Included at no cost:", "green")} ${colorize("20 recalls + 5 learning scans per day", "bold")}. Local indexing, worker, and dashboard remain free.`,
+		`  ${colorize("Included at no cost:", "green")} ${colorize("20 recalls + 5 learning scans per day", "bold")}. Local indexing and dashboard remain free.`,
 	);
 	console.log("");
 }
