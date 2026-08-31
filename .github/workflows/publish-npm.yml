@@ -48,6 +48,8 @@ jobs:
       - run: npm run test:unit
       - run: npm run test:cli
       - run: npm run test:eval
+      - run: npm run test:token-savings
+      - run: npm run test:harness
       - run: npm audit --audit-level=moderate
       - run: npm publish --access public
         env:

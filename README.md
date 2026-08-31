@@ -1,45 +1,54 @@
 # AgentMemory
 
-**Memory that survives the agent.** AgentMemory is a local, user-owned state layer for [Claude Code](https://claude.ai/code), [OpenAI Codex](https://github.com/openai/codex), [Cursor](https://cursor.com), and Agent (Cursor CLI). Keep scratch work, daily evidence, topic notes, and durable decisions as plain Markdown, then retrieve what matters with optional [qmd](https://github.com/tobi/qmd) search.
+**Your agent forgets everything. AgentMemory doesn't.**
+
+Every new session with [Claude Code](https://claude.ai/code), [Codex](https://github.com/openai/codex), or [Cursor](https://cursor.com) starts cold — the decisions you made yesterday are gone, and you explain them again. AgentMemory gives your agents a persistent, local, plain-Markdown memory that survives across sessions and models.
+
+```bash
+npm install -g myagentmemory
+agent-memory init      # wizard: skills, hooks, seed memory, live demo
+```
+
+Then open your agent and ask *"what do you remember about me?"* — that's the wow.
 
 [![npm version](https://img.shields.io/npm/v/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
 [![npm downloads](https://img.shields.io/npm/dm/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
 [![license](https://img.shields.io/npm/l/myagentmemory)](LICENSE)
 [![website](https://img.shields.io/badge/website-jayzeng.github.io%2Fagentmemory-0d9b7a)](https://jayzeng.github.io/agentmemory/)
 
-[Website and quickstart](https://jayzeng.github.io/agentmemory/) · [Field report: lessons from 1,000+ coding-agent sessions](https://www.jayzeng.com/writing/agentmemory-field-report/) · [Install](#installation) · [CLI commands](#cli-commands) · [How it works](#how-it-works)
+[Website and quickstart](https://jayzeng.github.io/agentmemory/) · [Field report: 1,000+ coding-agent sessions](https://www.jayzeng.com/writing/agentmemory-field-report/) · [Install](#installation) · [CLI commands](#cli-commands) · [How it works](#how-it-works)
 
-> **Field report:** “A session records what the agent did. Memory is a judgment about what the next agent should know.” Read [What 1000+ coding agent sessions taught me about LLM memory](https://www.jayzeng.com/writing/agentmemory-field-report/).
+## Why AgentMemory
 
-## Why AgentMemory?
+- AgentMemory injects your decisions, scratchpad, and daily log at session start — no copy-paste, no re-explaining.
+- Repeated corrections become durable memory you can inspect and undo (Pro).
+- Every memory is a plain Markdown file you own. Memory content, session content, queries, and repository paths stay on this machine.
 
-Coding-agent sessions preserve activity. They do not decide which facts, decisions, and follow-ups should remain useful tomorrow. AgentMemory gives that accumulated state explicit lifetimes, a user-controlled home, and a path back into future work.
+AgentMemory does not provide a Python SDK, does not provide a vector database, and does not provide a knowledge graph. It is a local Markdown store with a CLI, agent skills, and optional full-text and semantic search via [qmd](https://github.com/tobi/qmd). See [product boundary](docs/product-boundary.md) for full scope.
 
-- **Different lifetimes and scopes** — route short-lived follow-ups, chronological evidence, continuing topics, and durable decisions to the right destination.
-- **Curated continuity** — retain judgments that should affect future work instead of warehousing every transcript and abandoned path.
-- **Plain Markdown, local-first** — read, edit, diff, back up, or delete every memory. No database, cloud service, or lock-in.
-- **Optional retrieval** — skills load base context at session start and search related memories explicitly when a task needs them; qmd adds keyword, semantic, and hybrid search.
-- **Shared across agents** — Claude Code, Codex, Cursor, and Agent can use the same store even as models and harnesses change.
-- **Correctable state** — provenance, temporal status, secret screening, supersession, and forgetting help keep retained memory aligned with reality.
+> **Field report:** "A session records what the agent did. Memory is a judgment about what the next agent should know." Read [What 1,000+ coding agent sessions taught me about LLM memory](https://www.jayzeng.com/writing/agentmemory-field-report/).
 
-> **Naming:** `agentmemory` is the GitHub repo (and Homebrew tap), `myagentmemory` is the npm package, and `agent-memory` is the installed CLI binary. Also known as *coding agent memory* or *AI coding memory*.
-
-### Product boundary
-
-AgentMemory is free, open-source software under the MIT License. The core is a local Markdown store with a CLI, optional qmd search, and agent skills, and it remains fully usable without an account or commercial plugin. It does not automatically import every vendor transcript or silently decide what becomes durable. It is not a Python SDK, vector database, or knowledge graph. The Markdown files remain the source of truth.
+> **Naming:** `agentmemory` is the GitHub repo (and Homebrew tap), `myagentmemory` is the npm package, and `agent-memory` is the installed CLI binary. Free and MIT-licensed. See [product boundary](docs/product-boundary.md) for what it isn't.
 
 ### AgentMemory Pro preview
 
-**Core remembers what you save. Pro learns from what you do.** Core remains free, MIT-licensed, and useful forever. Pro is a separately distributed commercial bundle that recalls prior coding sessions, finds repeated corrections, and shows what it learned and why in a private local Memory Dashboard.
+**Core remembers what you save. Pro learns from what you do.** Core remains free, MIT-licensed, and useful forever. Pro adds three things:
+
+- **Remember past sessions** — ask *"what did we decide about auth?"* across Claude Code, Codex, and Cursor.
+- **Learn from your patterns** — turn repeated corrections into memory you can inspect and undo.
+- **Private by default** — memory and session content index locally. Pro installation uses a pseudonymous installation identifier and bounded compatibility metadata, never your memory or session content.
+
+Preview what Pro would find in your existing sessions *before* installing anything:
 
 ```bash
-agent-memory pro install
+agent-memory pro preview        # local-only scan, previews up to 50 sessions/day
+agent-memory pro install        # free preview, no account required
 agent-memory recall "what did we decide about authentication?"
 agent-memory learn
 agent-memory dashboard
 ```
 
-The preview requires no account, email, or payment method. It includes 10 useful recalls and one learning scan per local day; local indexing and the Memory Dashboard remain available. Coding history, memories, queries, repository paths, and raw session identifiers stay on the device. Installation sends only a random installation identifier plus bounded compatibility metadata to obtain the signed release. Paying will remove limits; it will not unlock access to the user's own local data. Low-level `agent-memory plugin` commands remain available for administration and scripting. See [how local privacy, signing, installation, and capability enforcement work](docs/official-plugin-bootstrap.md).
+Pre-install preview: up to 50 local sessions per day. Free installed preview: 20 recalls + 5 learning scans per local day. Memory, session, query, and repository content stay on your machine; installation sends only a pseudonymous identifier and bounded compatibility metadata. Full detail on [privacy, signing, and installation](docs/official-plugin-bootstrap.md).
 
 ## Installation
 
@@ -154,7 +163,7 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 | `agent-memory install-skills` | Install bundled SKILL.md files into local agent directories |
 | `agent-memory uninstall-skills` | Uninstall bundled SKILL.md files from local agent directories |
 | `agent-memory completion [bash\|zsh\|fish\|powershell] [--stdout]` | Install or print shell completion |
-| `agent-memory install-hooks [--yes] [--only <agents>]` | Install managed session-start memory hooks |
+| `agent-memory install-hooks [--yes] [--only <agents>]` | Install managed context and memory-write reminder hooks |
 | `agent-memory uninstall-hooks [--only <agents>]` | Remove only hooks managed by AgentMemory |
 | `agent-memory init` | Create dirs, detect qmd, setup collection |
 | `agent-memory status` | Show config, qmd status, file counts |
@@ -215,7 +224,7 @@ The context builder emits the following sections in priority order. Installed sk
 
 Total output, including headings and truncation notices, is hard-capped at 16,000 characters. Explicitly untrusted, expired, superseded, revoked, or retired blocks are excluded; legacy secret-like values are redacted before injection. When qmd is unavailable, the relevant-memory step is skipped and the rest still works.
 
-Claude Code loads base context through the skill's shell injection. Codex, Cursor, and Agent run the same base command at session start. The bundled skills use explicit search when a task relates to prior work; they make no host-level guarantee of automatic retrieval.
+Supported detected hosts can receive managed automatic context hooks after `agent-memory install-hooks`; Claude Code also receives a periodic memory-write reminder. Bundled skills remain the portable fallback and use explicit search when a task relates to prior work.
 
 ### Selective injection
 
@@ -308,6 +317,10 @@ Publication is tag-driven through `.github/workflows/publish-npm.yml`. Configure
 ## Acknowledgments
 
 AgentMemory contains portions adapted from [pi-mem](https://github.com/jo-inc/pi-mem), used under its MIT License; the upstream copyright notice is preserved in [LICENSE](LICENSE). Semantic search is powered by [qmd](https://github.com/tobi/qmd).
+
+## Copyright and commercial licensing
+
+AgentMemory Core is released under the MIT License. Jay Zeng retains copyright in his original contributions and may also offer commercial products or differently licensed versions of code for which he holds the necessary rights. Existing MIT grants remain valid, and adapted upstream portions remain subject to their preserved copyright notices and license terms.
 
 ## Changelog
 

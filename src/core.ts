@@ -62,6 +62,47 @@ export function getTopicsDir(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Hook mode config (per-turn vs stable)
+// ---------------------------------------------------------------------------
+
+export type HookMode = "stable" | "per-turn";
+
+const HOOK_CONFIG_FILENAME = "hook-config.json";
+const HOOK_MODE_DEFAULT: HookMode = "per-turn";
+
+function hookConfigPath(): string {
+	return path.join(MEMORY_DIR, HOOK_CONFIG_FILENAME);
+}
+
+/**
+ * Resolve the active hook mode.
+ * Precedence: `AGENT_MEMORY_HOOK_MODE` env var → `<memoryDir>/hook-config.json`
+ * → default `per-turn`. Invalid values fall through to the next source.
+ */
+export function readHookMode(): HookMode {
+	const env = process.env.AGENT_MEMORY_HOOK_MODE;
+	if (env === "stable" || env === "per-turn") return env;
+	try {
+		const raw = fs.readFileSync(hookConfigPath(), "utf-8");
+		const parsed = JSON.parse(raw) as { mode?: unknown };
+		if (parsed.mode === "stable" || parsed.mode === "per-turn") return parsed.mode;
+	} catch {}
+	return HOOK_MODE_DEFAULT;
+}
+
+/**
+ * Atomically persist the chosen hook mode. Called by `install-hooks` after a
+ * successful install pass so `doctor` and later invocations can report it.
+ */
+export function writeHookMode(mode: HookMode): void {
+	fs.mkdirSync(MEMORY_DIR, { recursive: true });
+	const target = hookConfigPath();
+	const temporary = `${target}.${process.pid}.tmp`;
+	fs.writeFileSync(temporary, `${JSON.stringify({ mode }, null, 2)}\n`, { mode: 0o600 });
+	fs.renameSync(temporary, target);
+}
+
+// ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
@@ -427,95 +468,119 @@ export function serializeScratchpad(items: ScratchpadItem[]): string {
 // Context builder
 // ---------------------------------------------------------------------------
 
-export function buildMemoryContext(searchResults?: string): string {
-	ensureDirs();
-	// Priority order: scratchpad > topics > today's daily > search results > MEMORY.md > yesterday's daily
-	const sections: string[] = [];
-
+function scratchpadContextSection(): string | null {
 	const scratchpad = readFileSafe(SCRATCHPAD_FILE);
-	if (scratchpad?.trim()) {
-		const openItems = parseScratchpad(scratchpad).filter((i) => !i.done);
-		if (openItems.length > 0) {
-			const serialized = filterMemoryForContext(serializeScratchpad(openItems));
-			const section = formatContextSection(
-				"## SCRATCHPAD.md (working context)",
-				serialized,
-				"start",
-				CONTEXT_SCRATCHPAD_MAX_LINES,
-				CONTEXT_SCRATCHPAD_MAX_CHARS,
-			);
-			if (section) sections.push(section);
-		}
-	}
+	if (!scratchpad?.trim()) return null;
+	const openItems = parseScratchpad(scratchpad).filter((i) => !i.done);
+	if (openItems.length === 0) return null;
+	const serialized = filterMemoryForContext(serializeScratchpad(openItems));
+	return formatContextSection(
+		"## SCRATCHPAD.md (working context)",
+		serialized,
+		"start",
+		CONTEXT_SCRATCHPAD_MAX_LINES,
+		CONTEXT_SCRATCHPAD_MAX_CHARS,
+	);
+}
 
-	const topicsSection = buildTopicsContextSection();
-	if (topicsSection) sections.push(topicsSection);
-
+function todayContextSection(): string | null {
 	const today = todayStr();
+	const content = readFileSafe(dailyPath(today));
+	const safe = content ? filterMemoryForContext(content) : "";
+	if (!safe) return null;
+	return formatContextSection(
+		`## Daily log: ${today} (today)`,
+		safe,
+		"middle",
+		CONTEXT_DAILY_MAX_LINES,
+		CONTEXT_DAILY_MAX_CHARS,
+	);
+}
+
+function yesterdayContextSection(): string | null {
 	const yesterday = yesterdayStr();
+	const content = readFileSafe(dailyPath(yesterday));
+	const safe = content ? filterMemoryForContext(content) : "";
+	if (!safe) return null;
+	return formatContextSection(
+		`## Daily log: ${yesterday} (yesterday)`,
+		safe,
+		"end",
+		CONTEXT_DAILY_MAX_LINES,
+		CONTEXT_DAILY_MAX_CHARS,
+	);
+}
 
-	const todayContent = readFileSafe(dailyPath(today));
-	const safeTodayContent = todayContent ? filterMemoryForContext(todayContent) : "";
-	if (safeTodayContent) {
-		const section = formatContextSection(
-			`## Daily log: ${today} (today)`,
-			safeTodayContent,
-			"middle",
-			CONTEXT_DAILY_MAX_LINES,
-			CONTEXT_DAILY_MAX_CHARS,
-		);
-		if (section) sections.push(section);
-	}
+function searchContextSection(searchResults?: string): string | null {
+	const safe = searchResults ? filterMemoryForContext(searchResults) : "";
+	if (!safe) return null;
+	return formatContextSection(
+		"## Relevant memories (auto-retrieved)",
+		safe,
+		"start",
+		CONTEXT_SEARCH_MAX_LINES,
+		CONTEXT_SEARCH_MAX_CHARS,
+	);
+}
 
-	const safeSearchResults = searchResults ? filterMemoryForContext(searchResults) : "";
-	if (safeSearchResults) {
-		const section = formatContextSection(
-			"## Relevant memories (auto-retrieved)",
-			safeSearchResults,
-			"start",
-			CONTEXT_SEARCH_MAX_LINES,
-			CONTEXT_SEARCH_MAX_CHARS,
-		);
-		if (section) sections.push(section);
-	}
-
+function longTermContextSection(): string | null {
 	const longTerm = readFileSafe(MEMORY_FILE);
-	const safeLongTerm = longTerm ? filterMemoryForContext(longTerm) : "";
-	if (safeLongTerm) {
-		const section = formatContextSection(
-			"## MEMORY.md (long-term)",
-			safeLongTerm,
-			"middle",
-			CONTEXT_LONG_TERM_MAX_LINES,
-			CONTEXT_LONG_TERM_MAX_CHARS,
-		);
-		if (section) sections.push(section);
-	}
+	const safe = longTerm ? filterMemoryForContext(longTerm) : "";
+	if (!safe) return null;
+	return formatContextSection(
+		"## MEMORY.md (long-term)",
+		safe,
+		"middle",
+		CONTEXT_LONG_TERM_MAX_LINES,
+		CONTEXT_LONG_TERM_MAX_CHARS,
+	);
+}
 
-	const yesterdayContent = readFileSafe(dailyPath(yesterday));
-	const safeYesterdayContent = yesterdayContent ? filterMemoryForContext(yesterdayContent) : "";
-	if (safeYesterdayContent) {
-		const section = formatContextSection(
-			`## Daily log: ${yesterday} (yesterday)`,
-			safeYesterdayContent,
-			"end",
-			CONTEXT_DAILY_MAX_LINES,
-			CONTEXT_DAILY_MAX_CHARS,
-		);
-		if (section) sections.push(section);
-	}
-
-	if (sections.length === 0) {
-		return "";
-	}
-
-	const context = `# Memory\n\n${sections.join("\n\n---\n\n")}`;
+function assembleContext(sections: readonly (string | null)[]): string {
+	const kept = sections.filter((s): s is string => !!s);
+	if (kept.length === 0) return "";
+	const context = `# Memory\n\n${kept.join("\n\n---\n\n")}`;
 	if (context.length > CONTEXT_MAX_CHARS) {
 		const note = "\n\n[truncated overall context to 16000 chars]";
 		return context.slice(0, CONTEXT_MAX_CHARS - note.length).trimEnd() + note;
 	}
-
 	return context;
+}
+
+/**
+ * Full context: scratchpad + topics + today + search + MEMORY.md + yesterday.
+ * Used by `agent-memory context` and by SessionStart in stable mode.
+ */
+export function buildMemoryContext(searchResults?: string): string {
+	ensureDirs();
+	return assembleContext([
+		scratchpadContextSection(),
+		buildTopicsContextSection(),
+		todayContextSection(),
+		searchContextSection(searchResults),
+		longTermContextSection(),
+		yesterdayContextSection(),
+	]);
+}
+
+/**
+ * Stable subset: scratchpad + topics + MEMORY.md. No daily logs, no search.
+ * Emitted at SessionStart in per-turn mode — the durable facts that survive
+ * across sessions and are unlikely to be affected by the current prompt.
+ */
+export function buildStableContext(): string {
+	ensureDirs();
+	return assembleContext([scratchpadContextSection(), buildTopicsContextSection(), longTermContextSection()]);
+}
+
+/**
+ * Dynamic subset: today's daily log + qmd search hits + yesterday's daily log.
+ * Emitted at UserPromptSubmit — turn-scoped context that can be scoped by the
+ * current query. Excludes MEMORY.md and scratchpad (already sent at SessionStart).
+ */
+export function buildDynamicContext(searchResults?: string, _query?: string): string {
+	ensureDirs();
+	return assembleContext([todayContextSection(), searchContextSection(searchResults), yesterdayContextSection()]);
 }
 
 function buildTopicsContextSection(): string | null {
@@ -773,44 +838,49 @@ export async function setupQmdCollection(): Promise<boolean> {
 	return true;
 }
 
-export function detectQmd(): Promise<boolean> {
+export function detectQmd(options: { signal?: AbortSignal } = {}): Promise<boolean> {
 	return new Promise((resolve) => {
 		// qmd doesn't reliably support --version; use a fast command that exits 0 when available.
-		execFileFn("qmd", ["status"], { timeout: 5_000 }, (err) => {
+		execFileFn("qmd", ["status"], { timeout: 5_000, signal: options.signal }, (err) => {
 			resolve(!err);
 		});
 	});
 }
 
-export function checkCollection(name?: string): Promise<boolean> {
+export function checkCollection(name?: string, options: { signal?: AbortSignal } = {}): Promise<boolean> {
 	const collName = name ?? QMD_COLLECTION_NAME;
 	return new Promise((resolve) => {
-		execFileFn("qmd", ["collection", "list", "--json"], { timeout: 10_000 }, (err, stdout) => {
-			if (err) {
-				resolve(false);
-				return;
-			}
-			try {
-				const collections = JSON.parse(stdout);
-				if (Array.isArray(collections)) {
-					resolve(
-						collections.some((entry) => {
-							if (typeof entry === "string") return entry === collName;
-							if (entry && typeof entry === "object" && "name" in entry) {
-								return (entry as { name?: string }).name === collName;
-							}
-							return false;
-						}),
-					);
-				} else {
-					// qmd may output an object with a collections array or similar
+		execFileFn(
+			"qmd",
+			["collection", "list", "--json"],
+			{ timeout: 10_000, signal: options.signal },
+			(err, stdout) => {
+				if (err) {
+					resolve(false);
+					return;
+				}
+				try {
+					const collections = JSON.parse(stdout);
+					if (Array.isArray(collections)) {
+						resolve(
+							collections.some((entry) => {
+								if (typeof entry === "string") return entry === collName;
+								if (entry && typeof entry === "object" && "name" in entry) {
+									return (entry as { name?: string }).name === collName;
+								}
+								return false;
+							}),
+						);
+					} else {
+						// qmd may output an object with a collections array or similar
+						resolve(stdout.includes(collName));
+					}
+				} catch {
+					// Fallback: just check if the name appears in the output
 					resolve(stdout.includes(collName));
 				}
-			} catch {
-				// Fallback: just check if the name appears in the output
-				resolve(stdout.includes(collName));
-			}
-		});
+			},
+		);
 	});
 }
 
@@ -890,9 +960,9 @@ export async function runQmdEmbedNow(): Promise<boolean> {
 	});
 }
 
-export async function ensureQmdAvailableForSync(): Promise<boolean> {
+export async function ensureQmdAvailableForSync(options: { signal?: AbortSignal } = {}): Promise<boolean> {
 	if (qmdAvailable) return true;
-	qmdAvailable = await detectQmd();
+	qmdAvailable = await detectQmd(options);
 	return qmdAvailable;
 }
 
@@ -1205,18 +1275,42 @@ function qmdResultPassesSourcePolicy(filePath: string | undefined, snippet: stri
 	if (!source) return false;
 
 	const activeSource = filterMemoryForContext(source);
+	// qmd truncates chunks with a trailing ellipsis, so requiring EVERY line to
+	// substring-match the source is too strict (it fails on any truncated line).
+	// We just need to verify the snippet came from THIS source and isn't stale.
+	// Require at least one substantive line to match, and reject if none do.
+	const stripTruncation = (line: string): string =>
+		line
+			.trim()
+			.replace(/\s*\.\.\.\s*$/, "")
+			.replace(/…\s*$/, "")
+			.trim();
 	const snippetLines = snippet
 		.split("\n")
-		.map((line) => line.trim())
+		.map(stripTruncation)
 		.filter((line) => line.length >= 8);
-	return snippetLines.length > 0 && snippetLines.every((line) => activeSource.includes(line));
+	if (snippetLines.length === 0) return false;
+	return snippetLines.some((line) => activeSource.includes(line));
+}
+
+const RECALL_TIMEOUT_MS = 8_000;
+const RECALL_LIMIT = 3;
+// Widen upstream so post-filtering (system/plugins/**) still leaves candidates.
+const RECALL_QMD_WIDEN = 15;
+const RECALL_EXCLUDE_PATH_FRAGMENTS = ["/system/plugins/", "system/plugins/"];
+
+function qmdResultIsUserContent(r: QmdSearchResult): boolean {
+	const p = getQmdResultPath(r);
+	if (!p) return true;
+	return !RECALL_EXCLUDE_PATH_FRAGMENTS.some((frag) => p.includes(frag));
 }
 
 /** Search for memories relevant to the user's prompt. Returns formatted markdown or empty string on error. */
-export async function searchRelevantMemories(prompt: string): Promise<string> {
+export async function searchRelevantMemories(prompt: string, options: { signal?: AbortSignal } = {}): Promise<string> {
 	if (!qmdAvailable || !prompt.trim()) return "";
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const controller = new AbortController();
+	const abortFromCaller = () => controller.abort();
 
 	// Sanitize: strip control chars, limit to 200 chars for the search query
 	const sanitized = prompt
@@ -1225,24 +1319,31 @@ export async function searchRelevantMemories(prompt: string): Promise<string> {
 		.trim()
 		.slice(0, 200);
 	if (!sanitized) return "";
+	if (options.signal?.aborted) controller.abort();
+	else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
 
 	try {
-		const hasCollection = await checkCollection();
+		const hasCollection = await checkCollection(undefined, { signal: controller.signal });
 		if (!hasCollection) return "";
 
-		const results = await Promise.race([
-			runQmdSearch("keyword", sanitized, 3, { signal: controller.signal }),
+		// Single `qmd query --no-rerank "lex: q\nvec: q"` invocation: qmd runs BM25 +
+		// vector internally and fuses via RRF. ~1.5s vs 2.5s for two parallel calls.
+		// No LLM query expansion, no LLM rerank — those add 2-6s and hurt named-entity
+		// / temporal-reasoning recall (LongMemEval-S finding 2026-08-27).
+		const deepResult = await Promise.race([
+			runQmdSearch("deep", sanitized, RECALL_QMD_WIDEN, { signal: controller.signal }),
 			new Promise<never>((_, reject) => {
 				timer = setTimeout(() => {
 					controller.abort();
 					reject(new Error("timeout"));
-				}, 3_000);
+				}, RECALL_TIMEOUT_MS);
 			}),
 		]);
 
-		if (!results || results.results.length === 0) return "";
+		const fused = deepResult.results.filter(qmdResultIsUserContent).slice(0, RECALL_LIMIT);
+		if (fused.length === 0) return "";
 
-		const snippets = results.results
+		const snippets = fused
 			.map((r) => {
 				const text = filterMemoryForContext(getQmdResultText(r));
 				if (!text) return null;
@@ -1259,6 +1360,7 @@ export async function searchRelevantMemories(prompt: string): Promise<string> {
 		return "";
 	} finally {
 		clearTimeout(timer);
+		options.signal?.removeEventListener("abort", abortFromCaller);
 	}
 }
 
@@ -1326,10 +1428,35 @@ export function runQmdSearch(
 	mode: "keyword" | "semantic" | "deep",
 	query: string,
 	limit: number,
-	options: { signal?: AbortSignal } = {},
+	options: { signal?: AbortSignal; collection?: string; index?: string } = {},
 ): Promise<{ results: QmdSearchResult[]; stderr: string }> {
-	const subcommand = mode === "keyword" ? "search" : mode === "semantic" ? "vsearch" : "query";
-	const args = [subcommand, "--json", "-c", QMD_COLLECTION_NAME, "-n", String(limit), query];
+	// Route through qmd's typed-query interface (`qmd query --no-rerank "lex: q\nvec: q"`)
+	// so mode="deep" runs BM25 + vector in ONE qmd invocation (~1.5s) with internal
+	// RRF fusion — vs two parallel invocations (~2.5s wall). Keyword and semantic modes
+	// use the typed form too so behavior is uniform: no LLM query expansion, no
+	// LLM rerank. That was the source of 8-9s hybrid latency + the temporal-reasoning
+	// regression on LongMemEval-S (grep 83% vs expanded-hybrid 62%).
+	// qmd's `vec:` grammar treats a leading `-` on a token as negation, which
+	// blows up natural-language questions like "e-commerce" or "friends-and-
+	// family". lex tolerates negation intentionally, but for vec we normalize
+	// hyphens to spaces (and collapse whitespace) before injection.
+	const vecSafe = query.replace(/-/g, " ").replace(/\s+/g, " ").trim() || query;
+	let typedBody: string;
+	if (mode === "keyword") typedBody = `lex: ${query}`;
+	else if (mode === "semantic") typedBody = `vec: ${vecSafe}`;
+	else typedBody = `lex: ${query}\nvec: ${vecSafe}`;
+	const args: string[] = [];
+	if (options.index) args.push("--index", options.index);
+	args.push(
+		"query",
+		"--json",
+		"--no-rerank",
+		"-c",
+		options.collection ?? QMD_COLLECTION_NAME,
+		"-n",
+		String(limit),
+		typedBody,
+	);
 
 	return new Promise((resolve, reject) => {
 		execFileFn("qmd", args, { timeout: 60_000, signal: options.signal }, (err, stdout, stderr) => {
@@ -1393,6 +1520,49 @@ export interface ToolResult {
 	text: string;
 	details: Record<string, unknown>;
 	isError?: boolean;
+}
+
+const LONG_TERM_SOFT_LINE_CAP = 50;
+const LONG_TERM_DUPLICATE_THRESHOLD = 0.6;
+
+function significantWords(text: string): Set<string> {
+	return new Set(
+		text
+			.toLowerCase()
+			.replace(/<!--.*?-->/gs, " ")
+			.replace(/[`*_#>[\]()]/g, " ")
+			.split(/\s+/)
+			.filter((word) => word.length > 2),
+	);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+	if (a.size === 0 || b.size === 0) return 0;
+	let intersection = 0;
+	for (const word of a) {
+		if (b.has(word)) intersection++;
+	}
+	return intersection / (a.size + b.size - intersection);
+}
+
+/** Cheap near-duplicate check against existing long_term entries — advisory only, never blocks the write. */
+function findSimilarLongTermEntry(existingContent: string, newContent: string): string | null {
+	const newWords = significantWords(newContent);
+	if (newWords.size === 0) return null;
+	const { entries } = splitLogicalMemoryEntries(existingContent);
+	for (const entry of entries) {
+		if (!entry.trim()) continue;
+		if (jaccardSimilarity(newWords, significantWords(entry)) >= LONG_TERM_DUPLICATE_THRESHOLD) {
+			return entry.trim();
+		}
+	}
+	return null;
+}
+
+function longTermLineCapWarning(finalContent: string): string | null {
+	const lineCount = finalContent.split("\n").length;
+	if (lineCount <= LONG_TERM_SOFT_LINE_CAP) return null;
+	return `MEMORY.md is now ${lineCount} lines, over the recommended ~${LONG_TERM_SOFT_LINE_CAP}-line cap — consider \`agent-memory distil\` to curate it back down.`;
 }
 
 export async function memoryWrite(params: {
@@ -1520,8 +1690,9 @@ export async function memoryWrite(params: {
 		const stored = formatStoredEntry(content, `<!-- last updated: ${ts} [${sid}] -->`, params.sourceUri);
 		fs.writeFileSync(memFile, stored.entry, "utf-8");
 		await scheduleSearchRefresh();
+		const warnings = [longTermLineCapWarning(stored.entry)].filter((w): w is string => w !== null);
 		return {
-			text: `Overwrote MEMORY.md${existingSnippet}`,
+			text: `Overwrote MEMORY.md${warnings.length ? `\n\n${warnings.join("\n\n")}` : ""}${existingSnippet}`,
 			details: {
 				path: memFile,
 				target,
@@ -1532,17 +1703,26 @@ export async function memoryWrite(params: {
 				redacted: stored.redacted,
 				qmdUpdateMode: getQmdUpdateMode(),
 				existingPreview,
+				warnings,
 			},
 		};
 	}
 
 	// append (default)
+	const similarEntry = findSimilarLongTermEntry(existing, content);
 	const separator = existing.trim() ? "\n\n" : "";
 	const stored = formatStoredEntry(content, `<!-- ${ts} [${sid}] -->`, params.sourceUri);
-	fs.writeFileSync(memFile, existing + separator + stored.entry, "utf-8");
+	const merged = existing + separator + stored.entry;
+	fs.writeFileSync(memFile, merged, "utf-8");
 	await scheduleSearchRefresh();
+	const warnings = [
+		similarEntry
+			? `Possible duplicate — an existing entry looks similar:\n${buildPreview(similarEntry, { maxLines: 4, maxChars: 300, mode: "start" }).preview}\nConsider \`--mode overwrite\` to curate instead of appending a near-duplicate.`
+			: null,
+		longTermLineCapWarning(merged),
+	].filter((w): w is string => w !== null);
 	return {
-		text: `Appended to MEMORY.md${existingSnippet}`,
+		text: `Appended to MEMORY.md${warnings.length ? `\n\n${warnings.join("\n\n")}` : ""}${existingSnippet}`,
 		details: {
 			path: memFile,
 			target,
@@ -1553,6 +1733,7 @@ export async function memoryWrite(params: {
 			redacted: stored.redacted,
 			qmdUpdateMode: getQmdUpdateMode(),
 			existingPreview,
+			warnings,
 		},
 	};
 }

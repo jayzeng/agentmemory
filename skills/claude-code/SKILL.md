@@ -14,6 +14,8 @@ Pi users can choose the native extension (`pi-memory`: https://github.com/jayzen
 
 !`agent-memory context --no-search 2>/dev/null`
 
+This deliberately fetches the full layer (today's log + MEMORY.md + yesterday's log), not just the narrower "stable" layer (MEMORY.md + scratchpad only) that an installed SessionStart hook injects to keep per-turn re-injection cheap. If a hook already ran this session, you may see two context blocks — that's expected, not a bug; treat this one (the fuller one) as authoritative.
+
 ## Session Lifecycle
 
 ### On session start
@@ -27,6 +29,8 @@ Pi users can choose the native extension (`pi-memory`: https://github.com/jayzen
 1. Log what was accomplished in the daily log
 2. Mark completed scratchpad items as done; add new follow-ups
 3. Only write to long-term memory if you discovered a **durable fact** that doesn't already exist there
+
+If Claude Code's `Stop` hook is installed, you may occasionally see a reminder to do this check even if you weren't planning to stop — that's the harness backing up this step for long sessions; treat it the same as the guidance above.
 
 ## Where to Write — Decision Guide
 
@@ -104,6 +108,15 @@ agent-memory search --query "how we handle auth" --mode semantic # Finds related
 agent-memory search --query "performance" --mode deep --limit 10 # Hybrid + reranking
 ```
 
+`search` only looks at what you saved (daily logs, MEMORY.md, topics, scratchpad). For **prior sessions** — things you or the agent said in a past Claude/Codex/pi chat — use `recall`:
+
+```bash
+agent-memory recall "deploy-to-dev label workflow"          # Cross-session, verbatim events
+agent-memory recall "auth refresh" --scope current --limit 5 # Restrict to this workspace
+```
+
+When qmd search returns no hits and AgentMemory Pro is installed, `search` automatically falls back to `recall` — but calling `recall` directly is faster and clearer when you know you want session history.
+
 If qmd is not installed, fall back to reading files directly:
 ```bash
 agent-memory read --target long_term
@@ -170,4 +183,6 @@ Distil scans daily logs and topic notes, groups entries by their `#tags`, and ge
 - Use `--target long_term` sparingly: architecture, preferences, key commands, hard-won lessons
 - Prefer the scratchpad for any TODOs or follow-ups (persistent, cross-session tracking)
 - Use `#tags` and `[[links]]` in content to improve search recall
-- Use `agent-memory search` to recall past work before starting related tasks
+- Use `agent-memory search` to find things you saved (daily logs, MEMORY.md, topics) before starting related tasks
+- Use `agent-memory recall "<query>"` to find things from prior chat sessions (Pro) — not the same as `search`
+- All `agent-memory` commands are safe — they read/write only to the memory directory (`~/.agent-memory/` by default)

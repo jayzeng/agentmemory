@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "baselines-v1",
+  "updatedAt": "2026-08-27T05:04:22Z",
+  "note": "Updated by 'bun run verify --update-baselines'. Hard limits and regression thresholds.",
+  "thresholds": {
+    "build_time_ms": {
+      "max": 10000
+    },
+    "binary_size_bytes": {
+      "max": 75000000
+    },
+    "ctx_lat_p50_ms": {
+      "max": 200,
+      "regressionPct": 20
+    },
+    "ctx_lat_p95_ms": {
+      "max": 500,
+      "regressionPct": 20
+    },
+    "ctx_sections_count": {
+      "min": 4
+    },
+    "det_probes_passed": {
+      "min": 21
+    },
+    "det_probes_intentional_fail": {
+      "exact": 1
+    },
+    "recall_at_1": {
+      "min": 0.8,
+      "regressionPct": 5
+    },
+    "recall_at_5": {
+      "min": 0.9,
+      "regressionPct": 5
+    },
+    "mrr_at_5": {
+      "min": 0.8,
+      "regressionPct": 5
+    },
+    "ndcg_at_5": {
+      "min": 0.85,
+      "regressionPct": 5
+    },
+    "stale_hit_rate": {
+      "max": 0
+    },
+    "sessions_coherent_pct": {
+      "min": 100
+    }
+  },
+  "observed": {
+    "build_time_ms": 1356,
+    "binary_size_bytes": 60116048,
+    "ctx_lat_p50_ms": 43,
+    "ctx_lat_p95_ms": 48,
+    "ctx_output_chars": 760,
+    "ctx_sections_count": 4,
+    "stale_hit_rate": 0,
+    "injected_tokens": 346,
+    "recall_at_1": "N/A",
+    "recall_at_5": "N/A",
+    "mrr_at_5": "N/A",
+    "ndcg_at_5": "N/A",
+    "lqmd_lat_p50": "N/A",
+    "lqmd_lat_p95": "N/A"
+  }
+}

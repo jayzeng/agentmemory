@@ -33,6 +33,14 @@ function words(values: readonly string[]): string {
 	return values.join(" ");
 }
 
+function shellSingleQuote(value: string): string {
+	return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function powerShellSingleQuote(value: string): string {
+	return `'${value.replace(/'/g, "''")}'`;
+}
+
 function zshOptionValue(command: string, option: string): string {
 	if (option === "--target") {
 		return command === "read"
@@ -52,7 +60,7 @@ function zshOptionValue(command: string, option: string): string {
 
 function zshOptionSpecs(command: string, options: readonly string[] = COMMAND_OPTIONS[command] ?? []): string {
 	return options
-		.map((option) => `'${option}[${optionDescription(option)}]${zshOptionValue(command, option)}'`)
+		.map((option) => shellSingleQuote(`${option}[${optionDescription(option)}]${zshOptionValue(command, option)}`))
 		.join(" ");
 }
 
@@ -71,7 +79,7 @@ function fishOption(command: string, condition: string, option: string): string 
 	else if (option === "--only") suggestions = " -a 'claude codex cursor opencode pi'";
 	else if (spec?.value?.kind === "directory") suggestions = " -a '(__fish_complete_directories)'";
 	else if (spec?.value?.kind === "file") suggestions = " -F";
-	return `complete -c agent-memory -n '${condition}' -l ${option.slice(2)}${value}${suggestions} -d '${optionDescription(option)}'`;
+	return `complete -c agent-memory -n ${shellSingleQuote(condition)} -l ${option.slice(2)}${value}${suggestions} -d ${shellSingleQuote(optionDescription(option))}`;
 }
 
 function bashCompletion(): string {
@@ -162,12 +170,12 @@ _agent-memory() {
   local subcommand="$words[3]"
 	local action="$words[4]"
   local command_position=$CURRENT
-  commands=(${COMMANDS.map((command) => `'${command}:${COMMAND_DESCRIPTIONS[command] ?? command}'`).join(" ")})
-  plugin_commands=(${PLUGIN_COMMANDS.map((command) => `'${command}:${PLUGIN_COMMAND_DESCRIPTIONS[command]}'`).join(" ")})
-  worker_actions=(${WORKER_ACTIONS.map((action) => `'${action}:${WORKER_ACTION_DESCRIPTIONS[action]}'`).join(" ")})
-  scratchpad_actions=(${SCRATCHPAD_ACTIONS.map((action) => `'${action}:${SCRATCHPAD_ACTION_DESCRIPTIONS[action]}'`).join(" ")})
+  commands=(${COMMANDS.map((command) => shellSingleQuote(`${command}:${COMMAND_DESCRIPTIONS[command] ?? command}`)).join(" ")})
+  plugin_commands=(${PLUGIN_COMMANDS.map((command) => shellSingleQuote(`${command}:${PLUGIN_COMMAND_DESCRIPTIONS[command]}`)).join(" ")})
+  worker_actions=(${WORKER_ACTIONS.map((action) => shellSingleQuote(`${action}:${WORKER_ACTION_DESCRIPTIONS[action]}`)).join(" ")})
+  scratchpad_actions=(${SCRATCHPAD_ACTIONS.map((action) => shellSingleQuote(`${action}:${SCRATCHPAD_ACTION_DESCRIPTIONS[action]}`)).join(" ")})
   shells=(${Object.entries(SHELL_DESCRIPTIONS)
-		.map(([shell, description]) => `'${shell}:${description}'`)
+		.map(([shell, description]) => shellSingleQuote(`${shell}:${description}`))
 		.join(" ")})
 
   _arguments -C \\
@@ -237,23 +245,23 @@ function fishCompletion(): string {
 		"complete -c agent-memory -f",
 		...COMMANDS.map(
 			(command) =>
-				`complete -c agent-memory -n '__fish_use_subcommand' -a '${command}' -d '${COMMAND_DESCRIPTIONS[command] ?? command}'`,
+				`complete -c agent-memory -n '__fish_use_subcommand' -a '${command}' -d ${shellSingleQuote(COMMAND_DESCRIPTIONS[command] ?? command)}`,
 		),
 		...PLUGIN_COMMANDS.map(
 			(command) =>
-				`complete -c agent-memory -n '__fish_seen_subcommand_from plugin; and not __fish_seen_subcommand_from ${words(PLUGIN_COMMANDS)}' -a '${command}' -d '${PLUGIN_COMMAND_DESCRIPTIONS[command]}'`,
+				`complete -c agent-memory -n '__fish_seen_subcommand_from plugin; and not __fish_seen_subcommand_from ${words(PLUGIN_COMMANDS)}' -a '${command}' -d ${shellSingleQuote(PLUGIN_COMMAND_DESCRIPTIONS[command])}`,
 		),
 		...WORKER_ACTIONS.map(
 			(action) =>
-				`complete -c agent-memory -n '__fish_seen_subcommand_from plugin; and __fish_seen_subcommand_from worker; and not __fish_seen_subcommand_from ${words(WORKER_ACTIONS)}' -a '${action}' -d '${WORKER_ACTION_DESCRIPTIONS[action]}'`,
+				`complete -c agent-memory -n '__fish_seen_subcommand_from plugin; and __fish_seen_subcommand_from worker; and not __fish_seen_subcommand_from ${words(WORKER_ACTIONS)}' -a '${action}' -d ${shellSingleQuote(WORKER_ACTION_DESCRIPTIONS[action])}`,
 		),
 		...SCRATCHPAD_ACTIONS.map(
 			(action) =>
-				`complete -c agent-memory -n '__fish_seen_subcommand_from scratchpad; and not __fish_seen_subcommand_from ${words(SCRATCHPAD_ACTIONS)}' -a '${action}' -d '${SCRATCHPAD_ACTION_DESCRIPTIONS[action]}'`,
+				`complete -c agent-memory -n '__fish_seen_subcommand_from scratchpad; and not __fish_seen_subcommand_from ${words(SCRATCHPAD_ACTIONS)}' -a '${action}' -d ${shellSingleQuote(SCRATCHPAD_ACTION_DESCRIPTIONS[action])}`,
 		),
 		...Object.entries(SHELL_DESCRIPTIONS).map(
 			([shell, description]) =>
-				`complete -c agent-memory -n '__fish_seen_subcommand_from completion' -a '${shell}' -d '${description}'`,
+				`complete -c agent-memory -n '__fish_seen_subcommand_from completion' -a '${shell}' -d ${shellSingleQuote(description)}`,
 		),
 		"complete -c agent-memory -l dir -r -a '(__fish_complete_directories)' -d 'override the active memory directory'",
 		"complete -c agent-memory -l json -d 'emit command-specific structured JSON'",
@@ -330,32 +338,32 @@ Register-ArgumentCompleter -Native -CommandName agent-memory -ScriptBlock {
   $shells = @('bash','zsh','fish','powershell')
   $commandDescriptions = @{
 ${Object.entries(COMMAND_DESCRIPTIONS)
-	.map(([command, description]) => `    '${command}' = '${description}'`)
+	.map(([command, description]) => `    '${command}' = ${powerShellSingleQuote(description)}`)
 	.join("\n")}
   }
   $pluginCommandDescriptions = @{
 ${Object.entries(PLUGIN_COMMAND_DESCRIPTIONS)
-	.map(([command, description]) => `    '${command}' = '${description}'`)
+	.map(([command, description]) => `    '${command}' = ${powerShellSingleQuote(description)}`)
 	.join("\n")}
   }
   $workerActionDescriptions = @{
 ${Object.entries(WORKER_ACTION_DESCRIPTIONS)
-	.map(([action, description]) => `    '${action}' = '${description}'`)
+	.map(([action, description]) => `    '${action}' = ${powerShellSingleQuote(String(description))}`)
 	.join("\n")}
   }
   $scratchpadActionDescriptions = @{
 ${Object.entries(SCRATCHPAD_ACTION_DESCRIPTIONS)
-	.map(([action, description]) => `    '${action}' = '${description}'`)
+	.map(([action, description]) => `    '${action}' = ${powerShellSingleQuote(description)}`)
 	.join("\n")}
   }
   $shellDescriptions = @{
 ${Object.entries(SHELL_DESCRIPTIONS)
-	.map(([shell, description]) => `    '${shell}' = '${description}'`)
+	.map(([shell, description]) => `    '${shell}' = ${powerShellSingleQuote(description)}`)
 	.join("\n")}
   }
   $optionDescriptions = @{
 ${Object.keys(OPTION_SPECS)
-	.map((option) => `    '${option}' = '${optionDescription(option)}'`)
+	.map((option) => `    '${option}' = ${powerShellSingleQuote(optionDescription(option))}`)
 	.join("\n")}
   }
   $globalOptions = @('${GLOBAL_OPTIONS.join("','")}')

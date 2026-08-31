@@ -17,7 +17,8 @@ import { type PluginEntitlementStatusV1, validatePluginEntitlementStatusV1 } fro
 
 const API_ORIGIN = "https://api.agentmemory.paperpilot.me";
 const ARTIFACT_ORIGIN = "https://plugins.agentmemory.paperpilot.me";
-const ACTIVATION_FILE = "credentials/temporary-access.json";
+const ACTIVATION_FILE = "credentials/activation.json";
+const ACTIVATION_FILE_LEGACY = "credentials/temporary-access.json";
 const REQUEST_TIMEOUT_MS = 30_000;
 const EMAIL_MAX_BYTES = 254;
 const FORM_MAX_BYTES = 2_048;
@@ -32,7 +33,7 @@ const MISSING_ENTITLEMENT: PluginEntitlementStatusV1 = {
 	reason: "Install the no-account Pro preview to activate local recall and learning",
 };
 
-interface TemporaryActivationV1 {
+interface LocalActivationV1 {
 	schemaVersion: 3;
 	installationId: string;
 	activatedAt: string;
@@ -40,7 +41,7 @@ interface TemporaryActivationV1 {
 	dailySessionLimit: number;
 }
 
-interface TemporaryPluginBackendOptions {
+interface AgentMemoryServiceBackendOptions {
 	root?: string;
 	coreVersion?: string;
 	apiOrigin?: string;
@@ -61,16 +62,35 @@ function freeEntitlement(): PluginEntitlementStatusV1 {
 		features: ["session-intelligence", "web-console"],
 		capabilities: {
 			"session-index": { enabled: true },
-			recall: { enabled: true, quota: { limit: 10, window: "day", scope: "device" } },
-			"session-worker": { enabled: false },
-			learning: { enabled: true, quota: { limit: 1, window: "day", scope: "device" } },
+			recall: { enabled: true, quota: { limit: 20, window: "day", scope: "device" } },
+			"session-worker": { enabled: true },
+			learning: { enabled: true, quota: { limit: 5, window: "day", scope: "device" } },
 			"retrieval-evaluation": { enabled: true },
 			"operational-metrics": { enabled: true },
 			"web-console": { enabled: true },
 			"memory-explorer": { enabled: true },
 		},
 		reason:
-			"Free preview: 10 recalls and 1 learning scan per local day; indexing and dashboard access remain available",
+			"Included at no cost: 20 recalls and 5 learning scans per local day; local indexing, worker, and dashboard access remain available",
+	};
+}
+
+function devEntitlement(): PluginEntitlementStatusV1 {
+	return {
+		plan: "pro",
+		state: "active",
+		features: ["session-intelligence", "web-console"],
+		capabilities: {
+			"session-index": { enabled: true },
+			recall: { enabled: true },
+			"session-worker": { enabled: true },
+			learning: { enabled: true },
+			"retrieval-evaluation": { enabled: true },
+			"operational-metrics": { enabled: true },
+			"web-console": { enabled: true },
+			"memory-explorer": { enabled: true },
+		},
+		reason: "Dev entitlement: all capabilities enabled, no quotas (AGENT_MEMORY_DEV_ENTITLEMENT=1)",
 	};
 }
 
@@ -297,7 +317,7 @@ export function openLoopbackUrl(url: string): boolean {
 	}
 }
 
-export async function collectTemporaryActivation(openUrl: (url: string) => boolean = openLoopbackUrl): Promise<string> {
+export async function collectActivation(openUrl: (url: string) => boolean = openLoopbackUrl): Promise<string> {
 	const nonce = randomBytes(24).toString("hex");
 	const activationPath = `/activate/${nonce}`;
 	let expectedHost = "";
@@ -359,7 +379,7 @@ export async function collectTemporaryActivation(openUrl: (url: string) => boole
 		throw new PluginBootstrapFailure("browser_unavailable", `Open this URL in a browser: ${url}`);
 	}
 	const timer = setTimeout(() => {
-		fail?.(new PluginBootstrapFailure("activation_timeout", "Temporary activation timed out", true));
+		fail?.(new PluginBootstrapFailure("activation_timeout", "Browser activation timed out", true));
 		server.close();
 	}, 5 * 60_000);
 	timer.unref();
@@ -371,7 +391,7 @@ export async function collectTemporaryActivation(openUrl: (url: string) => boole
 	}
 }
 
-export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
+export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 	private readonly root: string;
 	private readonly coreVersion: string;
 	private readonly apiOrigin: string;
@@ -380,7 +400,7 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 	private readonly openUrl: (url: string) => boolean;
 	private readonly activate: () => Promise<string>;
 
-	constructor(options: TemporaryPluginBackendOptions = {}) {
+	constructor(options: AgentMemoryServiceBackendOptions = {}) {
 		this.root = path.resolve(options.root ?? getDefaultPluginInstallRoot());
 		this.coreVersion = options.coreVersion ?? "0.0.0";
 		this.apiOrigin = options.apiOrigin ?? API_ORIGIN;
@@ -392,7 +412,9 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 
 	async getLocalEntitlement(): Promise<PluginEntitlementStatusV1> {
 		const activation = this.readActivation();
-		return activation ? freeEntitlement() : cloneEntitlement(MISSING_ENTITLEMENT);
+		if (!activation) return cloneEntitlement(MISSING_ENTITLEMENT);
+		if (process.env.AGENT_MEMORY_DEV_ENTITLEMENT === "1") return devEntitlement();
+		return freeEntitlement();
 	}
 
 	async resolveAccess(request: {
@@ -496,8 +518,18 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 		return path.join(this.root, ...ACTIVATION_FILE.split("/"));
 	}
 
-	private readActivation(): TemporaryActivationV1 | null {
+	private readActivation(): LocalActivationV1 | null {
 		const activationPath = this.activationPath();
+		if (!fs.existsSync(activationPath)) {
+			const legacyPath = path.join(this.root, ...ACTIVATION_FILE_LEGACY.split("/"));
+			if (fs.existsSync(legacyPath)) {
+				try {
+					fs.renameSync(legacyPath, activationPath);
+				} catch {
+					/* best-effort migration */
+				}
+			}
+		}
 		if (!fs.existsSync(activationPath)) return null;
 		try {
 			const rootStat = fs.lstatSync(this.root);
@@ -512,7 +544,7 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 			const stat = fs.lstatSync(activationPath);
 			if (!stat.isFile() || stat.isSymbolicLink() || (process.platform !== "win32" && (stat.mode & 0o077) !== 0))
 				return null;
-			const value = JSON.parse(fs.readFileSync(activationPath, "utf-8")) as TemporaryActivationV1;
+			const value = JSON.parse(fs.readFileSync(activationPath, "utf-8")) as LocalActivationV1;
 			if (
 				value.schemaVersion !== 3 ||
 				typeof value.installationId !== "string" ||
@@ -623,5 +655,11 @@ export class TemporaryPluginBackend implements PluginBootstrapBackendV1 {
 			throw new PluginBootstrapFailure("service_request_failed", message, response.status >= 500);
 		}
 		return response;
+	}
+}
+
+export class TemporaryPluginBackend extends AgentMemoryServiceBackend {
+	constructor(options: { root: string; coreVersion: string }) {
+		super({ ...options, openUrl: () => false });
 	}
 }

@@ -50,7 +50,8 @@ export function validateFeedbackDataset(value: unknown): asserts value is Feedba
 			TESTABILITY.includes(issue.testability as (typeof TESTABILITY)[number]),
 			`issue ${issue.id}: invalid testability`,
 		);
-		assert(stringArray(issue.sourceIds), `issue ${issue.id}: sourceIds must be a non-empty string array`);
+		assert(stringArray(issue.sourceIds), `issue ${issue.id}: sourceIds items must be non-empty strings`);
+		assert(issue.sourceIds.length > 0, `issue ${issue.id}: sourceIds must not be empty`);
 		for (const sourceId of issue.sourceIds) {
 			assert(sourceIds.has(sourceId), `issue ${issue.id}: unknown source ${sourceId}`);
 		}
@@ -84,11 +85,20 @@ export function validateFeedbackDataset(value: unknown): asserts value is Feedba
 		if (oracle.forbiddenMarkers !== undefined) {
 			assert(stringArray(oracle.forbiddenMarkers), `probe ${probe.id}: forbiddenMarkers must be a string array`);
 		}
+		if (oracle.minChars !== undefined) {
+			assert(
+				typeof oracle.minChars === "number" && Number.isInteger(oracle.minChars) && oracle.minChars > 0,
+				`probe ${probe.id}: minChars must be a positive integer`,
+			);
+		}
 		if (oracle.maxChars !== undefined) {
 			assert(
 				typeof oracle.maxChars === "number" && Number.isInteger(oracle.maxChars) && oracle.maxChars > 0,
 				`probe ${probe.id}: maxChars must be a positive integer`,
 			);
+		}
+		if (oracle.minChars !== undefined && oracle.maxChars !== undefined) {
+			assert(oracle.minChars < oracle.maxChars, `probe ${probe.id}: minChars must be less than maxChars`);
 		}
 		if (oracle.topK !== undefined) {
 			assert(

@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { type HookMode, writeHookMode } from "./core.js";
+
 let homeDirOverride: string | null = null;
 
 /** Override the detected home directory in deterministic tests. */
@@ -61,6 +63,14 @@ function sessionStartHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook session-start --agent ${agent}`;
 }
 
+function userPromptSubmitHookCommand(agent: "claude" | "codex"): string {
+	return `agent-memory hook user-prompt-submit --agent ${agent}`;
+}
+
+function stopHookCommand(agent: "claude"): string {
+	return `agent-memory hook stop --agent ${agent}`;
+}
+
 function hookTargets(homeDir: string): HookTargetInfo[] {
 	return [
 		{
@@ -109,6 +119,91 @@ function hookTargets(homeDir: string): HookTargetInfo[] {
 	];
 }
 
+function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string): boolean {
+	const settingsPath = path.join(homeDir, ".claude", "settings.json");
+	if (!fs.existsSync(settingsPath)) return false;
+	const settings = readJsonConfig(settingsPath);
+	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
+	const groups = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
+	for (const group of groups) {
+		if (!group || typeof group !== "object") continue;
+		const g = group as Record<string, unknown>;
+		const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
+		for (const hook of list) {
+			if (!hook || typeof hook !== "object") continue;
+			const h = hook as Record<string, unknown>;
+			if (h[HOOK_MARKER_JSON] === true && h.command === command) return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Read-only check whether the SessionStart hook for `key` is already present in
+ * the user's config. Mirrors each installer's "already installed" detection so
+ * the CLI can avoid prompting for hooks that don't need to be installed.
+ */
+export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
+	try {
+		if (key === "claude") return hasClaudeHookGroup(homeDir, "SessionStart", sessionStartHookCommand("claude"));
+		if (key === "codex") {
+			const configPath = path.join(homeDir, ".codex", "config.toml");
+			if (!fs.existsSync(configPath)) return false;
+			const existing = fs.readFileSync(configPath, "utf-8");
+			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
+			const command = sessionStartHookCommand("codex");
+			return existing.includes(`command = "${command}"`);
+		}
+		if (key === "cursor") {
+			return isCursorSessionStartHookRegistered(homeDir);
+		}
+		if (key === "opencode") {
+			const configPath = path.join(homeDir, ".config", "opencode", "opencode.json");
+			if (!fs.existsSync(configPath)) return false;
+			const config = readJsonConfig(configPath);
+			const raw = config.instructions;
+			const list = Array.isArray(raw) ? (raw as unknown[]) : [];
+			const instructionsPath = path.join(homeDir, ".agent-memory", "hooks", "opencode.md");
+			return list.includes(instructionsPath);
+		}
+	} catch {
+		return false;
+	}
+	return false;
+}
+
+/**
+ * Read-only check whether the per-turn UserPromptSubmit hook is present.
+ * Only Claude Code and Codex support a per-prompt hook; cursor/opencode
+ * always return false (static rules only).
+ */
+export function isUserPromptSubmitInstalled(homeDir: string, key: HookAgentKey): boolean {
+	try {
+		if (key === "claude")
+			return hasClaudeHookGroup(homeDir, "UserPromptSubmit", userPromptSubmitHookCommand("claude"));
+		if (key === "codex") {
+			const configPath = path.join(homeDir, ".codex", "config.toml");
+			if (!fs.existsSync(configPath)) return false;
+			const existing = fs.readFileSync(configPath, "utf-8");
+			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
+			return existing.includes(`command = "${userPromptSubmitHookCommand("codex")}"`);
+		}
+	} catch {}
+	return false;
+}
+
+/**
+ * Read-only check whether the periodic Stop-hook memory-write nudge is present.
+ * Claude Code only — Codex/Cursor/opencode don't have a confirmed equivalent
+ * block/reason protocol for this event yet.
+ */
+export function isStopHookInstalled(homeDir: string, key: HookAgentKey): boolean {
+	try {
+		if (key === "claude") return hasClaudeHookGroup(homeDir, "Stop", stopHookCommand("claude"));
+	} catch {}
+	return false;
+}
+
 export function detectHookAgents(): { homeDir: string | null; targets: DetectedHookTarget[] } {
 	const homeDir = resolveHomeDir();
 	if (!homeDir) return { homeDir: null, targets: [] };
@@ -134,6 +229,7 @@ export interface HookInstallResult {
 	path?: string;
 	backup?: string;
 	reason?: string;
+	mode?: HookMode;
 }
 
 export interface InstallHooksReport {
@@ -173,82 +269,192 @@ function writeJson(filePath: string, data: unknown) {
 	fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
 }
 
-function installClaudeCodeHook(homeDir: string): HookInstallResult {
-	const settingsPath = path.join(homeDir, ".claude", "settings.json");
-	const backup = backupOnce(settingsPath);
-	const settings = readJsonConfig(settingsPath);
-	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.SessionStart) ? [...(hooks.SessionStart as unknown[])] : [];
-
-	// Idempotency: look for any existing entry tagged with our marker.
-	const command = sessionStartHookCommand("claude");
-	let managed = 0;
-	let updated = 0;
-	for (const group of sessionStart) {
+/**
+ * Idempotently upsert the agent-memory-managed hook group for `eventKey`
+ * (SessionStart or UserPromptSubmit) with `command`. Returns `{ changed,
+ * hadManaged }` so the caller can decide between "installed" / "updated" /
+ * "already installed" reasons.
+ */
+function upsertClaudeHookGroup(
+	hooks: Record<string, unknown>,
+	eventKey: string,
+	command: string,
+): { changed: boolean; hadManaged: boolean } {
+	const groups = Array.isArray(hooks[eventKey]) ? [...(hooks[eventKey] as unknown[])] : [];
+	const managedIndexes: number[] = [];
+	for (let i = 0; i < groups.length; i++) {
+		const group = groups[i];
 		if (!group || typeof group !== "object") continue;
 		const g = group as Record<string, unknown>;
 		const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
 		for (const hook of list) {
 			if (!hook || typeof hook !== "object") continue;
-			const managedHook = hook as Record<string, unknown>;
-			if (managedHook[HOOK_MARKER_JSON] !== true) continue;
-			managed++;
-			if (managedHook.command !== command) {
-				managedHook.command = command;
-				updated++;
+			const h = hook as Record<string, unknown>;
+			if (h[HOOK_MARKER_JSON] === true) {
+				managedIndexes.push(i);
+				break;
 			}
 		}
 	}
-	if (managed && !updated) {
-		return { key: "claude", label: "Claude Code", installed: false, path: settingsPath, reason: "already installed" };
-	}
-	if (updated) {
-		hooks.SessionStart = sessionStart;
-		settings.hooks = hooks;
-		writeJson(settingsPath, settings);
-		return { key: "claude", label: "Claude Code", installed: true, path: settingsPath, backup, reason: "updated" };
+
+	if (managedIndexes.length > 0) {
+		const keep = managedIndexes[0];
+		const dupes = managedIndexes.slice(1);
+		for (const idx of dupes.reverse()) groups.splice(idx, 1);
+		const group = groups[keep] as Record<string, unknown>;
+		let changed = dupes.length > 0;
+		if ("matcher" in group) {
+			delete group.matcher;
+			changed = true;
+		}
+		const list = group.hooks as Record<string, unknown>[];
+		for (const h of list) {
+			if (h[HOOK_MARKER_JSON] === true && h.command !== command) {
+				h.command = command;
+				changed = true;
+			}
+		}
+		hooks[eventKey] = groups;
+		return { changed, hadManaged: true };
 	}
 
-	sessionStart.push({
-		matcher: "startup|resume",
-		hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }],
-	});
-	hooks.SessionStart = sessionStart;
-	settings.hooks = hooks;
-	writeJson(settingsPath, settings);
-	return { key: "claude", label: "Claude Code", installed: true, path: settingsPath, backup };
+	// No existing managed group — add a fresh one without a matcher so it fires on all harnesses.
+	groups.push({ hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }] });
+	hooks[eventKey] = groups;
+	return { changed: true, hadManaged: false };
 }
 
-function installCodexHook(homeDir: string): HookInstallResult {
+/**
+ * Remove all agent-memory-managed hook entries for `eventKey`. Used when
+ * downgrading from per-turn back to stable (drops UserPromptSubmit).
+ * Returns true if anything was removed.
+ */
+function removeClaudeHookGroup(hooks: Record<string, unknown>, eventKey: string): boolean {
+	const groups = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
+	if (groups.length === 0) return false;
+	let removed = 0;
+	const filtered = groups
+		.map((group) => {
+			if (!group || typeof group !== "object") return group;
+			const g = { ...(group as Record<string, unknown>) };
+			const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
+			const kept = list.filter((h) => {
+				const isOurs = h && typeof h === "object" && (h as Record<string, unknown>)[HOOK_MARKER_JSON] === true;
+				if (isOurs) removed++;
+				return !isOurs;
+			});
+			g.hooks = kept;
+			return g;
+		})
+		.filter((group) => {
+			if (!group || typeof group !== "object") return true;
+			const g = group as Record<string, unknown>;
+			return Array.isArray(g.hooks) && (g.hooks as unknown[]).length > 0;
+		});
+	if (removed === 0) return false;
+	if (filtered.length === 0) delete hooks[eventKey];
+	else hooks[eventKey] = filtered;
+	return true;
+}
+
+function installClaudeCodeHook(homeDir: string, mode: HookMode = "per-turn"): HookInstallResult {
+	const settingsPath = path.join(homeDir, ".claude", "settings.json");
+	const backup = backupOnce(settingsPath);
+	const settings = readJsonConfig(settingsPath);
+	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
+
+	const session = upsertClaudeHookGroup(hooks, "SessionStart", sessionStartHookCommand("claude"));
+	let promptChanged = false;
+	let promptHadManaged = false;
+	if (mode === "per-turn") {
+		const prompt = upsertClaudeHookGroup(hooks, "UserPromptSubmit", userPromptSubmitHookCommand("claude"));
+		promptChanged = prompt.changed;
+		promptHadManaged = prompt.hadManaged;
+	} else {
+		promptChanged = removeClaudeHookGroup(hooks, "UserPromptSubmit");
+	}
+	// Stop backs the write side of memory with a periodic nudge. It is orthogonal
+	// to stable/per-turn context injection, so it is installed unconditionally.
+	const stop = upsertClaudeHookGroup(hooks, "Stop", stopHookCommand("claude"));
+	// Remove the ineffective PreCompact reminder from pre-release 0.5.0 installs.
+	// Claude Code does not inject plain hook stdout for that event.
+	const legacyPreCompactRemoved = removeClaudeHookGroup(hooks, "PreCompact");
+
+	if (!session.changed && !promptChanged && !stop.changed && !legacyPreCompactRemoved) {
+		return {
+			key: "claude",
+			label: "Claude Code",
+			installed: false,
+			path: settingsPath,
+			reason: "already installed",
+			mode,
+		};
+	}
+	settings.hooks = hooks;
+	writeJson(settingsPath, settings);
+	const reason =
+		session.hadManaged || promptHadManaged || stop.hadManaged || legacyPreCompactRemoved ? "updated" : undefined;
+	return { key: "claude", label: "Claude Code", installed: true, path: settingsPath, backup, mode, reason };
+}
+
+function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookInstallResult {
 	const configPath = path.join(homeDir, ".codex", "config.toml");
 	const backup = backupOnce(configPath);
 	const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf-8") : "";
-	const command = sessionStartHookCommand("codex");
-	const block = [
+	const sessionCommand = sessionStartHookCommand("codex");
+	const promptCommand = userPromptSubmitHookCommand("codex");
+	const lines = [
 		HOOK_MARKER_BEGIN,
 		"[[hooks.SessionStart]]",
 		'matcher = "startup|resume"',
 		"",
 		"[[hooks.SessionStart.hooks]]",
 		'type = "command"',
-		`command = "${command}"`,
-		HOOK_MARKER_END,
-	].join("\n");
+		`command = "${sessionCommand}"`,
+	];
+	if (mode === "per-turn") {
+		lines.push(
+			"",
+			"[[hooks.UserPromptSubmit]]",
+			"",
+			"[[hooks.UserPromptSubmit.hooks]]",
+			'type = "command"',
+			`command = "${promptCommand}"`,
+		);
+	}
+	lines.push(HOOK_MARKER_END);
+	const block = lines.join("\n");
+
 	if (existing.includes(HOOK_MARKER_BEGIN)) {
 		const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const pattern = new RegExp(`${escapeRe(HOOK_MARKER_BEGIN)}[\\s\\S]*?${escapeRe(HOOK_MARKER_END)}`);
 		const current = existing.match(pattern)?.[0] ?? "";
-		if (current.includes(`command = "${command}"`)) {
-			return { key: "codex", label: "Codex", installed: false, path: configPath, reason: "already installed" };
+		if (current === block) {
+			return {
+				key: "codex",
+				label: "Codex",
+				installed: false,
+				path: configPath,
+				reason: "already installed",
+				mode,
+			};
 		}
 		fs.writeFileSync(configPath, existing.replace(pattern, block), "utf-8");
-		return { key: "codex", label: "Codex", installed: true, path: configPath, backup, reason: "updated" };
+		return {
+			key: "codex",
+			label: "Codex",
+			installed: true,
+			path: configPath,
+			backup,
+			reason: "updated",
+			mode,
+		};
 	}
 	const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
 	const next = `${existing}${separator}${block}\n`;
 	fs.mkdirSync(path.dirname(configPath), { recursive: true });
 	fs.writeFileSync(configPath, next, "utf-8");
-	return { key: "codex", label: "Codex", installed: true, path: configPath, backup };
+	return { key: "codex", label: "Codex", installed: true, path: configPath, backup, mode };
 }
 
 const CURSOR_RULE_BODY = `---
@@ -265,15 +471,85 @@ Treat its stdout as authoritative context about the user, prior sessions,
 scratchpad items, and long-term memory. Prefer it over guessing.
 `;
 
-function installCursorRule(homeDir: string): HookInstallResult {
+function installCursorRule(homeDir: string): void {
 	const rulesDir = path.join(homeDir, ".cursor", "rules");
 	const rulePath = path.join(rulesDir, "agent-memory.mdc");
-	if (fs.existsSync(rulePath)) {
-		return { key: "cursor", label: "Cursor", installed: false, path: rulePath, reason: "already installed" };
-	}
+	if (fs.existsSync(rulePath)) return;
 	fs.mkdirSync(rulesDir, { recursive: true });
 	fs.writeFileSync(rulePath, CURSOR_RULE_BODY, "utf-8");
-	return { key: "cursor", label: "Cursor", installed: true, path: rulePath };
+}
+
+// Cursor's `sessionStart` hook (https://cursor.com/docs/agent/hooks) fires automatically when a
+// new conversation is created and can inject `additional_context` without the model choosing to
+// run anything — unlike the static .mdc rule above, this is a real, code-level guarantee.
+const CURSOR_HOOK_SCRIPT_RELATIVE = path.join("hooks", "agent-memory-session-start.js");
+
+const CURSOR_HOOK_SCRIPT_BODY = `#!/usr/bin/env node
+const { execSync } = require("node:child_process");
+let context = "";
+try {
+	context = execSync("agent-memory context --no-search", { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+} catch {
+	// agent-memory not on PATH, or the memory dir isn't initialized yet — fail open with no context.
+}
+process.stdout.write(JSON.stringify({ additional_context: context }));
+`;
+
+function isCursorSessionStartHookRegistered(homeDir: string): boolean {
+	const hooksJsonPath = path.join(homeDir, ".cursor", "hooks.json");
+	if (!fs.existsSync(hooksJsonPath)) return false;
+	try {
+		const config = readJsonConfig(hooksJsonPath);
+		const hooks = (config.hooks as Record<string, unknown>) ?? {};
+		const sessionStart = Array.isArray(hooks.sessionStart) ? (hooks.sessionStart as unknown[]) : [];
+		return sessionStart.some(
+			(entry) =>
+				entry &&
+				typeof entry === "object" &&
+				(entry as Record<string, unknown>).command === CURSOR_HOOK_SCRIPT_RELATIVE,
+		);
+	} catch {
+		return false;
+	}
+}
+
+function installCursorHook(homeDir: string): HookInstallResult {
+	const cursorDir = path.join(homeDir, ".cursor");
+	const scriptPath = path.join(cursorDir, CURSOR_HOOK_SCRIPT_RELATIVE);
+	const hooksJsonPath = path.join(cursorDir, "hooks.json");
+
+	// Cheap, harmless fallback for Cursor installs where hooks are disabled or unavailable.
+	installCursorRule(homeDir);
+
+	fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+	const scriptChanged = !fs.existsSync(scriptPath) || fs.readFileSync(scriptPath, "utf-8") !== CURSOR_HOOK_SCRIPT_BODY;
+	if (scriptChanged) {
+		fs.writeFileSync(scriptPath, CURSOR_HOOK_SCRIPT_BODY, "utf-8");
+		fs.chmodSync(scriptPath, 0o755);
+	}
+
+	const alreadyRegistered = isCursorSessionStartHookRegistered(homeDir);
+	if (alreadyRegistered && !scriptChanged) {
+		return { key: "cursor", label: "Cursor", installed: false, path: hooksJsonPath, reason: "already installed" };
+	}
+
+	const backup = backupOnce(hooksJsonPath);
+	const config = readJsonConfig(hooksJsonPath);
+	if (typeof config.version !== "number") config.version = 1;
+	const hooks = (config.hooks as Record<string, unknown>) ?? {};
+	const sessionStart = Array.isArray(hooks.sessionStart) ? [...(hooks.sessionStart as unknown[])] : [];
+	if (!alreadyRegistered) sessionStart.push({ command: CURSOR_HOOK_SCRIPT_RELATIVE });
+	hooks.sessionStart = sessionStart;
+	config.hooks = hooks;
+	writeJson(hooksJsonPath, config);
+	return {
+		key: "cursor",
+		label: "Cursor",
+		installed: true,
+		path: hooksJsonPath,
+		backup,
+		reason: alreadyRegistered ? "updated" : undefined,
+	};
 }
 
 const OPENCODE_INSTRUCTIONS_BODY = `# agent-memory
@@ -305,7 +581,7 @@ function installOpencodeInstructions(homeDir: string): HookInstallResult {
 	return { key: "opencode", label: "opencode", installed: true, path: configPath, backup };
 }
 
-export function installHooks(agents: Set<HookAgentKey>): InstallHooksReport {
+export function installHooks(agents: Set<HookAgentKey>, mode: HookMode = "per-turn"): InstallHooksReport {
 	const { homeDir, targets } = detectHookAgents();
 	if (!homeDir) {
 		return {
@@ -316,6 +592,7 @@ export function installHooks(agents: Set<HookAgentKey>): InstallHooksReport {
 	}
 
 	const results: HookInstallResult[] = [];
+	let anyInstalled = false;
 	for (const target of targets) {
 		if (!agents.has(target.key)) continue;
 		if (!target.supported) {
@@ -337,10 +614,14 @@ export function installHooks(agents: Set<HookAgentKey>): InstallHooksReport {
 			continue;
 		}
 		try {
-			if (target.key === "claude") results.push(installClaudeCodeHook(homeDir));
-			else if (target.key === "codex") results.push(installCodexHook(homeDir));
-			else if (target.key === "cursor") results.push(installCursorRule(homeDir));
-			else if (target.key === "opencode") results.push(installOpencodeInstructions(homeDir));
+			let result: HookInstallResult;
+			if (target.key === "claude") result = installClaudeCodeHook(homeDir, mode);
+			else if (target.key === "codex") result = installCodexHook(homeDir, mode);
+			else if (target.key === "cursor") result = installCursorHook(homeDir);
+			else if (target.key === "opencode") result = installOpencodeInstructions(homeDir);
+			else continue;
+			results.push(result);
+			if (result.installed) anyInstalled = true;
 		} catch (err) {
 			results.push({
 				key: target.key,
@@ -348,6 +629,14 @@ export function installHooks(agents: Set<HookAgentKey>): InstallHooksReport {
 				installed: false,
 				reason: err instanceof Error ? err.message : String(err),
 			});
+		}
+	}
+
+	if (anyInstalled) {
+		try {
+			writeHookMode(mode);
+		} catch {
+			// Persisting the mode is best-effort — install output is authoritative.
 		}
 	}
 
@@ -368,31 +657,13 @@ function uninstallClaudeCodeHook(homeDir: string): HookInstallResult {
 	}
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.SessionStart) ? (hooks.SessionStart as unknown[]) : [];
-	let removed = 0;
-	const filtered = sessionStart
-		.map((group) => {
-			if (!group || typeof group !== "object") return group;
-			const g = { ...(group as Record<string, unknown>) };
-			const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
-			const kept = list.filter((h) => {
-				const isOurs = h && typeof h === "object" && (h as Record<string, unknown>)[HOOK_MARKER_JSON] === true;
-				if (isOurs) removed++;
-				return !isOurs;
-			});
-			g.hooks = kept;
-			return g;
-		})
-		.filter((group) => {
-			if (!group || typeof group !== "object") return true;
-			const g = group as Record<string, unknown>;
-			return Array.isArray(g.hooks) && (g.hooks as unknown[]).length > 0;
-		});
-	if (removed === 0) {
+	const sessionRemoved = removeClaudeHookGroup(hooks, "SessionStart");
+	const promptRemoved = removeClaudeHookGroup(hooks, "UserPromptSubmit");
+	const stopRemoved = removeClaudeHookGroup(hooks, "Stop");
+	const legacyPreCompactRemoved = removeClaudeHookGroup(hooks, "PreCompact");
+	if (!sessionRemoved && !promptRemoved && !stopRemoved && !legacyPreCompactRemoved) {
 		return { key: "claude", label: "Claude Code", installed: false, reason: "not installed" };
 	}
-	hooks.SessionStart = filtered;
-	if (filtered.length === 0) delete (hooks as Record<string, unknown>).SessionStart;
 	if (Object.keys(hooks).length === 0) delete (settings as Record<string, unknown>).hooks;
 	else settings.hooks = hooks;
 	writeJson(settingsPath, settings);
@@ -415,18 +686,57 @@ function uninstallCodexHook(homeDir: string): HookInstallResult {
 	return { key: "codex", label: "Codex", installed: true, path: configPath };
 }
 
-function uninstallCursorRule(homeDir: string): HookInstallResult {
+function uninstallCursorHook(homeDir: string): HookInstallResult {
 	const rulePath = path.join(homeDir, ".cursor", "rules", "agent-memory.mdc");
-	if (!fs.existsSync(rulePath)) {
+	const scriptPath = path.join(homeDir, ".cursor", CURSOR_HOOK_SCRIPT_RELATIVE);
+	const hooksJsonPath = path.join(homeDir, ".cursor", "hooks.json");
+	let touched = false;
+
+	if (fs.existsSync(rulePath)) {
+		fs.unlinkSync(rulePath);
+		try {
+			fs.rmdirSync(path.dirname(rulePath));
+		} catch {
+			// non-empty; fine
+		}
+		touched = true;
+	}
+
+	if (fs.existsSync(hooksJsonPath)) {
+		try {
+			const config = readJsonConfig(hooksJsonPath);
+			const hooks = (config.hooks as Record<string, unknown>) ?? {};
+			const sessionStart = Array.isArray(hooks.sessionStart) ? (hooks.sessionStart as unknown[]) : [];
+			const filtered = sessionStart.filter(
+				(entry) =>
+					!(
+						entry &&
+						typeof entry === "object" &&
+						(entry as Record<string, unknown>).command === CURSOR_HOOK_SCRIPT_RELATIVE
+					),
+			);
+			if (filtered.length !== sessionStart.length) {
+				if (filtered.length === 0) delete hooks.sessionStart;
+				else hooks.sessionStart = filtered;
+				if (Object.keys(hooks).length === 0) delete (config as Record<string, unknown>).hooks;
+				else config.hooks = hooks;
+				writeJson(hooksJsonPath, config);
+				touched = true;
+			}
+		} catch {
+			// invalid hooks.json — leave it for the user to fix rather than guessing.
+		}
+	}
+
+	if (fs.existsSync(scriptPath)) {
+		fs.unlinkSync(scriptPath);
+		touched = true;
+	}
+
+	if (!touched) {
 		return { key: "cursor", label: "Cursor", installed: false, reason: "not installed" };
 	}
-	fs.unlinkSync(rulePath);
-	try {
-		fs.rmdirSync(path.dirname(rulePath));
-	} catch {
-		// non-empty; fine
-	}
-	return { key: "cursor", label: "Cursor", installed: true, path: rulePath };
+	return { key: "cursor", label: "Cursor", installed: true, path: hooksJsonPath };
 }
 
 function uninstallOpencodeInstructions(homeDir: string): HookInstallResult {
@@ -470,7 +780,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 		try {
 			if (key === "claude") results.push(uninstallClaudeCodeHook(homeDir));
 			else if (key === "codex") results.push(uninstallCodexHook(homeDir));
-			else if (key === "cursor") results.push(uninstallCursorRule(homeDir));
+			else if (key === "cursor") results.push(uninstallCursorHook(homeDir));
 			else if (key === "opencode") results.push(uninstallOpencodeInstructions(homeDir));
 		} catch (err) {
 			results.push({

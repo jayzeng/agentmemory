@@ -4,9 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.5.0] - 2026-08-30
+
+### Added
+
+- Added agent-neutral setup, diagnostics, MCP, retrieval evaluation, and optional signed-plugin host surfaces while keeping the public package independent of proprietary plugin implementations.
+- Added a deterministic regression harness, token-savings simulator, and expanded synthetic evaluation corpus for release verification.
+- Added native Cursor session-start context wiring and a bounded Claude Code Stop-hook reminder for durable memory writes.
+
+### Changed
+
+- Switched qmd recall to one typed lexical-and-vector query with bounded, source-filtered context injection.
+- Prepared a distinct public package version for the accumulated post-0.4.17 changes.
+- Standardized the free installed preview at 20 recalls and 5 learning scans per local day.
+
 ### Fixed
 
 - Isolated the anonymous Pro-install CLI test from the live production service so a healthy preview deployment cannot make the deterministic Core suite fail.
+- Abort qmd and optional-plugin work when the per-turn hook reaches its three-second budget so a child process cannot keep the CLI alive.
+- Replaced organization-specific example and evaluation data with explicitly fictional fixtures.
+- Clarified Jay Zeng's copyright in original contributions and preserved the upstream `jo-inc` MIT notice and existing MIT grants.
+- Warn when duplicate memory lines or configured per-line limits would reduce context quality.
+- Made clean-checkout CI and release workflows run the token-savings and compiled-CLI harness suites.
+- Routed MCP reads and scratchpad writes through Core secret screening and report the actual package version during MCP initialization.
 
 ## [0.4.17] - 2026-08-17
 
@@ -39,13 +59,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Account-scoped daily capability quotas and fail-closed SessionStart usage reservation, commit, and release contracts
-- Activation-v2 support for server-issued usage credentials and D1-backed free-session metering
+- Activation-v2 support for server-issued usage credentials and server-backed free-session metering
 - Installed-plugin SessionStart hook dispatch while preserving public-core context when paid work is unavailable or exhausted
 
 ### Changed
 - Replace temporary unlimited email activation with a configurable free daily agent-session allowance keyed by normalized email
 - Persist an activation credential only after the control plane accepts activation; reconstruct the free account-metered capability policy in trusted core code on every load
-- Disclose the bounded D1 usage count and opaque SessionStart operation IDs on the activation page
+- Disclose the bounded server-tracked usage count and opaque SessionStart operation IDs on the activation page
 
 ### Fixed
 - Ignore legacy or malformed local activation records instead of treating them as active entitlements

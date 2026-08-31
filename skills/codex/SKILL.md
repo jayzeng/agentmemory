@@ -19,6 +19,8 @@ agent-memory context --no-search 2>/dev/null
 
 This prints your scratchpad, today's log, long-term memory, and yesterday's log. Review it — especially **open scratchpad items** — before starting work.
 
+Run this even if a SessionStart hook already fired — the hook only injects the narrower "stable" layer (MEMORY.md + scratchpad) to keep per-turn re-injection cheap. Seeing two context blocks in one session is expected; treat this fuller one as authoritative.
+
 If the user's task relates to prior work, search for relevant memories:
 ```bash
 agent-memory search --query "<topic>" --mode keyword
@@ -106,6 +108,15 @@ agent-memory search --query "how we handle auth" --mode semantic # Finds related
 agent-memory search --query "performance" --mode deep --limit 10 # Hybrid + reranking
 ```
 
+`search` only looks at what you saved (daily logs, MEMORY.md, topics, scratchpad). For **prior sessions** — things you or the agent said in a past Claude/Codex/pi chat — use `recall`:
+
+```bash
+agent-memory recall "deploy-to-dev label workflow"          # Cross-session, verbatim events
+agent-memory recall "auth refresh" --scope current --limit 5 # Restrict to this workspace
+```
+
+When qmd search returns no hits and AgentMemory Pro is installed, `search` automatically falls back to `recall` — but calling `recall` directly is faster and clearer when you know you want session history.
+
 If qmd is not installed, fall back to reading files directly:
 ```bash
 agent-memory read --target long_term
@@ -172,5 +183,6 @@ Distil scans daily logs and topic notes, groups entries by their `#tags`, and ge
 - Use `--target long_term` sparingly: architecture, preferences, key commands, hard-won lessons
 - Prefer the scratchpad for any TODOs or follow-ups (persistent, cross-session tracking)
 - Use `#tags` and `[[links]]` in content to improve search recall
-- Use `agent-memory search` to recall past work before starting related tasks
+- Use `agent-memory search` to find things you saved (daily logs, MEMORY.md, topics) before starting related tasks
+- Use `agent-memory recall "<query>"` to find things from prior chat sessions (Pro) — not the same as `search`
 - All `agent-memory` commands are safe — they read/write only to the memory directory (`~/.agent-memory/` by default)

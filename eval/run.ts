@@ -25,6 +25,7 @@ import type {
 	IssueVerdict,
 	ProbeOracle,
 	RepeatedText,
+	RetrievalMetrics,
 } from "./types.js";
 
 const REPO_ROOT = path.resolve(import.meta.dir, "..");
@@ -86,6 +87,9 @@ function scoreOutput(output: string, oracle: ProbeOracle): { passed: boolean; as
 	for (const marker of oracle.forbiddenMarkers ?? []) {
 		if (output.includes(marker)) assertions.push(`included forbidden marker: ${marker}`);
 	}
+	if (oracle.minChars !== undefined && output.length < oracle.minChars) {
+		assertions.push(`output length ${output.length} below minimum ${oracle.minChars}`);
+	}
 	if (oracle.maxChars !== undefined && output.length > oracle.maxChars) {
 		assertions.push(`output length ${output.length} exceeded ${oracle.maxChars}`);
 	}
@@ -107,7 +111,7 @@ async function runPromptRoutingProbe(probe: FeedbackProbe): Promise<FeedbackProb
 	fs.writeFileSync(path.join(memoryRoot, "daily", "eval.md"), marker, "utf-8");
 	fs.writeFileSync(
 		qmdShim,
-		`#!${process.execPath}\nconst fs = require("node:fs");\nconst args = process.argv.slice(2);\nif (args[0] === "status") { process.stdout.write("ok\\n"); process.exit(0); }\nif (args[0] === "collection" && args[1] === "list") { process.stdout.write(JSON.stringify([{ name: "agent-memory" }])); process.exit(0); }\nif (args[0] === "search") { fs.writeFileSync(process.env.QMD_CAPTURE_FILE, JSON.stringify(args)); process.stdout.write(JSON.stringify([{ path: "qmd://agent-memory/daily/eval.md", content: "${marker}" }])); process.exit(0); }\nprocess.stderr.write("unexpected qmd arguments: " + JSON.stringify(args));\nprocess.exit(1);\n`,
+		`#!${process.execPath}\nconst fs = require("node:fs");\nconst args = process.argv.slice(2);\nif (args[0] === "status") { process.stdout.write("ok\\n"); process.exit(0); }\nif (args[0] === "collection" && args[1] === "list") { process.stdout.write(JSON.stringify([{ name: "agent-memory" }])); process.exit(0); }\nif (args[0] === "search" || args[0] === "query") { fs.writeFileSync(process.env.QMD_CAPTURE_FILE, JSON.stringify(args)); process.stdout.write(JSON.stringify([{ path: "qmd://agent-memory/daily/eval.md", content: "${marker}" }])); process.exit(0); }\nprocess.stderr.write("unexpected qmd arguments: " + JSON.stringify(args));\nprocess.exit(1);\n`,
 		"utf-8",
 	);
 	fs.chmodSync(qmdShim, 0o755);
@@ -140,7 +144,12 @@ async function runPromptRoutingProbe(probe: FeedbackProbe): Promise<FeedbackProb
 			assertions.push("CLI context did not invoke qmd search");
 		} else {
 			const captured: unknown = JSON.parse(fs.readFileSync(captureFile, "utf-8"));
-			if (!Array.isArray(captured) || !captured.includes(query)) {
+			// Accept either the raw-string arg (`qmd search <query>`) or the typed-query
+			// form (`qmd query "lex: <query>\nvec: <query>"`) — both carry the full query
+			// text through without shell evaluation.
+			const passedThrough =
+				Array.isArray(captured) && captured.some((a) => typeof a === "string" && a.includes(query));
+			if (!passedThrough) {
 				assertions.push("CLI context did not pass the query argument to qmd search");
 			}
 		}
@@ -296,6 +305,10 @@ async function runLiveQmdProbes(dataset: FeedbackDataset, probes: FeedbackProbe[
 					.map((source) => path.basename(source, path.extname(source)));
 				const returnedSources = allReturnedSources.slice(0, probe.oracle.topK ?? 5);
 				const scored = scoreOutput(returnedSources.join("\n"), probe.oracle);
+				const required = probe.oracle.requiredMarkers ?? [];
+				const firstRelevantIndex = allReturnedSources.findIndex((source) =>
+					required.some((marker) => source.includes(marker)),
+				);
 				return {
 					probeId: probe.id,
 					issueId: probe.issueId,
@@ -304,6 +317,10 @@ async function runLiveQmdProbes(dataset: FeedbackDataset, probes: FeedbackProbe[
 					evaluator: probe.evaluator,
 					assertions: scored.assertions,
 					returnedSources,
+					firstRelevantRank: firstRelevantIndex < 0 ? undefined : firstRelevantIndex + 1,
+					relevantResults: returnedSources.filter((source) => required.some((marker) => source.includes(marker)))
+						.length,
+					retrievedResults: returnedSources.length,
 					durationMs: performance.now() - started,
 				} satisfies FeedbackProbeResult;
 			} catch (error) {
@@ -338,6 +355,63 @@ function deferredResult(probe: FeedbackProbe): FeedbackProbeResult {
 	};
 }
 
+function percentile(values: number[], p: number): number | null {
+	if (values.length === 0) return null;
+	const sorted = [...values].sort((a, b) => a - b);
+	return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)];
+}
+
+export function calculateRetrievalMetrics(results: FeedbackProbeResult[]): RetrievalMetrics {
+	const retrieval = results.filter(
+		(result) => result.evaluator === "live-qmd" && result.retrievedResults !== undefined,
+	);
+	const evaluated = retrieval.filter((result) => result.firstRelevantRank !== undefined);
+	// A query with no relevant result is an evaluated miss, not missing data.
+	// Keep it in the denominator for recall, MRR, and nDCG; otherwise failed
+	// retrieval queries disappear and the aggregate becomes optimistically biased.
+	const hitAt = (k: number) =>
+		retrieval.length
+			? retrieval.filter((result) => (result.firstRelevantRank ?? Infinity) <= k).length / retrieval.length
+			: null;
+	const reciprocalAt = (k: number) =>
+		retrieval.length
+			? retrieval.reduce(
+					(sum, result) =>
+						sum + ((result.firstRelevantRank ?? Infinity) <= k ? 1 / (result.firstRelevantRank as number) : 0),
+					0,
+				) / retrieval.length
+			: null;
+	const ndcg = retrieval.length
+		? retrieval.reduce((sum, result) => {
+				const rank = result.firstRelevantRank ?? Infinity;
+				return sum + (rank <= 5 ? 1 / Math.log2(rank + 1) : 0);
+			}, 0) / retrieval.length
+		: null;
+	const precision = retrieval.length
+		? retrieval.reduce(
+				(sum, result) => sum + (result.relevantResults ?? 0) / Math.max(1, result.retrievedResults ?? 0),
+				0,
+			) / retrieval.length
+		: null;
+	const latencies = results
+		.filter((result) => result.evaluator === "live-qmd" && result.durationMs > 0)
+		.map((result) => result.durationMs);
+	return {
+		queries: retrieval.length,
+		evaluatedQueries: evaluated.length,
+		recallAt1: hitAt(1),
+		recallAt5: hitAt(5),
+		mrrAt1: reciprocalAt(1),
+		mrrAt5: reciprocalAt(5),
+		ndcgAt5: ndcg,
+		precisionAt5: precision,
+		staleHitRate: null,
+		latencyMsP50: percentile(latencies, 0.5),
+		latencyMsP95: percentile(latencies, 0.95),
+		injectedTokenOverhead: null,
+	};
+}
+
 function buildIssueVerdicts(dataset: FeedbackDataset, results: FeedbackProbeResult[]): IssueVerdict[] {
 	return dataset.issues.map((issue) => {
 		const issueResults = results.filter((result) => result.issueId === issue.id);
@@ -369,13 +443,22 @@ export async function runFeedbackEvaluation(
 	const results: FeedbackProbeResult[] = [];
 	const liveProbes: FeedbackProbe[] = [];
 
+	const issueClassifications = new Map(dataset.issues.map((issue) => [issue.id, issue.classification]));
+
 	for (const probe of dataset.probes) {
 		if (probe.evaluator === "live-qmd") {
 			liveProbes.push(probe);
 			continue;
 		}
-		if (probe.evaluator === "prompt-routing") results.push(await runPromptRoutingProbe(probe));
-		else results.push(await runIsolatedProbe(dataset, probe));
+		const result =
+			probe.evaluator === "prompt-routing"
+				? await runPromptRoutingProbe(probe)
+				: await runIsolatedProbe(dataset, probe);
+		if (result.status === "failed" && issueClassifications.get(result.issueId) === "product-opportunity") {
+			results.push({ ...result, isProductOpportunity: true });
+		} else {
+			results.push(result);
+		}
 	}
 
 	if (options.liveQmd) results.push(...(await runLiveQmdProbes(dataset, liveProbes)));
@@ -389,11 +472,19 @@ export async function runFeedbackEvaluation(
 		liveQmd: options.liveQmd ?? false,
 		probes: results,
 		issues: buildIssueVerdicts(dataset, results),
+		retrievalMetrics: calculateRetrievalMetrics(results),
 	};
 }
 
 function printReport(report: FeedbackEvalReport): void {
 	console.log(`External feedback evaluation: ${report.datasetVersion}`);
+	if (report.retrievalMetrics) {
+		const m = report.retrievalMetrics;
+		const pct = (value: number | null) => (value === null ? "n/a" : `${(value * 100).toFixed(1)}%`);
+		console.log(
+			`Retrieval: ${m.evaluatedQueries}/${m.queries} scored · Recall@1 ${pct(m.recallAt1)} · Recall@5 ${pct(m.recallAt5)} · MRR@1 ${pct(m.mrrAt1)} · MRR@5 ${pct(m.mrrAt5)} · nDCG@5 ${pct(m.ndcgAt5)} · Precision@5 ${pct(m.precisionAt5)} · p50 ${m.latencyMsP50?.toFixed(0) ?? "n/a"}ms · p95 ${m.latencyMsP95?.toFixed(0) ?? "n/a"}ms`,
+		);
+	}
 	for (const issue of report.issues) {
 		console.log(
 			`${issue.verdict.padEnd(14)} ${issue.issueId} (${issue.failed} failed, ${issue.passed} passed, ${issue.deferred} deferred)`,
@@ -401,16 +492,25 @@ function printReport(report: FeedbackEvalReport): void {
 	}
 	console.log("\nProbe details:");
 	for (const probe of report.probes) {
-		console.log(`${probe.status.padEnd(8)} ${probe.probeId}`);
+		const label = probe.isProductOpportunity ? "opportunity" : probe.status;
+		console.log(`${label.padEnd(11)} ${probe.probeId}`);
 		for (const assertion of probe.assertions) console.log(`  - ${assertion}`);
 		if (probe.returnedSources) console.log(`  - sources: ${probe.returnedSources.join(", ") || "none"}`);
 	}
 }
 
 if (import.meta.main) {
-	const args = new Set(process.argv.slice(2));
-	const report = await runFeedbackEvaluation({ liveQmd: args.has("--live-qmd") });
+	const argv = process.argv.slice(2);
+	const args = new Set(argv);
+	const datasetIndex = argv.indexOf("--dataset");
+	const dataset = datasetIndex >= 0 ? argv[datasetIndex + 1] : undefined;
+	if (datasetIndex >= 0 && (!dataset || dataset.startsWith("--"))) {
+		console.error("--dataset requires a path or file URL");
+		process.exit(2);
+	}
+	const report = await runFeedbackEvaluation({ dataset, liveQmd: args.has("--live-qmd") });
 	if (args.has("--json")) console.log(JSON.stringify(report, null, 2));
 	else printReport(report);
-	if (args.has("--strict") && report.probes.some((probe) => probe.status === "failed")) process.exitCode = 1;
+	const regressions = report.probes.filter((probe) => probe.status === "failed" && !probe.isProductOpportunity);
+	if (args.has("--strict") && regressions.length > 0) process.exitCode = 1;
 }

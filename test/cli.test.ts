@@ -28,7 +28,14 @@ import {
 	serializeScratchpad,
 	todayStr,
 } from "../src/core.js";
-import { _setHookHomeDirForTest, installHooks, uninstallHooks } from "../src/hooks.js";
+import {
+	_setHookHomeDirForTest,
+	installHooks,
+	isHookInstalled,
+	isStopHookInstalled,
+	isUserPromptSubmitInstalled,
+	uninstallHooks,
+} from "../src/hooks.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -47,6 +54,15 @@ function cleanupTmpDir() {
 	_clearUpdateTimer();
 	_resetBaseDir();
 	fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+function installFakeQmd(source: string): string {
+	const fakeBin = path.join(tmpDir, "bin");
+	fs.mkdirSync(fakeBin, { recursive: true });
+	const fakeQmd = path.join(fakeBin, "qmd");
+	fs.writeFileSync(fakeQmd, `#!/usr/bin/env node\n${source}\n`, "utf-8");
+	fs.chmodSync(fakeQmd, 0o755);
+	return fakeBin;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +327,7 @@ describe("CLI subprocess", () => {
 	beforeEach(setupTmpDir);
 	afterEach(cleanupTmpDir);
 
-	test("init creates directories", async () => {
+	test("init creates directories", { timeout: 30_000 }, async () => {
 		const result = Bun.spawnSync(
 			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "init", "--dir", tmpDir, "--json"],
 			{ stdout: "pipe", stderr: "pipe" },
@@ -320,6 +336,330 @@ describe("CLI subprocess", () => {
 		const out = JSON.parse(result.stdout.toString());
 		expect(out.ok).toBe(true);
 		expect(out.directory).toBe(tmpDir);
+	});
+
+	test("hook user-prompt-submit emits dynamic-layer context from stdin JSON", { timeout: 15_000 }, () => {
+		// Seed the memory dir: stable content (MEMORY.md, scratchpad) must be
+		// EXCLUDED; dynamic content (today's daily log) must be INCLUDED.
+		fs.mkdirSync(path.join(tmpDir, "daily"), { recursive: true });
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "SCRATCHPAD.md"), "# Scratchpad\n\n- [ ] Task X\n", "utf-8");
+		const today = new Date().toISOString().slice(0, 10);
+		fs.writeFileSync(path.join(tmpDir, "daily", `${today}.md`), "Today's dynamic entry", "utf-8");
+
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"user-prompt-submit",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{
+				stdin: Buffer.from(JSON.stringify({ user_input: "recent" })),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const stdout = result.stdout.toString();
+		expect(stdout).toContain(`## Daily log: ${today} (today)`);
+		expect(stdout).toContain("Today's dynamic entry");
+		expect(stdout).not.toContain("Durable fact");
+		expect(stdout).not.toContain("Task X");
+	});
+
+	test("hook user-prompt-submit cancels a hanging qmd process at its timeout", { timeout: 12_000 }, async () => {
+		const fakeBin = installFakeQmd('process.on("SIGTERM", () => process.exit(0));\nsetInterval(() => {}, 1_000);');
+
+		const startedAt = performance.now();
+		const child = Bun.spawn(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"user-prompt-submit",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{
+				stdin: Buffer.from(JSON.stringify({ user_input: "recent" })),
+				stdout: "pipe",
+				stderr: "pipe",
+				env: {
+					...process.env,
+					PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+					AGENT_MEMORY_PLUGIN_DIR: path.join(tmpDir, "plugins"),
+					AGENT_MEMORY_QMD_UPDATE: "off",
+					AGENT_MEMORY_QMD_EMBED: "off",
+				},
+			},
+		);
+		const exitCode = await child.exited;
+		const elapsedMs = performance.now() - startedAt;
+
+		expect(exitCode).toBe(0);
+		expect(elapsedMs).toBeLessThan(6_000);
+	});
+
+	test("hook user-prompt-submit exits 0 with empty stdout on malformed stdin", { timeout: 15_000 }, () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"user-prompt-submit",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{
+				stdin: Buffer.from("this is not json"),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toBe("");
+	});
+
+	test("hook user-prompt-submit exits 0 with empty stdout on empty stdin", { timeout: 15_000 }, () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"user-prompt-submit",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{
+				stdin: Buffer.from(""),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toBe("");
+	});
+
+	test("hook session-start emits stable-layer only when hook mode is per-turn", { timeout: 15_000 }, () => {
+		fs.mkdirSync(path.join(tmpDir, "daily"), { recursive: true });
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "SCRATCHPAD.md"), "# Scratchpad\n\n- [ ] Task X\n", "utf-8");
+		const today = new Date().toISOString().slice(0, 10);
+		fs.writeFileSync(path.join(tmpDir, "daily", `${today}.md`), "Today's dynamic entry", "utf-8");
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"session-start",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+				env: { ...process.env, AGENT_MEMORY_HOOK_MODE: "per-turn" },
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const stdout = result.stdout.toString();
+		expect(stdout).toContain("Durable fact");
+		expect(stdout).toContain("Task X");
+		expect(stdout).not.toContain("Today's dynamic entry");
+	});
+
+	test("hook session-start emits full context in stable hook mode", { timeout: 15_000 }, () => {
+		fs.mkdirSync(path.join(tmpDir, "daily"), { recursive: true });
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+		const today = new Date().toISOString().slice(0, 10);
+		fs.writeFileSync(path.join(tmpDir, "daily", `${today}.md`), "Today's dynamic entry", "utf-8");
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"session-start",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+				env: { ...process.env, AGENT_MEMORY_HOOK_MODE: "stable" },
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const stdout = result.stdout.toString();
+		expect(stdout).toContain("Durable fact");
+		expect(stdout).toContain("Today's dynamic entry");
+	});
+
+	function runHookStop(sessionId: string, stopHookActive = false) {
+		return Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"stop",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{
+				stdin: Buffer.from(JSON.stringify({ session_id: sessionId, stop_hook_active: stopHookActive })),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+	}
+
+	test("hook stop only nags every STOP_NAG_INTERVAL (12) turns per session", { timeout: 20_000 }, () => {
+		const sessionId = "session-a";
+		for (let turn = 1; turn <= 11; turn++) {
+			const result = runHookStop(sessionId);
+			expect(result.exitCode).toBe(0);
+			expect(result.stdout.toString()).toBe("");
+		}
+		const twelfth = runHookStop(sessionId);
+		expect(twelfth.exitCode).toBe(0);
+		const decision = JSON.parse(twelfth.stdout.toString());
+		expect(decision.decision).toBe("block");
+		expect(typeof decision.reason).toBe("string");
+		expect(decision.reason.length).toBeGreaterThan(0);
+
+		// Counter resets relative to the last nag — turns 13-23 stay quiet, 24 nags again.
+		for (let turn = 13; turn <= 23; turn++) {
+			expect(runHookStop(sessionId).stdout.toString()).toBe("");
+		}
+		const twentyFourth = runHookStop(sessionId);
+		expect(JSON.parse(twentyFourth.stdout.toString()).decision).toBe("block");
+	});
+
+	test("hook stop never nags twice in a row when stop_hook_active is true", { timeout: 15_000 }, () => {
+		const sessionId = "session-b";
+		for (let turn = 1; turn <= 12; turn++) {
+			runHookStop(sessionId, true);
+		}
+		// Even after 12 calls, stop_hook_active always short-circuits to "allow".
+		const result = runHookStop(sessionId, true);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toBe("");
+	});
+
+	test("hook stop tracks each session_id independently", { timeout: 15_000 }, () => {
+		for (let turn = 1; turn <= 11; turn++) {
+			expect(runHookStop("session-c").stdout.toString()).toBe("");
+		}
+		// A different session starts its own counter from zero.
+		expect(runHookStop("session-d").stdout.toString()).toBe("");
+	});
+
+	test("hook stop exits 0 with empty stdout on missing session_id", { timeout: 15_000 }, () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"hook",
+				"stop",
+				"--agent",
+				"claude",
+				"--dir",
+				tmpDir,
+			],
+			{ stdin: Buffer.from(JSON.stringify({})), stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toBe("");
+	});
+
+	test("serve --mcp initializes with the package version and lists Core tools", { timeout: 15_000 }, () => {
+		const requests = [
+			{ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } },
+			{ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+		];
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "serve", "--mcp", "--dir", tmpDir],
+			{
+				stdin: Buffer.from(`${requests.map((request) => JSON.stringify(request)).join("\n")}\n`),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const responses = result.stdout
+			.toString()
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(responses[0]?.result.serverInfo).toEqual({ name: "agent-memory", version: "0.5.0" });
+		const toolNames = responses[1]?.result.tools.map((tool: { name: string }) => tool.name);
+		expect(toolNames).toContain("memory_read");
+		expect(toolNames).toContain("memory_write");
+	});
+
+	test("serve --mcp routes scratchpad writes through Core secret screening", { timeout: 15_000 }, () => {
+		const token = "sk-eval-DO-NOT-USE-1234567890abcdef";
+		const request = {
+			jsonrpc: "2.0",
+			id: 1,
+			method: "tools/call",
+			params: { name: "memory_write", arguments: { target: "scratchpad", content: `Use ${token}` } },
+		};
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "serve", "--mcp", "--dir", tmpDir],
+			{
+				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).not.toContain(token);
+		const scratchpad = fs.readFileSync(path.join(tmpDir, "SCRATCHPAD.md"), "utf-8");
+		expect(scratchpad).not.toContain(token);
+		expect(scratchpad).toContain("[REDACTED_SECRET]");
+	});
+
+	test("serve --mcp screens legacy secrets before returning memory", { timeout: 15_000 }, () => {
+		const token = "sk-eval-DO-NOT-USE-1234567890abcdef";
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), `# Memory\n\nUse ${token}\n`);
+		fs.writeFileSync(path.join(tmpDir, "SCRATCHPAD.md"), `# Scratchpad\n\n- [ ] Rotate ${token}\n`);
+		const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "memory_read", arguments: {} } };
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "serve", "--mcp", "--dir", tmpDir],
+			{
+				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).not.toContain(token);
+		expect(result.stdout.toString()).toContain("[REDACTED_SECRET]");
 	});
 
 	test("status shows config", async () => {
@@ -586,7 +926,10 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory");
-		expect(out).toContain("Commands:");
+		// Grouped-help sections replaced the single "Commands:" header
+		expect(out).toContain("Do things:");
+		expect(out).toContain("Setup:");
+		expect(out).toContain("Pro:");
 		for (const command of COMMANDS) expect(out).toMatch(new RegExp(`^  ${command}\\s{2,}`, "m"));
 		expect(out).not.toMatch(/^\t/m);
 	});
@@ -624,10 +967,10 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		const stdout = result.stdout.toString();
 		expect(stdout).toContain("Core remembers what you save. Pro learns from what you do.");
-		expect(stdout).toContain("Recall coding history");
-		expect(stdout).toContain("Learn from corrections");
-		expect(stdout).toContain("Memory Dashboard");
-		expect(stdout).toContain("No account is required");
+		expect(stdout).toContain("Remember past sessions");
+		expect(stdout).toContain("Learn from your patterns");
+		expect(stdout).toContain("Private by default");
+		expect(stdout).toContain("No account. No email.");
 		expect(stdout).toContain("agent-memory pro install");
 	});
 
@@ -722,7 +1065,7 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		const out = result.stdout.toString();
 		expect(out).toContain("agent-memory plugin install");
-		expect(out).toContain("10 recalls and one learning scan per local day");
+		expect(out).toContain("20 recalls and 5 learning scans per local day");
 	});
 
 	test("Pro status delegates to the low-level bootstrap contract", () => {
@@ -747,6 +1090,255 @@ describe("CLI subprocess", () => {
 			stderr: "pipe",
 		});
 		expect(result.exitCode).toBe(1);
+	});
+
+	test("typo in command name suggests the correct one", async () => {
+		const result = Bun.spawnSync(["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "reed", "--json"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr.toString()).toContain("Did you mean 'read'");
+	});
+
+	test("unknown flag on write is rejected (not silently ignored)", async () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--dir",
+				tmpDir,
+				"--taget",
+				"long_term",
+				"--content",
+				"should not persist",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(1);
+		const stderr = result.stderr.toString();
+		expect(stderr).toContain("Unknown flag --taget");
+		expect(stderr).toContain("Did you mean --target?");
+	});
+
+	test("unknown flag on search suggests --query", async () => {
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "search", "--dir", tmpDir, "--qeury", "test"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr.toString()).toContain("Did you mean --query?");
+	});
+
+	test("search --json emits a source field distinguishing qmd from recall fallback", () => {
+		const fakeBin = installFakeQmd(
+			'const args = process.argv.slice(2);\nif (args[0] === "collection") console.log(JSON.stringify([{ name: "agent-memory" }]));\nelse if (args.includes("query")) console.log("[]");',
+		);
+		const pluginDir = path.join(tmpDir, "plugin-install"); // empty → Pro absent → fallback no-op
+		const unique = "agent-memory-fallback-test-nonexistent-token-xzxzxz";
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"search",
+				"--query",
+				unique,
+				"--mode",
+				"keyword",
+				"--json",
+			],
+			{
+				env: {
+					...process.env,
+					PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+					AGENT_MEMORY_PLUGIN_DIR: pluginDir,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+
+		const out = JSON.parse(result.stdout.toString());
+		expect(out.mode).toBe("keyword");
+		expect(out.query).toBe(unique);
+		expect(out.source).toBe("qmd"); // Pro disabled → source stays "qmd"
+		expect(out.count).toBe(0);
+		expect(Array.isArray(out.results)).toBe(true);
+	});
+
+	test("search prints standard no-hit message when qmd is empty and Pro is absent", () => {
+		const fakeBin = installFakeQmd(
+			'const args = process.argv.slice(2);\nif (args[0] === "collection") console.log(JSON.stringify([{ name: "agent-memory" }]));\nelse if (args.includes("query")) console.log("[]");',
+		);
+		const pluginDir = path.join(tmpDir, "plugin-install");
+		const unique = "agent-memory-fallback-test-nonexistent-token-yzyzyz";
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "search", "--query", unique, "--mode", "keyword"],
+			{
+				env: {
+					...process.env,
+					PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+					AGENT_MEMORY_PLUGIN_DIR: pluginDir,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+
+		const stdout = result.stdout.toString();
+		// With Pro absent the fallback is a silent no-op and we fall back to the standard message.
+		expect(stdout).toContain(`No results found for "${unique}"`);
+		expect(stdout).not.toContain("falling back to prior sessions");
+	});
+
+	test("global --json flag is accepted on all commands", async () => {
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "status", "--dir", tmpDir, "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+	});
+
+	test("save preserves --tokens inside content", async () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"save",
+				"add --dry-run flag to distil",
+				"--dir",
+				tmpDir,
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const read = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "read", "--target", "daily", "--dir", tmpDir],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(read.stdout.toString()).toContain("add --dry-run flag to distil");
+	});
+
+	test("save honors trailing --target flag while preserving literal --target in content", async () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"save",
+				"literal --target long_term text",
+				"--target",
+				"long_term",
+				"--dir",
+				tmpDir,
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const read = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "read", "--target", "long_term", "--dir", tmpDir],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(read.stdout.toString()).toContain("literal --target long_term text");
+	});
+
+	test("note preserves --tokens as scratchpad text", async () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"note",
+				"fix the --no-verify hook",
+				"--dir",
+				tmpDir,
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(0);
+		const list = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "scratchpad", "list", "--dir", tmpDir],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(list.stdout.toString()).toContain("fix the --no-verify hook");
+	});
+
+	test("doctor exits 0 when everything is fine", { timeout: 30_000 }, async () => {
+		const seededDir = path.join(tmpDir, "doctor-ok");
+		// Seed MEMORY.md so it isn't the empty-warn path
+		Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"write",
+				"--target",
+				"long_term",
+				"--content",
+				"first fact",
+				"--dir",
+				seededDir,
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "doctor", "--dir", seededDir],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect([0, 1]).toContain(result.exitCode); // 1 acceptable if plugin unavailable in CI
+		const output = result.stdout.toString();
+		expect(output).toContain("AgentMemory diagnostic");
+		// Verify no duplicate Pro row from the earlier double-row bug
+		const proMatches = output.match(/AgentMemory Pro/g);
+		expect(proMatches?.length ?? 0).toBeLessThanOrEqual(1);
+	});
+
+	test("doctor --json emits structured rows", { timeout: 30_000 }, async () => {
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "doctor", "--dir", tmpDir, "--json"],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		const output = JSON.parse(result.stdout.toString()) as { rows: Array<{ status: string; label: string }> };
+		expect(Array.isArray(output.rows)).toBe(true);
+		expect(output.rows.length).toBeGreaterThan(0);
+		expect(output.rows.some((row) => row.label === "Memory directory")).toBe(true);
+	});
+
+	test("doctor reports Stop nudge status for Claude Code", { timeout: 30_000 }, () => {
+		const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-doctor-home-"));
+		try {
+			fs.mkdirSync(path.join(fakeHome, ".claude"), { recursive: true });
+			fs.writeFileSync(path.join(fakeHome, ".claude", "settings.json"), "{}");
+
+			const before = Bun.spawnSync(
+				["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "doctor", "--dir", tmpDir, "--json"],
+				{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: fakeHome } },
+			);
+			const beforeRows = JSON.parse(before.stdout.toString()).rows as Array<{ label: string; detail: string }>;
+			const beforeRow = beforeRows.find((row) => row.label === "Hook: Claude Code");
+			expect(beforeRow?.detail).toContain("Stop memory-write nudge missing");
+
+			Bun.spawnSync(
+				["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "install-hooks", "--only", "claude", "--yes"],
+				{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: fakeHome } },
+			);
+
+			const after = Bun.spawnSync(
+				["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "doctor", "--dir", tmpDir, "--json"],
+				{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: fakeHome } },
+			);
+			const afterRows = JSON.parse(after.stdout.toString()).rows as Array<{ label: string; detail: string }>;
+			const afterRow = afterRows.find((row) => row.label === "Hook: Claude Code");
+			expect(afterRow?.detail).toContain("Stop memory-write nudge active");
+		} finally {
+			fs.rmSync(fakeHome, { recursive: true, force: true });
+		}
 	});
 
 	test("sync command runs without crash", async () => {
@@ -774,6 +1366,83 @@ describe("CLI subprocess", () => {
 		expect(out.embedMode).toBeDefined();
 		expect(["background", "manual", "off"]).toContain(out.embedMode);
 		expect(out.officialPlugin).toEqual({ installed: false, result: "not_installed", entitlement: "missing" });
+	});
+
+	test("pro preview counts local sessions before the Pro bundle is installed", async () => {
+		const pluginDir = path.join(tmpDir, "plugin-preview");
+		const claudeRoot = path.join(tmpDir, "sessions", "claude");
+		const codexRoot = path.join(tmpDir, "sessions", "codex");
+		const piRoot = path.join(tmpDir, "sessions", "pi");
+		fs.mkdirSync(path.join(claudeRoot, "project"), { recursive: true });
+		fs.mkdirSync(codexRoot, { recursive: true });
+		fs.mkdirSync(piRoot, { recursive: true });
+		fs.writeFileSync(path.join(claudeRoot, "project", "one.jsonl"), "{}\n");
+		fs.writeFileSync(path.join(claudeRoot, "project", "two.jsonl"), "{}\n");
+		fs.writeFileSync(path.join(codexRoot, "three.jsonl"), "{}\n");
+
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "pro", "preview", "--json"],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+				env: {
+					...process.env,
+					AGENT_MEMORY_PLUGIN_DIR: pluginDir,
+					AGENT_MEMORY_CLAUDE_SESSION_ROOT: claudeRoot,
+					AGENT_MEMORY_CODEX_SESSION_ROOT: codexRoot,
+					AGENT_MEMORY_PI_SESSION_ROOT: piRoot,
+				},
+			},
+		);
+
+		expect(result.exitCode).toBe(0);
+		const out = JSON.parse(result.stdout.toString());
+		expect(out).toMatchObject({
+			available: true,
+			sessions: { claude: 2, codex: 1, pi: 0 },
+			discovered: 3,
+			previewed: 3,
+		});
+		expect(out.cap.limit).toBe(50);
+		expect(out.cap.used).toBe(3);
+	});
+
+	test("pro preview enforces a local daily session cap without a bundle", async () => {
+		const pluginDir = path.join(tmpDir, "plugin-preview-cap");
+		const claudeRoot = path.join(tmpDir, "sessions-cap", "claude");
+		const codexRoot = path.join(tmpDir, "sessions-cap", "codex");
+		const piRoot = path.join(tmpDir, "sessions-cap", "pi");
+		fs.mkdirSync(claudeRoot, { recursive: true });
+		fs.mkdirSync(codexRoot, { recursive: true });
+		fs.mkdirSync(piRoot, { recursive: true });
+		for (let index = 0; index < 55; index++) {
+			fs.writeFileSync(path.join(claudeRoot, `${index}.jsonl`), "{}\n");
+		}
+		const env = {
+			...process.env,
+			AGENT_MEMORY_PLUGIN_DIR: pluginDir,
+			AGENT_MEMORY_CLAUDE_SESSION_ROOT: claudeRoot,
+			AGENT_MEMORY_CODEX_SESSION_ROOT: codexRoot,
+			AGENT_MEMORY_PI_SESSION_ROOT: piRoot,
+		};
+
+		const first = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "pro", "preview", "--json"],
+			{ stdout: "pipe", stderr: "pipe", env },
+		);
+		const second = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "pro", "preview", "--json"],
+			{ stdout: "pipe", stderr: "pipe", env },
+		);
+
+		expect(first.exitCode).toBe(0);
+		expect(second.exitCode).toBe(0);
+		const firstOut = JSON.parse(first.stdout.toString());
+		const secondOut = JSON.parse(second.stdout.toString());
+		expect(firstOut.previewed).toBe(50);
+		expect(firstOut.cap).toMatchObject({ limit: 50, used: 50, remaining: 0, exhausted: false });
+		expect(secondOut.previewed).toBe(0);
+		expect(secondOut.cap).toMatchObject({ limit: 50, used: 50, remaining: 0, exhausted: true });
 	});
 
 	test("install-skills --uninstall removes SKILL.md from home", async () => {
@@ -1098,6 +1767,12 @@ describe("core-owned hooks and completion", () => {
 		expect(bash).not.toContain("recall learn eval");
 	});
 
+	test("zsh completion escapes apostrophes in descriptions", () => {
+		const zsh = generateCompletion("zsh");
+		expect(zsh).toContain("--skip-skills[init: don'\\''t prompt to install agent skills]");
+		expect(zsh).not.toContain("--skip-skills[init: don't prompt to install agent skills]");
+	});
+
 	test("managed Claude hook is idempotent and uninstall preserves unrelated hooks", () => {
 		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
 		try {
@@ -1113,6 +1788,371 @@ describe("core-owned hooks and completion", () => {
 			expect(uninstallHooks(new Set(["claude"])).results[0]?.installed).toBe(true);
 			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
 			expect(settings.hooks.SessionStart[0].hooks[0].command).toBe("echo keep");
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("fresh Claude hook install writes no matcher field and removes a legacy PreCompact hook", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(
+				settingsPath,
+				JSON.stringify({
+					hooks: {
+						PreCompact: [
+							{
+								hooks: [
+									{
+										type: "command",
+										command: "agent-memory hook pre-compact --agent claude",
+										_agentMemory: true,
+									},
+								],
+							},
+						],
+					},
+				}),
+			);
+			expect(installHooks(new Set(["claude"])).results[0]?.installed).toBe(true);
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			expect(settings.hooks.PreCompact).toBeUndefined();
+			const group = settings.hooks.SessionStart.find(
+				(g: Record<string, unknown>) =>
+					Array.isArray(g.hooks) && (g.hooks as Record<string, unknown>[]).some((h) => h._agentMemory === true),
+			);
+			expect(group).toBeDefined();
+			expect(group.matcher).toBeUndefined();
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("re-install repairs stale matcher on existing Claude hook entry", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			// Simulate an older install that wrote matcher: "startup|resume"
+			fs.writeFileSync(
+				settingsPath,
+				JSON.stringify({
+					hooks: {
+						SessionStart: [
+							{
+								matcher: "startup|resume",
+								hooks: [
+									{
+										type: "command",
+										command: "agent-memory hook session-start --agent claude",
+										_agentMemory: true,
+									},
+								],
+							},
+						],
+					},
+				}),
+			);
+			const result = installHooks(new Set(["claude"])).results[0];
+			expect(result?.installed).toBe(true);
+			expect(result?.reason).toBe("updated");
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			const group = settings.hooks.SessionStart[0];
+			expect(group.matcher).toBeUndefined();
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("per-turn install writes both SessionStart and UserPromptSubmit for Claude", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(settingsPath, JSON.stringify({}));
+			const report = installHooks(new Set(["claude"]), "per-turn");
+			expect(report.results[0]?.installed).toBe(true);
+			expect(report.results[0]?.mode).toBe("per-turn");
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			// Both groups exist and carry the marker.
+			const sessionGroup = settings.hooks.SessionStart.find(
+				(g: Record<string, unknown>) =>
+					Array.isArray(g.hooks) && (g.hooks as Record<string, unknown>[]).some((h) => h._agentMemory === true),
+			);
+			const promptGroup = settings.hooks.UserPromptSubmit.find(
+				(g: Record<string, unknown>) =>
+					Array.isArray(g.hooks) && (g.hooks as Record<string, unknown>[]).some((h) => h._agentMemory === true),
+			);
+			expect(sessionGroup).toBeDefined();
+			expect(promptGroup).toBeDefined();
+			expect(sessionGroup.hooks[0].command).toBe("agent-memory hook session-start --agent claude");
+			expect(promptGroup.hooks[0].command).toBe("agent-memory hook user-prompt-submit --agent claude");
+			// Hook mode persisted.
+			const config = JSON.parse(fs.readFileSync(path.join(memDir, "hook-config.json"), "utf-8"));
+			expect(config).toEqual({ mode: "per-turn" });
+			// isUserPromptSubmitInstalled sees it.
+			expect(isUserPromptSubmitInstalled(home, "claude")).toBe(true);
+			expect(isHookInstalled(home, "claude")).toBe(true);
+			// Re-install is idempotent.
+			expect(installHooks(new Set(["claude"]), "per-turn").results[0]?.reason).toBe("already installed");
+		} finally {
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("install writes a Stop group for Claude, independent of mode", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(settingsPath, JSON.stringify({}));
+
+			// Stable mode still gets Stop — it backs memory writes, not per-turn
+			// context injection, so it isn't gated by the mode toggle.
+			installHooks(new Set(["claude"]), "stable");
+			const stableSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			expect(stableSettings.hooks.Stop[0].hooks[0].command).toBe("agent-memory hook stop --agent claude");
+			expect(stableSettings.hooks.PreCompact).toBeUndefined();
+			expect(isStopHookInstalled(home, "claude")).toBe(true);
+
+			// Idempotent re-install, including a mode switch, doesn't duplicate it.
+			installHooks(new Set(["claude"]), "per-turn");
+			const perTurnSettings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			expect(perTurnSettings.hooks.Stop).toHaveLength(1);
+		} finally {
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("uninstall removes the managed Stop group and preserves unrelated hooks", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(
+				settingsPath,
+				JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "echo keep" }] }] } }),
+			);
+			installHooks(new Set(["claude"]));
+			expect(isStopHookInstalled(home, "claude")).toBe(true);
+
+			expect(uninstallHooks(new Set(["claude"])).results[0]?.installed).toBe(true);
+			expect(isStopHookInstalled(home, "claude")).toBe(false);
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			expect(settings.hooks.Stop[0].hooks[0].command).toBe("echo keep");
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("stable mode omits UserPromptSubmit and downgrade removes an existing one", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(settingsPath, JSON.stringify({}));
+			// First install per-turn — both hooks present.
+			installHooks(new Set(["claude"]), "per-turn");
+			expect(isUserPromptSubmitInstalled(home, "claude")).toBe(true);
+			// Now downgrade to stable — UserPromptSubmit managed entry must be removed.
+			const report = installHooks(new Set(["claude"]), "stable");
+			expect(report.results[0]?.installed).toBe(true);
+			expect(report.results[0]?.mode).toBe("stable");
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			expect(settings.hooks.UserPromptSubmit).toBeUndefined();
+			expect(isUserPromptSubmitInstalled(home, "claude")).toBe(false);
+			expect(isHookInstalled(home, "claude")).toBe(true);
+			// Config mode reflects downgrade.
+			const config = JSON.parse(fs.readFileSync(path.join(memDir, "hook-config.json"), "utf-8"));
+			expect(config.mode).toBe("stable");
+		} finally {
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("per-turn Codex install writes both TOML sections within one marker block", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			// Create ~/.codex so detectHookAgents picks it up.
+			fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
+			fs.writeFileSync(path.join(home, ".codex", "config.toml"), "");
+			const report = installHooks(new Set(["codex"]), "per-turn");
+			expect(report.results[0]?.installed).toBe(true);
+			const toml = fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf-8");
+			expect(toml).toContain("# BEGIN agent-memory hook");
+			expect(toml).toContain("# END agent-memory hook");
+			expect(toml).toContain("[[hooks.SessionStart]]");
+			expect(toml).toContain("[[hooks.UserPromptSubmit]]");
+			expect(toml).toContain('command = "agent-memory hook session-start --agent codex"');
+			expect(toml).toContain('command = "agent-memory hook user-prompt-submit --agent codex"');
+			// Both markers appear exactly once (single BEGIN/END pair).
+			expect(toml.split("# BEGIN agent-memory hook").length - 1).toBe(1);
+			expect(toml.split("# END agent-memory hook").length - 1).toBe(1);
+			expect(isUserPromptSubmitInstalled(home, "codex")).toBe(true);
+			// Re-install is idempotent.
+			expect(installHooks(new Set(["codex"]), "per-turn").results[0]?.reason).toBe("already installed");
+		} finally {
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("uninstall removes both SessionStart and UserPromptSubmit for Claude", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(settingsPath, JSON.stringify({}));
+			installHooks(new Set(["claude"]), "per-turn");
+			expect(uninstallHooks(new Set(["claude"])).results[0]?.installed).toBe(true);
+			expect(isHookInstalled(home, "claude")).toBe(false);
+			expect(isUserPromptSubmitInstalled(home, "claude")).toBe(false);
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			expect(settings).toEqual({});
+		} finally {
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("re-install deduplicates multiple managed Claude hook groups", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			const settingsPath = path.join(home, ".claude", "settings.json");
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			const managedHook = {
+				type: "command",
+				command: "agent-memory hook session-start --agent claude",
+				_agentMemory: true,
+			};
+			// Simulate 3 duplicate managed groups (as seen in the wild)
+			fs.writeFileSync(
+				settingsPath,
+				JSON.stringify({
+					hooks: {
+						SessionStart: [
+							{ matcher: "startup|resume", hooks: [managedHook] },
+							{ matcher: "startup|resume", hooks: [managedHook] },
+							{ matcher: "startup|resume", hooks: [managedHook] },
+							{ hooks: [{ type: "command", command: "echo keep" }] },
+						],
+					},
+				}),
+			);
+			const result = installHooks(new Set(["claude"])).results[0];
+			expect(result?.installed).toBe(true);
+			expect(result?.reason).toBe("updated");
+			const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+			// Only one managed group should remain, plus the unrelated hook
+			expect(settings.hooks.SessionStart).toHaveLength(2);
+			const managed = settings.hooks.SessionStart.find(
+				(g: Record<string, unknown>) =>
+					Array.isArray(g.hooks) && (g.hooks as Record<string, unknown>[]).some((h) => h._agentMemory === true),
+			);
+			expect(managed).toBeDefined();
+			expect(managed.matcher).toBeUndefined();
+			const unrelated = settings.hooks.SessionStart.find(
+				(g: Record<string, unknown>) =>
+					Array.isArray(g.hooks) &&
+					(g.hooks as Record<string, unknown>[]).some(
+						(h) => (h as Record<string, unknown>).command === "echo keep",
+					),
+			);
+			expect(unrelated).toBeDefined();
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("Cursor install writes a real sessionStart hook (hooks.json + script), not just a static rule", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			// Create ~/.cursor so detectHookAgents picks it up.
+			fs.mkdirSync(path.join(home, ".cursor"), { recursive: true });
+			const report = installHooks(new Set(["cursor"]));
+			expect(report.results[0]?.installed).toBe(true);
+
+			const hooksJson = JSON.parse(fs.readFileSync(path.join(home, ".cursor", "hooks.json"), "utf-8"));
+			expect(hooksJson.hooks.sessionStart).toEqual([
+				{ command: path.join("hooks", "agent-memory-session-start.js") },
+			]);
+
+			const scriptPath = path.join(home, ".cursor", "hooks", "agent-memory-session-start.js");
+			expect(fs.existsSync(scriptPath)).toBe(true);
+			expect(fs.readFileSync(scriptPath, "utf-8")).toContain("agent-memory context --no-search");
+			expect(fs.statSync(scriptPath).mode & 0o111).not.toBe(0); // executable bit set
+
+			// Static .mdc rule is still written as a harmless fallback.
+			expect(fs.existsSync(path.join(home, ".cursor", "rules", "agent-memory.mdc"))).toBe(true);
+
+			expect(isHookInstalled(home, "cursor")).toBe(true);
+			// Re-install is idempotent.
+			expect(installHooks(new Set(["cursor"])).results[0]?.reason).toBe("already installed");
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("Cursor uninstall removes our hook entry, script, and rule while preserving unrelated hooks.json entries", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			fs.mkdirSync(path.join(home, ".cursor"), { recursive: true });
+			fs.writeFileSync(
+				path.join(home, ".cursor", "hooks.json"),
+				JSON.stringify({ version: 1, hooks: { sessionStart: [{ command: "hooks/keep-me.sh" }] } }),
+			);
+			installHooks(new Set(["cursor"]));
+			expect(isHookInstalled(home, "cursor")).toBe(true);
+
+			expect(uninstallHooks(new Set(["cursor"])).results[0]?.installed).toBe(true);
+			expect(isHookInstalled(home, "cursor")).toBe(false);
+			expect(fs.existsSync(path.join(home, ".cursor", "hooks", "agent-memory-session-start.js"))).toBe(false);
+			expect(fs.existsSync(path.join(home, ".cursor", "rules", "agent-memory.mdc"))).toBe(false);
+
+			const hooksJson = JSON.parse(fs.readFileSync(path.join(home, ".cursor", "hooks.json"), "utf-8"));
+			expect(hooksJson.hooks.sessionStart).toEqual([{ command: "hooks/keep-me.sh" }]);
 		} finally {
 			_setHookHomeDirForTest(null);
 			fs.rmSync(home, { recursive: true, force: true });

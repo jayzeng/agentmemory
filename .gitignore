@@ -4,3 +4,7 @@ node_modules/
 *.map
 dist/
 .DS_Store
+*.bun-build
+.codegraph/
+eval/reports/
+eval/token-savings-report.html

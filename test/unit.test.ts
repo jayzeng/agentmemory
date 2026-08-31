@@ -26,7 +26,9 @@ import {
 	_setQmdAvailable,
 	_setSkillsRootForTest,
 	_setSpawnForTest,
+	buildDynamicContext,
 	buildMemoryContext,
+	buildStableContext,
 	dailyPath,
 	distilMemories,
 	ensureDirs,
@@ -50,6 +52,7 @@ import {
 	qmdCollectionInstructions,
 	qmdInstallInstructions,
 	readFileSafe,
+	readHookMode,
 	redactSecrets,
 	runQmdEmbedDetached,
 	runQmdSync,
@@ -64,6 +67,7 @@ import {
 	todayStr,
 	topicPath,
 	uninstallSkills,
+	writeHookMode,
 	yesterdayStr,
 } from "../src/core.js";
 import {
@@ -92,7 +96,7 @@ import {
 	validatePluginManifestV1,
 } from "../src/plugin-host.js";
 import { InstalledPluginRuntimeV1 } from "../src/plugin-runtime.js";
-import { collectTemporaryActivation, TemporaryPluginBackend } from "../src/plugin-service.js";
+import { AgentMemoryServiceBackend, collectActivation } from "../src/plugin-service.js";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -637,6 +641,100 @@ describe("buildMemoryContext", () => {
 });
 
 // ==========================================================================
+// 3b. buildStableContext / buildDynamicContext (hook layers)
+// ==========================================================================
+
+describe("buildStableContext", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	test("includes MEMORY.md and open scratchpad, excludes daily logs and search", () => {
+		ensureDirs();
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "SCRATCHPAD.md"), "# Scratchpad\n\n- [ ] Task X\n", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "daily", `${todayStr()}.md`), "Today's work", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "daily", `${yesterdayStr()}.md`), "Yesterday's work", "utf-8");
+		const ctx = buildStableContext();
+		expect(ctx).toContain("## MEMORY.md (long-term)");
+		expect(ctx).toContain("Durable fact");
+		expect(ctx).toContain("Task X");
+		expect(ctx).not.toContain("Daily log");
+		expect(ctx).not.toContain("Today's work");
+		expect(ctx).not.toContain("Yesterday's work");
+	});
+
+	test("returns empty string when only daily logs exist", () => {
+		ensureDirs();
+		fs.writeFileSync(path.join(tmpDir, "daily", `${todayStr()}.md`), "Today's work", "utf-8");
+		expect(buildStableContext()).toBe("");
+	});
+});
+
+describe("buildDynamicContext", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	test("includes daily logs and search results, excludes MEMORY.md and scratchpad", () => {
+		ensureDirs();
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "SCRATCHPAD.md"), "# Scratchpad\n\n- [ ] Task X\n", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "daily", `${todayStr()}.md`), "Today's work", "utf-8");
+		const ctx = buildDynamicContext("Search snippet body", "query");
+		expect(ctx).toContain(`## Daily log: ${todayStr()} (today)`);
+		expect(ctx).toContain("Today's work");
+		expect(ctx).toContain("## Relevant memories (auto-retrieved)");
+		expect(ctx).toContain("Search snippet body");
+		expect(ctx).not.toContain("Durable fact");
+		expect(ctx).not.toContain("Task X");
+	});
+
+	test("returns empty string when only stable content exists", () => {
+		ensureDirs();
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+		fs.writeFileSync(path.join(tmpDir, "SCRATCHPAD.md"), "# Scratchpad\n\n- [ ] Task X\n", "utf-8");
+		expect(buildDynamicContext("", "")).toBe("");
+	});
+});
+
+describe("readHookMode / writeHookMode", () => {
+	beforeEach(setupTmpDir);
+	afterEach(() => {
+		delete process.env.AGENT_MEMORY_HOOK_MODE;
+		cleanupTmpDir();
+	});
+
+	test("defaults to per-turn when no env var and no config file", () => {
+		delete process.env.AGENT_MEMORY_HOOK_MODE;
+		expect(readHookMode()).toBe("per-turn");
+	});
+
+	test("env var overrides the config file", () => {
+		writeHookMode("stable");
+		process.env.AGENT_MEMORY_HOOK_MODE = "per-turn";
+		expect(readHookMode()).toBe("per-turn");
+	});
+
+	test("config file wins over the default when env is unset", () => {
+		delete process.env.AGENT_MEMORY_HOOK_MODE;
+		writeHookMode("stable");
+		expect(readHookMode()).toBe("stable");
+	});
+
+	test("invalid env value falls through to the config file", () => {
+		writeHookMode("stable");
+		process.env.AGENT_MEMORY_HOOK_MODE = "invalid";
+		expect(readHookMode()).toBe("stable");
+	});
+
+	test("writeHookMode is atomic and idempotent", () => {
+		writeHookMode("stable");
+		writeHookMode("per-turn");
+		const raw = fs.readFileSync(path.join(tmpDir, "hook-config.json"), "utf-8");
+		expect(JSON.parse(raw)).toEqual({ mode: "per-turn" });
+	});
+});
+
+// ==========================================================================
 // 4. QMD helper functions
 // ==========================================================================
 
@@ -872,6 +970,45 @@ describe("memoryWrite", () => {
 		expect(content).not.toContain("Old content");
 		expect(content).toContain("<!-- last updated:");
 		expect(result.details.mode).toBe("overwrite");
+	});
+
+	test("warns on near-duplicate long_term append without blocking the write", async () => {
+		await memoryWrite({
+			target: "long_term",
+			content: "Project uses Drizzle ORM with PostgreSQL for the database layer",
+			sessionId: "abcdef1234567890",
+		});
+		const result = await memoryWrite({
+			target: "long_term",
+			content: "Project uses Drizzle ORM with PostgreSQL as the database layer",
+			sessionId: "abcdef1234567890",
+		});
+		const content = fs.readFileSync(path.join(tmpDir, "MEMORY.md"), "utf-8");
+		expect(content).toContain("database layer");
+		expect(result.text).toContain("Possible duplicate");
+		expect((result.details.warnings as string[])[0]).toContain("Possible duplicate");
+	});
+
+	test("does not warn when appended long_term content is unrelated to existing entries", async () => {
+		await memoryWrite({ target: "long_term", content: "User likes cats", sessionId: "abcdef1234567890" });
+		const result = await memoryWrite({
+			target: "long_term",
+			content: "Deploy runs via bun run deploy:prod",
+			sessionId: "abcdef1234567890",
+		});
+		expect(result.details.warnings).toEqual([]);
+	});
+
+	test("warns when MEMORY.md exceeds the soft line cap", async () => {
+		const bulky = Array.from({ length: 60 }, (_, i) => `Fact number ${i} about the system.`).join("\n");
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), bulky, "utf-8");
+		const result = await memoryWrite({
+			target: "long_term",
+			content: "One more unrelated fact",
+			sessionId: "abcdef1234567890",
+		});
+		expect(result.text).toContain("over the recommended ~50-line cap");
+		expect((result.details.warnings as string[]).some((w) => w.includes("line cap"))).toBe(true);
 	});
 
 	test("appends to daily log", async () => {
@@ -2285,7 +2422,7 @@ describe("official plugin bootstrap", () => {
 describe("temporary plugin activation and runtime", () => {
 	test("closes activation when the browser launcher throws", async () => {
 		await expect(
-			collectTemporaryActivation(() => {
+			collectActivation(() => {
 				throw new Error("launcher failed");
 			}),
 		).rejects.toMatchObject({ code: "browser_unavailable" });
@@ -2293,7 +2430,7 @@ describe("temporary plugin activation and runtime", () => {
 
 	test("collects an email when a same-origin browser omits Origin but sends Fetch Metadata and Referer", async () => {
 		let page = "";
-		const email = await collectTemporaryActivation((url) => {
+		const email = await collectActivation((url) => {
 			void (async () => {
 				const loaded = await fetch(url);
 				page = await loaded.text();
@@ -2330,7 +2467,7 @@ describe("temporary plugin activation and runtime", () => {
 
 	test("accepts Chromium's opaque Origin only for a user-initiated same-origin document navigation", async () => {
 		let referrerPolicy = "";
-		const email = await collectTemporaryActivation((url) => {
+		const email = await collectActivation((url) => {
 			void (async () => {
 				const loaded = await fetch(url);
 				referrerPolicy = loaded.headers.get("Referrer-Policy") ?? "";
@@ -2355,7 +2492,7 @@ describe("temporary plugin activation and runtime", () => {
 	});
 
 	test("rejects a cross-origin activation POST without consuming the nonce", async () => {
-		const email = await collectTemporaryActivation((url) => {
+		const email = await collectActivation((url) => {
 			void (async () => {
 				const rejectedOpaqueOrigin = await fetch(url, {
 					method: "POST",
@@ -2409,7 +2546,7 @@ describe("temporary plugin activation and runtime", () => {
 			};
 			let activations = 0;
 			let accessRequest: Record<string, unknown> | null = null;
-			const backend = new TemporaryPluginBackend({
+			const backend = new AgentMemoryServiceBackend({
 				root,
 				coreVersion: "0.4.15",
 				activate: async () => {
@@ -2453,7 +2590,7 @@ describe("temporary plugin activation and runtime", () => {
 			expect(access.kind).toBe("granted");
 			expect(activations).toBe(1);
 			expect((await backend.getLocalEntitlement()).capabilities.learning.enabled).toBe(true);
-			const record = path.join(root, "credentials", "temporary-access.json");
+			const record = path.join(root, "credentials", "activation.json");
 			expect(fs.statSync(record).mode & 0o777).toBe(0o600);
 			expect(fs.readFileSync(record, "utf-8")).toContain("am_install_abcdefghijklmnopqrstuvwxyz012345");
 			expect(fs.readFileSync(record, "utf-8")).not.toContain("email");
@@ -2481,7 +2618,7 @@ describe("temporary plugin activation and runtime", () => {
 	test("rejects oversized plugin-service error responses", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-service-error-"));
 		try {
-			const backend = new TemporaryPluginBackend({
+			const backend = new AgentMemoryServiceBackend({
 				root,
 				activate: async () => "beta@example.invalid",
 				fetch: (async () =>
@@ -2497,7 +2634,7 @@ describe("temporary plugin activation and runtime", () => {
 					allowAuthentication: true,
 				}),
 			).rejects.toMatchObject({ code: "service_response_too_large" });
-			expect(fs.existsSync(path.join(root, "credentials", "temporary-access.json"))).toBe(false);
+			expect(fs.existsSync(path.join(root, "credentials", "activation.json"))).toBe(false);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
@@ -2594,5 +2731,187 @@ describe("temporary plugin activation and runtime", () => {
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
+	});
+});
+
+// ==========================================================================
+// Upgrade module
+// ==========================================================================
+
+import {
+	checkForUpgrades,
+	detectInstallMethod,
+	formatUpgradeNotice,
+	isCacheFresh,
+	readUpgradeCache,
+	type UpgradeCache,
+	writeUpgradeCache,
+} from "../src/upgrade.js";
+
+describe("detectInstallMethod", () => {
+	test("recognizes bun global install", () => {
+		const method = detectInstallMethod("/Users/anyone/.bun/install/global/node_modules/myagentmemory/dist/cli.js");
+		expect(method.manager).toBe("bun");
+		expect(method.command).toEqual(["bun", "add", "-g", "myagentmemory@latest"]);
+	});
+
+	test("recognizes pnpm global install", () => {
+		const method = detectInstallMethod("/home/x/.local/share/pnpm/global/5/node_modules/myagentmemory/dist/cli.js");
+		expect(method.manager).toBe("pnpm");
+	});
+
+	test("recognizes yarn global install", () => {
+		const method = detectInstallMethod("/Users/x/.config/yarn/global/node_modules/myagentmemory/dist/cli.js");
+		expect(method.manager).toBe("yarn");
+	});
+
+	test("recognizes npm global install under homebrew", () => {
+		const method = detectInstallMethod("/opt/homebrew/lib/node_modules/myagentmemory/dist/cli.js");
+		expect(method.manager).toBe("npm");
+	});
+
+	test("recognizes nvm-managed node global install", () => {
+		const method = detectInstallMethod(
+			"/Users/x/.nvm/versions/node/v22.4.0/lib/node_modules/myagentmemory/dist/cli.js",
+		);
+		expect(method.manager).toBe("npm");
+	});
+
+	test("falls back to npm -g best-effort for unknown locations", () => {
+		const method = detectInstallMethod("/tmp/local/checkout/agentmemory/dist/cli.js");
+		expect(method.manager).toBe("unknown");
+		expect(method.command).toEqual(["npm", "install", "-g", "myagentmemory@latest"]);
+	});
+});
+
+describe("upgrade cache", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	test("round-trips a valid record", () => {
+		const record: UpgradeCache = {
+			checkedAt: new Date().toISOString(),
+			cliCurrent: "0.4.17",
+			cliLatest: "0.4.18",
+			pluginCurrent: "0.2.1",
+			pluginLatest: null,
+		};
+		writeUpgradeCache(record);
+		const read = readUpgradeCache();
+		expect(read).toEqual(record);
+	});
+
+	test("rejects a malformed record", () => {
+		const file = path.join(getMemoryDir(), "state", "upgrade-check.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, "{ not: json }");
+		expect(readUpgradeCache()).toBeNull();
+	});
+
+	test("isCacheFresh honors the 24h TTL", () => {
+		const fresh: UpgradeCache = {
+			checkedAt: new Date().toISOString(),
+			cliCurrent: "0.4.17",
+			cliLatest: "0.4.17",
+			pluginCurrent: null,
+			pluginLatest: null,
+		};
+		const stale: UpgradeCache = { ...fresh, checkedAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString() };
+		expect(isCacheFresh(fresh)).toBe(true);
+		expect(isCacheFresh(stale)).toBe(false);
+		expect(isCacheFresh(null)).toBe(false);
+	});
+});
+
+describe("checkForUpgrades", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	test("reports CLI upgrade when npm registry advertises a newer version", async () => {
+		const status = await checkForUpgrades({
+			cliCurrent: "0.4.17",
+			pluginCurrent: "0.2.1",
+			refresh: true,
+			fetchCliLatest: async () => "0.5.0",
+			pluginLatestHint: "0.2.1",
+		});
+		expect(status.cli.upgradeAvailable).toBe(true);
+		expect(status.cli.latest).toBe("0.5.0");
+		expect(status.plugin.upgradeAvailable).toBe(false);
+	});
+
+	test("reports plugin upgrade even when latest version is unknown", async () => {
+		const status = await checkForUpgrades({
+			cliCurrent: "0.4.17",
+			pluginCurrent: "0.2.1",
+			refresh: true,
+			fetchCliLatest: async () => "0.4.17",
+			pluginLatestHint: null,
+			pluginUpgradeAvailable: true,
+		});
+		expect(status.cli.upgradeAvailable).toBe(false);
+		expect(status.plugin.upgradeAvailable).toBe(true);
+		expect(status.plugin.latest).toBeNull();
+	});
+
+	test("returns fromCache=true when a fresh cache exists and refresh is off", async () => {
+		writeUpgradeCache({
+			checkedAt: new Date().toISOString(),
+			cliCurrent: "0.4.17",
+			cliLatest: "0.4.20",
+			pluginCurrent: "0.2.1",
+			pluginLatest: "0.2.1",
+		});
+		let called = false;
+		const status = await checkForUpgrades({
+			cliCurrent: "0.4.17",
+			pluginCurrent: "0.2.1",
+			fetchCliLatest: async () => {
+				called = true;
+				return "0.5.0";
+			},
+		});
+		expect(called).toBe(false);
+		expect(status.fromCache).toBe(true);
+		expect(status.cli.latest).toBe("0.4.20");
+		expect(status.cli.upgradeAvailable).toBe(true);
+	});
+
+	test("cacheOnly returns snapshot without contacting the network on cache miss", async () => {
+		let called = false;
+		const status = await checkForUpgrades({
+			cliCurrent: "0.4.17",
+			pluginCurrent: null,
+			cacheOnly: true,
+			fetchCliLatest: async () => {
+				called = true;
+				return "0.5.0";
+			},
+		});
+		expect(called).toBe(false);
+		expect(status.fromCache).toBe(true);
+		expect(status.cli.upgradeAvailable).toBe(false);
+	});
+
+	test("formatUpgradeNotice combines CLI and Pro upgrade signals", () => {
+		const notice = formatUpgradeNotice({
+			cli: { current: "0.4.17", latest: "0.5.0", upgradeAvailable: true },
+			plugin: { current: "0.2.1", latest: null, upgradeAvailable: true },
+			checkedAt: new Date().toISOString(),
+			fromCache: true,
+		});
+		expect(notice).toContain("CLI 0.4.17 → 0.5.0");
+		expect(notice).toContain("Pro 0.2.1 → new");
+		expect(notice).toContain("agent-memory upgrade");
+	});
+
+	test("formatUpgradeNotice returns null when nothing is available", () => {
+		const notice = formatUpgradeNotice({
+			cli: { current: "0.4.17", latest: "0.4.17", upgradeAvailable: false },
+			plugin: { current: "0.2.1", latest: "0.2.1", upgradeAvailable: false },
+			checkedAt: new Date().toISOString(),
+			fromCache: true,
+		});
+		expect(notice).toBeNull();
 	});
 });

@@ -96,6 +96,23 @@ export interface PluginSessionStartHookV1 {
 	run(context: PluginSessionStartContextV1): Promise<void>;
 }
 
+export interface PluginBackgroundRefreshContextV1 {
+	host: string;
+	cwd?: string;
+	signal: AbortSignal;
+}
+
+/**
+ * Un-metered per-turn refresh callback. Fired on every UserPromptSubmit so
+ * plugins can keep background workers alive across `/clear` and long idle.
+ * MUST be idempotent and cheap — no quota is charged.
+ */
+export interface PluginBackgroundRefreshHookV1 {
+	name: string;
+	requiredCapability: string;
+	run(context: PluginBackgroundRefreshContextV1): Promise<void>;
+}
+
 export interface PluginMemoryWriteV1 {
 	target: "long_term" | "daily" | "topic";
 	content: string;
@@ -150,12 +167,28 @@ export interface PluginContextProviderV1 {
 	}): Promise<PluginContextSectionV1[]>;
 }
 
+export interface PluginMcpToolInputSchema {
+	type: "object";
+	properties: Record<string, { type: string; description?: string; enum?: string[] }>;
+	required?: string[];
+}
+
+export interface PluginMcpToolV1 {
+	name: string;
+	description: string;
+	inputSchema: PluginMcpToolInputSchema;
+	run(input: Record<string, unknown>): unknown | Promise<unknown>;
+}
+
 export interface AgentMemoryPluginHostV1 {
 	apiVersion: 1;
 	coreVersion: string;
 	registerCommand(command: PluginCommandV1): void;
 	registerSessionStartHook(hook: PluginSessionStartHookV1): void;
+	registerBackgroundRefresh?(hook: PluginBackgroundRefreshHookV1): void;
 	registerContextProvider?(provider: PluginContextProviderV1): void;
+	registerMcpTool?(tool: PluginMcpToolV1): void;
+	registerMcpStartup?(fn: () => void | Promise<void>): void;
 	getStateDirectory(): string;
 	getMemoryDirectory(): string;
 	getEntitlement(): Promise<PluginEntitlementStatusV1>;

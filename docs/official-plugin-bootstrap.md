@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted design on 2026-08-16 and revised on 2026-08-17. The public core implements host types, anonymous preview activation, live catalog and artifact retrieval, Ed25519 release verification, bounded package validation, transactional install, bundle health checks, paid-command dispatch, and SessionStart hook dispatch. The free preview grants 10 device-local recalls and one device-local learning scan per local day while keeping indexing and Memory Dashboard visibility available. Account authentication, payment, renewal, and account management remain deferred.
+Accepted design on 2026-08-16 and revised on 2026-08-17. The public core implements host types, anonymous preview activation, live catalog and artifact retrieval, Ed25519 release verification, bounded package validation, transactional install, bundle health checks, paid-command dispatch, and SessionStart hook dispatch. The free preview grants 20 device-local recalls and 5 device-local learning scans per local day while keeping indexing and Memory Dashboard visibility available. Account authentication, payment, renewal, and account management remain deferred.
 
-The public `agentmemory` repository and `myagentmemory` npm package remain the free, MIT-licensed core. The public bootstrap client and host contracts are also MIT-licensed. Official commercial implementations and browser assets are built and distributed separately from the private `agent-memory-plugin` workspace under their own terms. Pricing, the billing provider, device limits, offline-grace duration, and Enterprise contract terms are intentionally not decided here. The temporary beta currently uses allowlisted `*.agentmemory.paperpilot.me` service origins; changing those origins is a public-client release change.
+The public `agentmemory` repository and `myagentmemory` npm package remain the free, MIT-licensed core. The public bootstrap client and host contracts are also MIT-licensed. Official commercial implementations and browser assets are built and distributed separately from the private commercial workspace under their own terms. Pricing, the billing provider, device limits, offline-grace duration, and Enterprise contract terms are intentionally not decided here. The temporary beta currently uses allowlisted `*.agentmemory.paperpilot.me` service origins; changing those origins is a public-client release change.
 
 ## Decision
 
@@ -146,7 +146,7 @@ Every bootstrap command supports `--json` and emits one JSON document with a ver
 1. `agent-memory pro install` creates a random installation identifier locally when no activation record exists.
 2. The CLI sends that identifier plus core, installed-bundle, platform, architecture, and release-channel fields to the private control plane. It sends no email, memory, session content, query, repository path, raw agent session identifier, IP address, or user-agent string.
 3. The service stores the pseudonymous identifier and only the hash of a random compatibility credential, then returns a free-preview capability policy and short-lived object-bound artifact grant.
-4. The CLI validates the explicit free policy: local indexing and Memory Dashboard access, 10 device-local recalls per day, one device-local learning scan per day, and no free automatic background worker.
+4. The CLI validates the explicit free policy: local indexing and Memory Dashboard access, 20 device-local recalls per day, 5 device-local learning scans per day, and no free automatic background worker.
 5. Only then does the CLI atomically write a mode-0600 activation record.
 6. The CLI verifies the Ed25519-signed release plus package digest and limits, imports it for health checks, and atomically activates the receipt.
 7. Device-local quota operations reserve before work, commit after useful work, and release on abstention or failure. A zero-result recall does not consume allowance.

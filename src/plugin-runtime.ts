@@ -20,12 +20,15 @@ import {
 	type AgentMemoryPluginHostV1,
 	type AgentMemoryPluginManifestV1,
 	isPluginCapabilityEnabled,
+	type PluginBackgroundRefreshContextV1,
+	type PluginBackgroundRefreshHookV1,
 	type PluginCommandContextV1,
 	type PluginCommandResultV1,
 	type PluginCommandV1,
 	type PluginContextProviderV1,
 	type PluginContextSectionV1,
 	type PluginEntitlementStatusV1,
+	type PluginMcpToolV1,
 	type PluginMemoryCorrectionV1,
 	type PluginMemoryWriteV1,
 	type PluginSessionStartHookV1,
@@ -33,7 +36,7 @@ import {
 	validatePluginEntitlementStatusV1,
 	validatePluginManifestV1,
 } from "./plugin-host.js";
-import { TemporaryPluginBackend } from "./plugin-service.js";
+import { AgentMemoryServiceBackend } from "./plugin-service.js";
 
 interface RegisteredCommand {
 	command: PluginCommandV1;
@@ -137,12 +140,15 @@ export class InstalledPluginRuntimeV1 {
 	private readonly backend: PluginBootstrapBackendV1;
 	private readonly commands = new Map<string, RegisteredCommand>();
 	private readonly hooks: PluginSessionStartHookV1[] = [];
+	private readonly backgroundRefreshHooks: PluginBackgroundRefreshHookV1[] = [];
 	private readonly contextProviders: RegisteredContextProvider[] = [];
+	private readonly mcpTools: PluginMcpToolV1[] = [];
+	private readonly mcpStartupHooks: Array<() => void | Promise<void>> = [];
 	private loaded = false;
 
 	constructor(private readonly options: PluginRuntimeOptionsV1) {
 		this.store = options.store ?? new FilePluginInstallStore();
-		this.backend = options.backend ?? new TemporaryPluginBackend({ root: this.store.root });
+		this.backend = options.backend ?? new AgentMemoryServiceBackend({ root: this.store.root });
 	}
 
 	async load(): Promise<boolean> {
@@ -210,6 +216,21 @@ export class InstalledPluginRuntimeV1 {
 		}
 	}
 
+	/**
+	 * Fire all registered background-refresh hooks. Un-metered — intended for
+	 * per-turn UserPromptSubmit invocation, keeping workers alive across
+	 * `/clear` and idle without charging session quota. Failures propagate to
+	 * the caller (which is expected to swallow them silently).
+	 */
+	async refreshBackgroundWorkers(context: PluginBackgroundRefreshContextV1): Promise<void> {
+		if (!(await this.load()) || this.backgroundRefreshHooks.length === 0) return;
+		const entitlement = await this.refreshEntitlement();
+		for (const hook of this.backgroundRefreshHooks) {
+			if (!isPluginCapabilityEnabled(entitlement, hook.requiredCapability)) continue;
+			await hook.run(context);
+		}
+	}
+
 	async provideContext(context: {
 		host: string;
 		cwd?: string;
@@ -253,6 +274,14 @@ export class InstalledPluginRuntimeV1 {
 		return sections;
 	}
 
+	getMcpTools(): PluginMcpToolV1[] {
+		return [...this.mcpTools];
+	}
+
+	async runMcpStartup(): Promise<void> {
+		for (const hook of this.mcpStartupHooks) await hook();
+	}
+
 	private createHost(manifest: AgentMemoryPluginManifestV1): AgentMemoryPluginHostV1 {
 		const descriptors = new Map(manifest.commands.map((command) => [command.name, command]));
 		const stateRoot = path.join(this.store.root, "state");
@@ -293,6 +322,19 @@ export class InstalledPluginRuntimeV1 {
 					);
 				this.hooks.push(hook);
 			},
+			registerBackgroundRefresh: (hook) => {
+				if (!(manifest.capabilities ?? []).includes(hook.requiredCapability))
+					throw new PluginBootstrapFailure(
+						"plugin_hook_invalid",
+						`Plugin ${manifest.id} registered a background refresh hook with an undeclared capability`,
+					);
+				if (!hook.name || this.backgroundRefreshHooks.some((existing) => existing.name === hook.name))
+					throw new PluginBootstrapFailure(
+						"plugin_hook_invalid",
+						`Plugin background refresh hook ${hook.name || "(unnamed)"} is invalid or already registered`,
+					);
+				this.backgroundRefreshHooks.push(hook);
+			},
 			registerContextProvider: (provider) => {
 				if (!(manifest.capabilities ?? []).includes(provider.requiredCapability))
 					throw new PluginBootstrapFailure(
@@ -305,6 +347,17 @@ export class InstalledPluginRuntimeV1 {
 						`Plugin context provider ${provider.name || "(unnamed)"} is invalid or already registered`,
 					);
 				this.contextProviders.push({ provider, pluginId: manifest.id });
+			},
+			registerMcpTool: (tool) => {
+				if (!tool.name || this.mcpTools.some((existing) => existing.name === tool.name))
+					throw new PluginBootstrapFailure(
+						"plugin_mcp_tool_invalid",
+						`Plugin MCP tool ${tool.name || "(unnamed)"} is invalid or already registered`,
+					);
+				this.mcpTools.push(tool);
+			},
+			registerMcpStartup: (fn) => {
+				this.mcpStartupHooks.push(fn);
 			},
 			getStateDirectory: () => stateDirectory,
 			getMemoryDirectory: () => {
@@ -364,6 +417,7 @@ export function createInstalledBundleHealthCheck(
 				coreVersion,
 				registerCommand() {},
 				registerSessionStartHook() {},
+				registerBackgroundRefresh() {},
 				getStateDirectory: () => stateDirectory,
 				getMemoryDirectory: () => {
 					assertPermission(plugin.manifest, "memory:read");

@@ -10,7 +10,7 @@ import {
 	type PluginEntitlementStatusV1,
 	validateBundleManifestV1,
 } from "./plugin-host.js";
-import { TemporaryPluginBackend } from "./plugin-service.js";
+import { AgentMemoryServiceBackend } from "./plugin-service.js";
 
 export const OFFICIAL_BUNDLE_ID = "agentmemory.pro";
 export const OFFICIAL_PLUGIN_IDS = ["agentmemory.session-intelligence", "agentmemory.web-console"] as const;
@@ -202,7 +202,7 @@ const OFFICIAL_PLUGINS = [
 const PACKAGE_MAX_BYTES = 64 * 1024 * 1024;
 const PACKAGE_MAX_EXPANDED_BYTES = 128 * 1024 * 1024;
 const PACKAGE_MAX_FILES = 10_000;
-const TEMPORARY_RELEASE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+const RELEASE_SIGNING_KEY_2026_08 = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEASefZFUVFy1EmvGbd0ckHZThmPgqQ3u9HCwZRReAZQW8=
 -----END PUBLIC KEY-----`;
 
@@ -714,11 +714,11 @@ export class PluginBootstrapV1 {
 
 export function createDefaultPluginBootstrap(coreVersion: string): PluginBootstrapV1 {
 	const store = new FilePluginInstallStore();
-	const backend = new TemporaryPluginBackend({ root: store.root, coreVersion });
+	const backend = new AgentMemoryServiceBackend({ root: store.root, coreVersion });
 	return new PluginBootstrapV1({
 		coreVersion,
 		backend,
-		verifier: new Ed25519ReleaseVerifier({ "agentmemory-temporary-2026-08": TEMPORARY_RELEASE_PUBLIC_KEY }),
+		verifier: new Ed25519ReleaseVerifier({ "agentmemory-temporary-2026-08": RELEASE_SIGNING_KEY_2026_08 }),
 		store,
 		healthCheck: async (directory, release) => {
 			const { createInstalledBundleHealthCheck } = await import("./plugin-runtime.js");
