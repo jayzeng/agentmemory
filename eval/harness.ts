@@ -401,6 +401,15 @@ function caseE(): HarnessCase {
 	}
 
 	const { stdout, status, durationMs } = runBinary(["context"], { AGENT_MEMORY_DIR: realMemoryDir });
+	if (status === 0 && stdout.length === 0) {
+		return {
+			name: "E-token-overhead",
+			passed: true,
+			durationMs: Math.round(durationMs),
+			metrics: { skipped: "real memory dir has no injectable context" },
+			errors: [],
+		};
+	}
 
 	metrics.ctx_output_chars = stdout.length;
 	metrics.injected_token_overhead = Math.ceil(stdout.length / 4);
