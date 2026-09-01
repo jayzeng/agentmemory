@@ -128,7 +128,7 @@ agent-memory read --target daily
 ### Setup
 
 ```bash
-agent-memory init      # Create dirs, detect qmd, setup collection
+agent-memory setup     # Idempotent: memory dir, qmd collection, skills, hooks, MCP
 agent-memory sync      # Re-index and embed all files (requires qmd)
 agent-memory status    # Show config, file counts, qmd status
 ```

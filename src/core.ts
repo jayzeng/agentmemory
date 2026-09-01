@@ -750,14 +750,22 @@ function findSkillsRoot(): string | null {
 		}
 	};
 
+	const realDirOf = (p: string): string => {
+		try {
+			return path.dirname(fs.realpathSync(p));
+		} catch {
+			return path.resolve(path.dirname(p));
+		}
+	};
+
 	const argvPath = process.argv[1];
 	if (argvPath) {
-		const found = scanUp(path.resolve(path.dirname(argvPath)));
+		const found = scanUp(realDirOf(argvPath));
 		if (found) return found;
 	}
 
-	const execDir = path.dirname(process.execPath);
-	const found = scanUp(path.resolve(execDir));
+	const execDir = realDirOf(process.execPath);
+	const found = scanUp(execDir);
 	if (found) return found;
 
 	return scanUp(path.resolve(process.cwd()));

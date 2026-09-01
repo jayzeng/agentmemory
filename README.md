@@ -6,7 +6,7 @@ Every new session with [Claude Code](https://claude.ai/code), [Codex](https://gi
 
 ```bash
 npm install -g myagentmemory
-agent-memory init      # wizard: skills, hooks, seed memory, live demo
+agent-memory setup     # one-shot: memory dir, skills, hooks, MCP, local Pro preview
 ```
 
 Then open your agent and ask *"what do you remember about me?"* — that's the wow.
@@ -67,17 +67,16 @@ npm install -g myagentmemory
 bun run build:cli
 # => produces dist/agent-memory
 
-# Initialize memory directory
-agent-memory init
-
-# Install skill files for Claude Code, Codex, Cursor, and Agent
-agent-memory install-skills
+# One-shot setup: memory dir, qmd collection, skills, hooks, MCP registration, local Pro preview
+agent-memory setup
 
 # Uninstall skill files
 agent-memory uninstall-skills
 ```
 
 The npm package installs a platform-neutral Node.js executable. The optional Homebrew and `build:cli` paths use a native binary built for the current platform.
+
+`agent-memory setup` is the recommended entry point — it is idempotent, so re-running it after an upgrade or a partial install is always safe. Pass `--skip-skills`, `--skip-hooks`, `--skip-plugin`, or `--skip-mcp` to opt out of individual steps, or `--yes --json` for scripted/CI installs. If you want the older step-by-step interactive wizard instead, `agent-memory init` still works.
 
 `install-skills` writes a SKILL.md into each agent's config directory:
 - `~/.claude/skills/agent-memory/SKILL.md` — Claude Code skill
@@ -95,7 +94,7 @@ If you're on Pi and prefer a native extension, use `pi-memory` (https://github.c
 
 ### Optional: Enable search with qmd
 
-When qmd is installed, the collection is automatically set up via `agent-memory init`.
+When qmd is installed, the collection is automatically set up via `agent-memory setup` (or `init`).
 
 Note: `memory_search` **semantic**/**deep** modes require vector embeddings. If you see a warning like "need embeddings", run `qmd embed` once and retry.
 
@@ -153,27 +152,39 @@ The memory directory defaults to `~/.agent-memory/`. Override with `AGENT_MEMORY
 
 ## CLI Commands
 
+Run `agent-memory help` for the full generated list, or `agent-memory <command> --help` for a command's flags and examples.
+
 | Command | Purpose |
 |---------|---------|
-| `agent-memory context [--query <text>] [--no-search]` | Build context and optionally include qmd matches for a query |
-| `agent-memory write --target <long_term\|daily\|topic> --content <text> [--mode append\|overwrite] [--source-uri <uri>] [--topic <name>] [--date YYYY-MM-DD]` | Write to memory files with optional provenance |
+| `agent-memory setup [--yes] [--skip-skills] [--skip-hooks] [--skip-plugin] [--skip-mcp]` | One-shot idempotent installer: memory dir + skills + hooks + local Pro preview + MCP registration |
+| `agent-memory context [--query <text>] [--no-search] [--layer stable\|dynamic\|full]` | Build context and optionally include qmd matches for a query |
+| `agent-memory save "<text>"` | Shortcut: append a daily memory entry |
+| `agent-memory note "<text>"` | Shortcut: add a scratchpad checklist item |
+| `agent-memory write "<text>" --target <long_term\|daily\|topic> [--mode append\|overwrite] [--source-uri <uri>] [--topic <name>] [--date YYYY-MM-DD]` | Write to memory files with optional provenance |
 | `agent-memory read --target <long_term\|scratchpad\|daily\|list\|topic\|topics> [--date YYYY-MM-DD] [--topic <name>]` | Read memory files |
 | `agent-memory scratchpad <add\|done\|undo\|clear_done\|list> [--text <text>]` | Manage checklist |
-| `agent-memory search --query <text> [--mode keyword\|semantic\|deep] [--limit N]` | Search via qmd |
-| `agent-memory install-skills` | Install bundled SKILL.md files into local agent directories |
+| `agent-memory search --query <text> [--mode keyword\|semantic\|deep] [--limit N]` | Search indexed memory via qmd |
+| `agent-memory distil [--dry-run]` | Rebuild a compact MEMORY.md index from logs and topics |
+| `agent-memory sync` | Update the qmd index and semantic embeddings |
+| `agent-memory install-skills [--uninstall]` | Install bundled SKILL.md files into local agent directories |
 | `agent-memory uninstall-skills` | Uninstall bundled SKILL.md files from local agent directories |
 | `agent-memory completion [bash\|zsh\|fish\|powershell] [--stdout]` | Install or print shell completion |
-| `agent-memory install-hooks [--yes] [--only <agents>]` | Install managed context and memory-write reminder hooks |
+| `agent-memory install-hooks [--yes] [--all] [--only <agents>] [--mode stable\|per-turn]` | Install managed context and memory-write reminder hooks |
 | `agent-memory uninstall-hooks [--only <agents>]` | Remove only hooks managed by AgentMemory |
-| `agent-memory init` | Create dirs, detect qmd, setup collection |
-| `agent-memory status` | Show config, qmd status, file counts |
-| `agent-memory pro <install\|status\|upgrade\|manage>` | Install and manage the no-account AgentMemory Pro preview |
+| `agent-memory init [--yes] [--skip-skills] [--skip-hooks]` | Legacy interactive wizard; `setup` runs this as its first step |
+| `agent-memory status [--probe]` | Show config, qmd status, file counts, embedding health |
+| `agent-memory doctor` | One-shot health check across memory, qmd, skills, hooks, and Pro |
+| `agent-memory tutorial` | Guided 3-minute walkthrough in a throwaway sandbox |
+| `agent-memory pro <install\|preview\|status\|upgrade\|manage>` | Install and manage the no-account AgentMemory Pro preview |
 | `agent-memory recall <query>` | Recall decisions and context from prior coding sessions with Pro |
-| `agent-memory learn` | Find repeated corrections worth remembering with Pro |
-| `agent-memory dashboard` | Open the private local Memory Dashboard |
+| `agent-memory learn [--preview]` | Find repeated corrections worth remembering with Pro |
+| `agent-memory dashboard [--no-browser]` | Open the private local Memory Dashboard |
 | `agent-memory plugin <list\|status\|install\|update\|uninstall\|manage>` | Discover and manage optional signed first-party plugins |
+| `agent-memory serve --mcp [--register]` | Run as a Model Context Protocol (MCP) server over stdio |
+| `agent-memory upgrade [--check] [--cli\|--plugin] [--yes]` | Check for and install newer CLI/Pro releases |
+| `agent-memory version` | Print the installed version |
 
-Global flags: `--dir <path>` (override directory), `--json` (machine output)
+Global flags: `--dir <path>` (override directory), `--json` (machine output), `--help`, `--version`
 
 ### memory_search modes
 
@@ -226,11 +237,13 @@ Total output, including headings and truncation notices, is hard-capped at 16,00
 
 Supported detected hosts can receive managed automatic context hooks after `agent-memory install-hooks`; Claude Code also receives a periodic memory-write reminder. Bundled skills remain the portable fallback and use explicit search when a task relates to prior work.
 
+`context --layer` can request a subset instead of the full six-section build: `stable` (scratchpad + topics + MEMORY.md — durable facts unlikely to change with the current prompt), `dynamic` (today's log + qmd search + yesterday's log — turn-scoped, prompt-dependent), or `full` (default, all six sections). This backs the hook system's two install modes (`install-hooks --mode stable|per-turn` / `AGENT_MEMORY_HOOK_MODE`): `per-turn` (the default) installs a SessionStart hook that loads the `stable` layer once plus a UserPromptSubmit hook that reloads the `dynamic` layer every turn; `stable` mode installs SessionStart only, loading the `full` context once per session.
+
 ### Selective injection
 
-When qmd is available and `context --query` is supplied, the CLI sanitizes the query, limits it to 200 characters, and includes the top three keyword results with the standard context. Programmatic integrations should spawn the CLI with an argument array so query text is not evaluated by a shell.
+When qmd is available and `context --query` is supplied, the CLI sanitizes the query, limits it to 200 characters, and runs one fused `qmd` query (BM25 + vector, reciprocal-rank-fused server-side) against the current prompt, including the top three hits with the standard context. Programmatic integrations should spawn the CLI with an argument array so query text is not evaluated by a shell.
 
-The search has a 3-second timeout and fails silently. If qmd is down or the query returns nothing, injection falls back to the standard behavior.
+The search has an 8-second timeout and fails silently. If qmd is down or the query returns nothing, injection falls back to the standard behavior.
 
 ### Provenance, temporal state, and secret screening
 
@@ -254,7 +267,7 @@ These are content conventions, not enforced metadata. qmd's full-text indexing m
 
 - **Persistence**: Memory files are plain markdown on disk — readable, editable, and git-friendly.
 - **Tool response previews**: Write/scratchpad tools return size-capped previews instead of full file contents.
-- **qmd auto-setup**: Via `agent-memory init`, the collection and path contexts are created automatically.
+- **qmd auto-setup**: Via `agent-memory setup` (or `init`), the collection and path contexts are created automatically.
 - **qmd re-indexing**: After every write, a debounced `qmd update` runs in the background (fire-and-forget, non-blocking) unless disabled via `AGENT_MEMORY_QMD_UPDATE`.
 - **qmd embeddings**: Semantic/deep search needs vector embeddings. If you see "need embeddings" warnings, run `qmd embed` once and retry.
 - **Graceful degradation**: If qmd is not installed, core tools work fine. `memory_search` returns install instructions.
@@ -265,7 +278,10 @@ These are content conventions, not enforced metadata. qmd's full-text indexing m
 |----------|--------|---------|-------------|
 | `AGENT_MEMORY_DIR` | path | `~/.agent-memory` | Memory directory |
 | `AGENT_MEMORY_QMD_UPDATE` | `background`, `manual`, `off` | `background` | Controls automatic `qmd update` after writes |
+| `AGENT_MEMORY_QMD_EMBED` | `background`, `manual`, `off` | `background` | Controls automatic embedding generation after `init`/`setup` |
 | `AGENT_MEMORY_PLUGIN_DIR` | path | `~/.agent-memory/system/plugins` | Machine-local official plugin installation root; independent of `AGENT_MEMORY_DIR` |
+| `AGENT_MEMORY_HOOK_MODE` | `stable`, `per-turn` | `per-turn` | SessionStart-only vs. SessionStart + UserPromptSubmit hook installation |
+| `AGENT_MEMORY_SKILLS_ROOT` | path | auto-detected | Override where `install-skills`/`setup` look for the bundled `skills/` directory |
 
 ## Running tests
 
@@ -324,36 +340,4 @@ AgentMemory Core is released under the MIT License. Jay Zeng retains copyright i
 
 ## Changelog
 
-### 0.4.12
-
-- **Removed pi extension**: Removed `index.ts` and all pi-specific code (`@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`, `@sinclair/typebox` peer dependencies).
-- **Standalone tool functions**: Extracted `memoryWrite()`, `memoryRead()`, `scratchpadAction()`, `memorySearch()` into `src/core.ts` as standalone functions usable without any framework.
-- **Renamed package**: `pi-memory` → `myagentmemory` (npm); the CLI binary is `agent-memory`.
-- **Renamed env var**: `PI_MEMORY_QMD_UPDATE` → `AGENT_MEMORY_QMD_UPDATE` (old name still works as fallback).
-- **Default memory directory**: Now always `~/.agent-memory/`.
-- **Removed pi-specific tests**: Deleted `test/e2e.ts`, `test/eval-recall.ts`, `test/unit.ts`.
-
-### 0.4.0
-
-- **Multi-platform support**: Memory system now works with Claude Code and OpenAI Codex via CLI + skills, in addition to pi.
-- **Extracted shared core**: `src/core.ts` contains platform-agnostic logic (paths, truncation, scratchpad, context builder, qmd) with zero pi peer dependencies.
-- **CLI binary**: `agent-memory` CLI with subcommands: `context`, `write`, `read`, `scratchpad`, `search`, `init`, `status`.
-- **Skill files**: `skills/claude-code/SKILL.md` and `skills/codex/SKILL.md` for installation into respective platforms.
-- **Configurable memory directory**: `AGENT_MEMORY_DIR` env var or `--dir` flag (default: `~/.agent-memory/`).
-- **CLI tests**: `test/cli.test.ts` with unit and subprocess tests.
-
-### 0.2.0
-
-- **Selective injection**: Before each turn, the user's prompt is searched against memory via qmd. Top results are injected into the system prompt alongside standard context, surfacing relevant past decisions without explicit tool calls.
-- **qmd auto-setup**: The extension automatically creates the collection and path contexts on session start when qmd is available. No manual `qmd collection add` needed.
-- **Tags and links**: `memory_write` and context injection now encourage `#tags` and `[[wiki-links]]` as searchable content conventions.
-- **Context priority reordering**: Injection order is now scratchpad > today > search results > MEMORY.md > yesterday.
-- **Unit tests**: Added deterministic tests (no LLM/qmd needed).
-- **Recall eval**: Added recall effectiveness evaluation.
-
-### 0.1.0
-
-- Initial release: `memory_write`, `memory_read`, `scratchpad`, `memory_search` tools.
-- Context injection of MEMORY.md, scratchpad, and today/yesterday daily logs.
-- qmd integration for keyword, semantic, and hybrid search.
-- Debounced background `qmd update` after writes.
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.

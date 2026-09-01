@@ -110,4 +110,4 @@ else
   echo "  $AGENT_MEMORY_BIN"
 fi
 echo ""
-echo "Initialize memory: agent-memory init"
+echo "Finish setup: agent-memory setup"

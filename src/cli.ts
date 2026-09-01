@@ -1063,7 +1063,7 @@ async function cmdSearch(flags: Record<string, string | boolean>) {
 	const collName = getCollectionName();
 	const hasCollection = await checkCollection(collName);
 	if (!hasCollection) {
-		exitError(`qmd collection '${collName}' not found. Run: agent-memory init`, json);
+		exitError(`qmd collection '${collName}' not found. Run: agent-memory setup`, json);
 	}
 
 	try {
@@ -1352,7 +1352,7 @@ async function cmdSync(flags: Record<string, string | boolean>) {
 	const collName = getCollectionName();
 	const hasCollection = await checkCollection(collName);
 	if (!hasCollection) {
-		exitError(`qmd collection '${collName}' not found. Run: agent-memory init`, json);
+		exitError(`qmd collection '${collName}' not found. Run: agent-memory setup`, json);
 	}
 
 	const result = await runQmdSync();
@@ -2010,7 +2010,7 @@ async function cmdStatus(flags: Record<string, string | boolean>) {
 		if (qmdFound) {
 			console.log(`qmd: available`);
 			console.log(
-				`Collection '${getCollectionName()}': ${hasCollection ? "configured" : "not configured — run: agent-memory init"}`,
+				`Collection '${getCollectionName()}': ${hasCollection ? "configured" : "not configured — run: agent-memory setup"}`,
 			);
 			console.log(`Embed mode: ${embedMode}`);
 			if (hasCollection && embeddings !== "n/a") {
@@ -2108,7 +2108,7 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 				status: "warn",
 				label: "qmd collection",
 				detail: `'${getCollectionName()}' not configured`,
-				fix: "agent-memory init",
+				fix: "agent-memory setup",
 			});
 		} else {
 			try {
@@ -2332,7 +2332,7 @@ async function cmdTutorial(flags: Record<string, string | boolean>): Promise<voi
 		console.log(colorize("You're done.", "bold"));
 		console.log("");
 		console.log("In your real setup:");
-		console.log("  agent-memory init                  — set up the real memory dir (interactive wizard)");
+		console.log("  agent-memory setup                 — one-shot install: memory dir, skills, hooks, MCP");
 		console.log('  agent-memory save "your note"      — quick save');
 		console.log('  agent-memory note "your todo"      — scratchpad item');
 		console.log("  agent-memory doctor                — health check");
