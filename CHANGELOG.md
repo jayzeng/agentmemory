@@ -2,11 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [0.5.1] - 2026-09-01
 
 ### Fixed
 
-- Enforced the documented free-preview contract in trusted Core code: 20 recalls and 5 learning scans per device-local day, with automatic background capture disabled.
+- Resolved symlinked global npm installs (e.g. `npm install -g`) before scanning for the bundled `skills/` directory, fixing `agent-memory setup` failing with "Could not locate the skills directory" on such installs.
+- Routed onboarding hints (qmd-collection-not-found errors, `status`/`doctor` fixes, the tutorial cheat sheet, and bundled `SKILL.md` setup instructions) from the unlisted `init` command to `agent-memory setup`.
+- Re-pinned the Homebrew formula's release archive checksum.
 
 ## [0.5.0] - 2026-08-30
 
@@ -24,6 +26,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Enforced the documented free-preview contract in trusted Core code: 20 recalls and 5 learning scans per device-local day, with automatic background capture disabled.
 - Isolated the anonymous Pro-install CLI test from the live production service so a healthy preview deployment cannot make the deterministic Core suite fail.
 - Abort qmd and optional-plugin work when the per-turn hook reaches its three-second budget so a child process cannot keep the CLI alive.
 - Replaced organization-specific example and evaluation data with explicitly fictional fixtures.

@@ -615,7 +615,7 @@ describe("CLI subprocess", () => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
-		expect(responses[0]?.result.serverInfo).toEqual({ name: "agent-memory", version: "0.5.0" });
+		expect(responses[0]?.result.serverInfo).toEqual({ name: "agent-memory", version: "0.5.1" });
 		const toolNames = responses[1]?.result.tools.map((tool: { name: string }) => tool.name);
 		expect(toolNames).toContain("memory_read");
 		expect(toolNames).toContain("memory_write");
