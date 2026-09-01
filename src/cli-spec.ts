@@ -26,6 +26,7 @@ export const COMMANDS = [
 	"uninstall-skills",
 	"install-hooks",
 	"uninstall-hooks",
+	"uninstall",
 	"completion",
 	"pro",
 	"recall",
@@ -61,6 +62,8 @@ export const COMMAND_DESCRIPTIONS: Record<(typeof COMMANDS)[number], string> = {
 	"uninstall-skills": "remove core instructions from detected agents",
 	"install-hooks": "install managed context and memory-write reminder hooks",
 	"uninstall-hooks": "remove only hooks managed by agent-memory",
+	uninstall:
+		"remove hooks, skills, MCP registrations, completions, and the Pro plugin; add --data to also delete memory data",
 	completion: "install or print Bash, Zsh, Fish, or PowerShell completion",
 	pro: "install, inspect, or upgrade AgentMemory Pro",
 	recall: "recall decisions and context from prior coding sessions with Pro",
@@ -113,6 +116,7 @@ export const COMMAND_OPTIONS: Record<string, readonly string[]> = {
 	"uninstall-skills": [],
 	"install-hooks": ["--yes", "--all", "--only", "--mode"],
 	"uninstall-hooks": ["--only"],
+	uninstall: ["--data", "--yes"],
 	completion: ["--stdout"],
 	pro: [],
 	recall: [
@@ -294,6 +298,7 @@ export const OPTION_SPECS: Record<string, CliOptionSpec> = {
 	"--agent": { description: "internal SessionStart host key", value: { label: "agent", kind: "value" } },
 	"--token": { description: "internal session-worker lease token", value: { label: "token", kind: "value" } },
 	"--uninstall": { description: "use install-skills compatibility uninstall mode" },
+	"--data": { description: "uninstall: also permanently delete the memory directory and plugin state" },
 	"--mcp": { description: "serve as an MCP server over stdio (used by Claude Code)" },
 	"--register": { description: "register the MCP server in detected supported agents and exit" },
 	"--check": { description: "upgrade: report available updates without installing" },
@@ -339,6 +344,7 @@ const COMMAND_USAGE: Record<string, string> = {
 	"install-hooks":
 		"agent-memory install-hooks [--yes] [--all] [--only claude,codex,cursor] [--mode stable|per-turn] [--json]",
 	"uninstall-hooks": "agent-memory uninstall-hooks [--only claude,codex,cursor] [--json]",
+	uninstall: "agent-memory uninstall [--data] [--yes] [--json]",
 	completion: "agent-memory completion [bash|zsh|fish|powershell] [--stdout]",
 	pro: "agent-memory pro <install|status|upgrade> [--channel stable] [--yes]",
 	recall:
@@ -386,6 +392,10 @@ const COMMAND_EXAMPLES: Record<string, string[]> = {
 	status: ["agent-memory status", "agent-memory status --json"],
 	init: ["agent-memory init", "agent-memory init --yes --skip-hooks"],
 	setup: ["agent-memory setup", "agent-memory setup --json"],
+	uninstall: [
+		"agent-memory uninstall --yes  # removes hooks, skills, MCP registrations, completions, Pro plugin",
+		"agent-memory uninstall --data --yes  # also deletes MEMORY.md, daily logs, scratchpad, topics",
+	],
 	"install-hooks": [
 		"agent-memory install-hooks",
 		"agent-memory install-hooks --yes",

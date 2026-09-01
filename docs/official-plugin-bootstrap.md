@@ -267,7 +267,7 @@ An install or upgrade must:
 
 Failure before activation leaves the previous version active. Failure immediately after activation restores the previous receipt. Concurrent installers do not interleave. The core never invokes package-manager lifecycle scripts or elevates privileges.
 
-Uninstall removes executable versions, the active receipt, contributed skills, and managed hooks. It does not remove `MEMORY.md`, daily logs, topics, scratchpad items, source session logs, plugin-created review data, or billing state. A separate future purge command would require explicit scope and confirmation.
+Uninstall removes executable versions, the active receipt, contributed skills, and managed hooks. It does not remove `MEMORY.md`, daily logs, topics, scratchpad items, source session logs, plugin-created review data, or billing state. The top-level `agent-memory uninstall` command composes this with hook/skill/MCP/completion removal in one step; its explicit `--data` flag additionally deletes the memory directory and the entire plugin install root (bundles, receipts, and the activation credential) once the user opts in and confirms.
 
 ## Plugin host API v1
 

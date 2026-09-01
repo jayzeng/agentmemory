@@ -171,6 +171,7 @@ Run `agent-memory help` for the full generated list, or `agent-memory <command> 
 | `agent-memory completion [bash\|zsh\|fish\|powershell] [--stdout]` | Install or print shell completion |
 | `agent-memory install-hooks [--yes] [--all] [--only <agents>] [--mode stable\|per-turn]` | Install managed context and memory-write reminder hooks |
 | `agent-memory uninstall-hooks [--only <agents>]` | Remove only hooks managed by AgentMemory |
+| `agent-memory uninstall [--data] [--yes]` | Remove hooks, skills, MCP registrations, completions, and the Pro plugin; `--data` also deletes MEMORY.md, daily logs, scratchpad, and topics |
 | `agent-memory init [--yes] [--skip-skills] [--skip-hooks]` | Legacy interactive wizard; `setup` runs this as its first step |
 | `agent-memory status [--probe]` | Show config, qmd status, file counts, embedding health |
 | `agent-memory doctor` | One-shot health check across memory, qmd, skills, hooks, and Pro |

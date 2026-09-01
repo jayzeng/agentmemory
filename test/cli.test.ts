@@ -2212,6 +2212,118 @@ describe("core-owned hooks and completion", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 10b. `agent-memory uninstall` — the reverse of `setup`
+// ---------------------------------------------------------------------------
+
+describe("uninstall command", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	const cliPath = path.join(__dirname, "..", "src", "cli.ts");
+
+	function runCli(args: string[], env: Record<string, string>) {
+		return Bun.spawnSync(["bun", "run", cliPath, ...args], {
+			env: { ...process.env, ...env },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+	}
+
+	function makeHomeDir(): string {
+		return fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-uninstall-home-"));
+	}
+
+	test(
+		"removes hooks, skills, MCP registrations, and completions but leaves memory data untouched",
+		{ timeout: 30_000 },
+		() => {
+			const homeDir = makeHomeDir();
+			const env = {
+				HOME: homeDir,
+				AGENT_MEMORY_DIR: tmpDir,
+				AGENT_MEMORY_PLUGIN_DIR: path.join(homeDir, "plugins"),
+			};
+			fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+			// install-hooks/serve --register only act on agents whose config dir is
+			// already present, so seed a marker directory to make Claude Code "detected".
+			fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
+
+			try {
+				expect(runCli(["install-hooks", "--yes", "--json"], env).exitCode).toBe(0);
+				expect(runCli(["install-skills", "--json"], env).exitCode).toBe(0);
+				expect(runCli(["serve", "--register"], env).exitCode).toBe(0);
+				expect(runCli(["completion", "bash", "--json"], env).exitCode).toBe(0);
+
+				// Sanity-check the artifacts actually landed before asserting removal.
+				expect(fs.existsSync(path.join(homeDir, ".claude", "settings.json"))).toBe(true);
+				expect(fs.existsSync(path.join(homeDir, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(true);
+				expect(fs.existsSync(path.join(homeDir, ".claude.json"))).toBe(true);
+				expect(
+					fs.existsSync(path.join(homeDir, ".config", "agent-memory", "completions", "agent-memory.bash")),
+				).toBe(true);
+
+				const result = runCli(["uninstall", "--yes", "--json"], env);
+				expect(result.exitCode).toBe(0);
+				const out = JSON.parse(result.stdout.toString());
+				expect(out.ok).toBe(true);
+				for (const step of out.steps) expect(step.ok).toBe(true);
+
+				expect(fs.existsSync(path.join(homeDir, ".claude", "skills", "agent-memory", "SKILL.md"))).toBe(false);
+				expect(
+					fs.existsSync(path.join(homeDir, ".config", "agent-memory", "completions", "agent-memory.bash")),
+				).toBe(false);
+				const claudeJson = JSON.parse(fs.readFileSync(path.join(homeDir, ".claude.json"), "utf-8"));
+				expect(claudeJson.mcpServers?.["agent-memory"]).toBeUndefined();
+				const claudeSettings = JSON.parse(fs.readFileSync(path.join(homeDir, ".claude", "settings.json"), "utf-8"));
+				expect(claudeSettings.hooks?.SessionStart).toBeUndefined();
+
+				// Memory data is untouched by a plain `uninstall` (no --data).
+				expect(fs.readFileSync(path.join(tmpDir, "MEMORY.md"), "utf-8")).toBe("Durable fact");
+			} finally {
+				fs.rmSync(homeDir, { recursive: true, force: true });
+			}
+		},
+	);
+
+	test("--data also deletes the memory directory and plugin install root", { timeout: 30_000 }, () => {
+		const homeDir = makeHomeDir();
+		const pluginDir = path.join(homeDir, "plugins");
+		const env = { HOME: homeDir, AGENT_MEMORY_DIR: tmpDir, AGENT_MEMORY_PLUGIN_DIR: pluginDir };
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+		fs.mkdirSync(pluginDir, { recursive: true });
+		fs.writeFileSync(path.join(pluginDir, "marker.txt"), "plugin state", "utf-8");
+
+		try {
+			const result = runCli(["uninstall", "--data", "--yes", "--json"], env);
+			expect(result.exitCode).toBe(0);
+			const out = JSON.parse(result.stdout.toString());
+			expect(out.ok).toBe(true);
+			expect(fs.existsSync(tmpDir)).toBe(false);
+			expect(fs.existsSync(pluginDir)).toBe(false);
+		} finally {
+			fs.rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	test("requires explicit confirmation without --yes and changes nothing", { timeout: 15_000 }, () => {
+		const homeDir = makeHomeDir();
+		const env = { HOME: homeDir, AGENT_MEMORY_DIR: tmpDir, AGENT_MEMORY_PLUGIN_DIR: path.join(homeDir, "plugins") };
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+
+		try {
+			const result = runCli(["uninstall", "--json"], env);
+			expect(result.exitCode).toBe(1);
+			const out = JSON.parse(result.stdout.toString());
+			expect(out.ok).toBe(false);
+			expect(out.error.code).toBe("confirmation_required");
+			expect(fs.existsSync(path.join(tmpDir, "MEMORY.md"))).toBe(true);
+		} finally {
+			fs.rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
 // 11. npm package portability
 // ---------------------------------------------------------------------------
 

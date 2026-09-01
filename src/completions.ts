@@ -29,6 +29,14 @@ export interface CompletionInstallResult {
 	profileUpdated: boolean;
 }
 
+export interface CompletionUninstallResult {
+	shell: CompletionShell;
+	completionPath: string;
+	removed: boolean;
+	profilePath?: string;
+	profileUpdated: boolean;
+}
+
 function words(values: readonly string[]): string {
 	return values.join(" ");
 }
@@ -460,6 +468,27 @@ function ensureProfileBlock(filePath: string, lines: string[]): boolean {
 	return true;
 }
 
+/** Reverse of {@link ensureProfileBlock}: strips the marker block, if present, from the given file. */
+function removeProfileBlock(filePath: string): boolean {
+	const start = "# >>> agent-memory completion >>>";
+	const end = "# <<< agent-memory completion <<<";
+	if (!fs.existsSync(filePath)) return false;
+	const current = fs.readFileSync(filePath, "utf8");
+	const startIndex = current.indexOf(start);
+	const endIndex = startIndex === -1 ? -1 : current.indexOf(end, startIndex);
+	if (startIndex === -1 || endIndex === -1) return false;
+	const updated = (current.slice(0, startIndex) + current.slice(endIndex + end.length)).replace(/\n{3,}/g, "\n\n");
+	if (updated === current) return false;
+	fs.writeFileSync(filePath, updated, { mode: 0o600 });
+	return true;
+}
+
+function removeCompletionFile(filePath: string): boolean {
+	if (!fs.existsSync(filePath)) return false;
+	fs.unlinkSync(filePath);
+	return true;
+}
+
 export function installCompletion(
 	shell: CompletionShell,
 	options: { homeDir?: string; platform?: NodeJS.Platform } = {},
@@ -506,4 +535,48 @@ export function installCompletion(
 		`. "$HOME/.config/agent-memory/completions/agent-memory.ps1"`,
 	]);
 	return { shell, completionPath, profilePath, profileUpdated };
+}
+
+function uninstallShellCompletion(
+	shell: CompletionShell,
+	homeDir: string,
+	platform: NodeJS.Platform,
+): CompletionUninstallResult {
+	const completionDir = path.join(homeDir, ".config", "agent-memory", "completions");
+
+	if (shell === "fish") {
+		const completionPath = path.join(homeDir, ".config", "fish", "completions", "agent-memory.fish");
+		return { shell, completionPath, removed: removeCompletionFile(completionPath), profileUpdated: false };
+	}
+
+	const extension = shell === "powershell" ? "ps1" : shell;
+	const completionPath = path.join(completionDir, `agent-memory.${extension}`);
+	const removed = removeCompletionFile(completionPath);
+
+	if (shell === "bash") {
+		const profilePath = path.join(homeDir, ".bashrc");
+		return { shell, completionPath, removed, profilePath, profileUpdated: removeProfileBlock(profilePath) };
+	}
+
+	if (shell === "zsh") {
+		const profilePath = path.join(homeDir, ".zshrc");
+		return { shell, completionPath, removed, profilePath, profileUpdated: removeProfileBlock(profilePath) };
+	}
+
+	const profilePath =
+		platform === "win32"
+			? path.join(homeDir, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
+			: path.join(homeDir, ".config", "powershell", "Microsoft.PowerShell_profile.ps1");
+	return { shell, completionPath, removed, profilePath, profileUpdated: removeProfileBlock(profilePath) };
+}
+
+/** Reverse of {@link installCompletion} across every supported shell. */
+export function uninstallCompletion(
+	options: { homeDir?: string; platform?: NodeJS.Platform } = {},
+): CompletionUninstallResult[] {
+	const homeDir = options.homeDir ?? os.homedir();
+	const platform = options.platform ?? process.platform;
+	return (["bash", "zsh", "fish", "powershell"] as const).map((shell) =>
+		uninstallShellCompletion(shell, homeDir, platform),
+	);
 }

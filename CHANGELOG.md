@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `agent-memory uninstall [--data] [--yes]` — removes hooks, skills, MCP registrations, shell completions, and the Pro plugin in one step. By default your memory data (`MEMORY.md`, daily logs, scratchpad, topics, qmd index) is left untouched; pass `--data` to also delete it and the plugin install root, after explicit confirmation.
+
 ## [0.5.2] - 2026-09-01
 
 ### Fixed

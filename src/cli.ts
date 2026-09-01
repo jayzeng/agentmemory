@@ -37,7 +37,13 @@ import {
 	renderCommandHelp,
 	SCRATCHPAD_ACTION_OPTIONS,
 } from "./cli-spec.js";
-import { type CompletionShell, detectCompletionShell, generateCompletion, installCompletion } from "./completions.js";
+import {
+	type CompletionShell,
+	detectCompletionShell,
+	generateCompletion,
+	installCompletion,
+	uninstallCompletion,
+} from "./completions.js";
 
 import {
 	_setBaseDir,
@@ -96,6 +102,7 @@ import {
 import { StdioMcpServer } from "./mcp-server.js";
 import {
 	createDefaultPluginBootstrap,
+	getDefaultPluginInstallRoot,
 	PluginBootstrapFailure,
 	type PluginBootstrapResultV1,
 } from "./plugin-bootstrap.js";
@@ -1874,6 +1881,128 @@ async function cmdSetup(flags: Record<string, string | boolean>) {
 }
 
 /**
+ * Reverse of {@link cmdSetup}: removes every install artifact agent-memory
+ * creates outside of this package — hooks, skills, MCP registrations, shell
+ * completions, and the Pro plugin executables. Memory data under
+ * `getMemoryDir()` (MEMORY.md, daily logs, scratchpad, topics, qmd index) is
+ * left untouched unless `--data` is passed, since that's the one step a user
+ * can't undo. Destructive by nature, so it always requires either an
+ * interactive confirmation or `--yes`.
+ */
+async function cmdUninstall(flags: Record<string, string | boolean>): Promise<void> {
+	const json = hasFlag(flags, "json");
+	const yes = hasFlag(flags, "yes");
+	const wipeData = hasFlag(flags, "data");
+	const interactive = !json && Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
+	if (!yes) {
+		const message = wipeData
+			? "Re-run with --yes to remove agent-memory's hooks, skills, MCP registrations, completions, and Pro plugin, and permanently delete ~/.agent-memory (MEMORY.md, daily logs, scratchpad, topics, qmd index)."
+			: "Re-run with --yes to remove agent-memory's hooks, skills, MCP registrations, completions, and Pro plugin. Your memory data is left untouched.";
+		if (interactive) {
+			const question = wipeData
+				? "This will also permanently delete your memory data (MEMORY.md, daily logs, scratchpad). Continue?"
+				: "Remove agent-memory's hooks, skills, MCP registrations, completions, and Pro plugin?";
+			if (!(await promptYesNo(question, false))) {
+				console.log("Aborted. Nothing was removed.");
+				return;
+			}
+		} else {
+			if (json) output({ ok: false, error: { code: "confirmation_required", message } }, true);
+			else console.error(`Error: ${message}`);
+			process.exitCode = 1;
+			return;
+		}
+	}
+
+	const steps: Array<{ name: string; ok: boolean; detail?: string }> = [];
+
+	try {
+		const report = uninstallSkills();
+		if (!report.ok) throw new Error(report.error ?? "failed to remove skills");
+		steps.push({
+			name: "skills",
+			ok: true,
+			detail: report.removed.length ? `removed ${report.removed.length}` : "not installed",
+		});
+	} catch (error) {
+		steps.push({ name: "skills", ok: false, detail: (error as Error).message });
+	}
+
+	try {
+		const report = uninstallHooks();
+		if (!report.ok) throw new Error(report.error ?? "failed to remove hooks");
+		const removed = report.results.filter((r) => r.installed).length;
+		steps.push({ name: "hooks", ok: true, detail: removed ? `removed ${removed}` : "not installed" });
+	} catch (error) {
+		steps.push({ name: "hooks", ok: false, detail: (error as Error).message });
+	}
+
+	try {
+		const results = unregisterMcpFromAgents(null);
+		const removed = results.filter((r) => r.status === "unregistered").length;
+		steps.push({ name: "mcp", ok: true, detail: removed ? `unregistered ${removed}` : "not registered" });
+	} catch (error) {
+		steps.push({ name: "mcp", ok: false, detail: (error as Error).message });
+	}
+
+	try {
+		const results = uninstallCompletion();
+		const removed = results.filter((r) => r.removed || r.profileUpdated).length;
+		steps.push({ name: "completions", ok: true, detail: removed ? `removed ${removed}` : "not installed" });
+	} catch (error) {
+		steps.push({ name: "completions", ok: false, detail: (error as Error).message });
+	}
+
+	try {
+		const manager = createDefaultPluginBootstrap(VERSION);
+		const pluginResult = await manager.uninstall();
+		steps.push({ name: "plugin", ok: pluginResult.ok, detail: pluginResult.result });
+	} catch (error) {
+		steps.push({ name: "plugin", ok: false, detail: (error as Error).message });
+	}
+
+	if (wipeData) {
+		try {
+			const memoryDir = getMemoryDir();
+			if (fs.existsSync(memoryDir)) fs.rmSync(memoryDir, { recursive: true, force: true });
+			const pluginRoot = getDefaultPluginInstallRoot();
+			if (fs.existsSync(pluginRoot)) fs.rmSync(pluginRoot, { recursive: true, force: true });
+			steps.push({ name: "data", ok: true, detail: memoryDir });
+		} catch (error) {
+			steps.push({ name: "data", ok: false, detail: (error as Error).message });
+		}
+	}
+
+	const allOk = steps.every((step) => step.ok);
+	if (!allOk) process.exitCode = 1;
+
+	if (json) {
+		output({ ok: allOk, data: wipeData, steps }, true);
+		return;
+	}
+
+	console.log("");
+	console.log(colorize("agent-memory uninstall", "bold"));
+	for (const step of steps) {
+		const mark = step.ok ? MARK_OK : MARK_FAIL;
+		const detail = step.detail ? colorize(` ${step.detail}`, "dim") : "";
+		console.log(`  ${mark} ${step.name}${detail}`);
+	}
+	console.log("");
+	if (!allOk) {
+		console.log(colorize("Some steps failed — see details above.", "yellow"));
+	} else if (wipeData) {
+		console.log(colorize("agent-memory has been fully removed, including your memory data.", "green"));
+	} else {
+		console.log(colorize("agent-memory's install artifacts have been removed.", "green"));
+		console.log(
+			colorize(`Your notes are untouched at ${getMemoryDir()}. Re-run with --data to remove them too.`, "dim"),
+		);
+	}
+}
+
+/**
  * Explain the optional plugin without making a successful core setup feel
  * incomplete. Keep the quota line here in sync with `freeEntitlement()`.
  */
@@ -2946,6 +3075,68 @@ function registerMcpInAgents(only: Set<string> | null): McpRegistrationEntry[] {
 	return results;
 }
 
+type McpUnregistrationEntry = {
+	key: McpAgentKey;
+	displayName: string;
+	path: string;
+	status: "unregistered" | "not-registered" | "not-installed";
+};
+
+/**
+ * Reverse of {@link registerMcpInAgents}: removes the `agent-memory` MCP server
+ * entry from every supported local harness. Missing config files are reported
+ * as `not-installed`, files that never had the entry as `not-registered`.
+ */
+function unregisterMcpFromAgents(only: Set<string> | null): McpUnregistrationEntry[] {
+	const home = os.homedir();
+	const want = (key: string) => !only || only.has(key);
+	const results: McpUnregistrationEntry[] = [];
+
+	const unregisterJson = (key: McpAgentKey, displayName: string, configFile: string): void => {
+		const p = path.join(home, configFile);
+		if (!fs.existsSync(p)) {
+			results.push({ key, displayName, path: p, status: "not-installed" });
+			return;
+		}
+		let s: Record<string, unknown> = {};
+		try {
+			s = JSON.parse(fs.readFileSync(p, "utf8")) as Record<string, unknown>;
+		} catch {}
+		const servers = (s.mcpServers ?? {}) as Record<string, unknown>;
+		if (!servers["agent-memory"]) {
+			results.push({ key, displayName, path: p, status: "not-registered" });
+			return;
+		}
+		delete servers["agent-memory"];
+		if (Object.keys(servers).length === 0) delete s.mcpServers;
+		else s.mcpServers = servers;
+		fs.writeFileSync(p, `${JSON.stringify(s, null, 2)}\n`);
+		results.push({ key, displayName, path: p, status: "unregistered" });
+	};
+
+	if (want("claude")) unregisterJson("claude", "Claude Code", ".claude.json");
+	if (want("cursor")) unregisterJson("cursor", "Cursor", ".cursor/mcp.json");
+	if (want("windsurf")) unregisterJson("windsurf", "Windsurf", ".windsurf/mcp_settings.json");
+
+	if (want("codex")) {
+		const p = path.join(home, ".codex", "config.toml");
+		if (!fs.existsSync(p)) {
+			results.push({ key: "codex", displayName: "Codex", path: p, status: "not-installed" });
+		} else {
+			const existing = fs.readFileSync(p, "utf8");
+			if (!existing.includes("[mcp_servers.agent-memory]")) {
+				results.push({ key: "codex", displayName: "Codex", path: p, status: "not-registered" });
+			} else {
+				const pattern = /\n?\[mcp_servers\.agent-memory\]\n(?:(?!\[)[^\n]*\n?)*/;
+				fs.writeFileSync(p, existing.replace(pattern, ""), "utf8");
+				results.push({ key: "codex", displayName: "Codex", path: p, status: "unregistered" });
+			}
+		}
+	}
+
+	return results;
+}
+
 async function cmdServe(flags: Record<string, string | boolean>): Promise<void> {
 	const isMcp = hasFlag(flags, "mcp");
 	const isRegister = hasFlag(flags, "register");
@@ -3064,7 +3255,7 @@ function printUsage() {
 		["Do things", ["save", "note", "recall", "search"]],
 		["See things", ["status", "doctor", "dashboard"]],
 		["Advanced", ["write", "read", "context", "scratchpad", "distil", "sync"]],
-		["Setup", ["setup", "install-skills", "install-hooks", "completion"]],
+		["Setup", ["setup", "install-skills", "install-hooks", "completion", "uninstall"]],
 		["Pro", ["pro", "learn"]],
 	];
 
@@ -3175,7 +3366,7 @@ async function main() {
 		process.stdout.isTTY &&
 		!json &&
 		command &&
-		!["init", "help", "version", "doctor", "status", "completion", "hook", "serve"].includes(command) &&
+		!["init", "help", "version", "doctor", "status", "completion", "hook", "serve", "uninstall"].includes(command) &&
 		!fs.existsSync(getMemoryDir())
 	) {
 		console.log(colorize("It looks like this is your first run — no memory directory yet.", "yellow"));
@@ -3288,6 +3479,9 @@ async function main() {
 			break;
 		case "uninstall-hooks":
 			cmdUninstallHooks(flags);
+			break;
+		case "uninstall":
+			await cmdUninstall(flags);
 			break;
 		case "hook": {
 			const sub = positional[0];
