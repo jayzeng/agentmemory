@@ -730,8 +730,11 @@ async function cmdUserPromptSubmit(_flags: Record<string, string | boolean>): Pr
 
 // How many Stop events must elapse (per session_id) before the periodic
 // memory-write nudge fires again. Balances "long sessions get checked
-// repeatedly" against "don't block every single turn".
-const STOP_NAG_INTERVAL = 12;
+// repeatedly" against "don't block every single turn". Deliberately short —
+// most real sessions are well under a dozen turns, so a wider interval meant
+// the nudge rarely fired in practice (see stop-hook.json in the wild: sessions
+// topping out around 7 turns, zero nags ever recorded).
+const STOP_NAG_INTERVAL = 6;
 // Bound state/stop-hook.json so it can't grow unboundedly across many sessions.
 const STOP_HOOK_MAX_SESSIONS = 50;
 
@@ -2991,7 +2994,9 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
 		async () => {
 			const memFile = getMemoryFile();
 			const scratchFile = getScratchpadFile();
-			const memory = redactSecrets(readFileSafe(memFile) ?? "").content || "(empty)";
+			const memory =
+				redactSecrets(readFileSafe(memFile) ?? "").content ||
+				'(empty — this only covers what was explicitly saved. For things said in prior chat sessions, try `agent-memory recall "<query>"` or the `session_recall`/`session_search` MCP tools, if AgentMemory Pro is installed.)';
 			const scratchRaw = readFileSafe(scratchFile) ?? "";
 			const scratchItems = parseScratchpad(scratchRaw)
 				.filter((item) => !item.done)
@@ -3039,7 +3044,7 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
 		await runtime.load();
 		for (const tool of runtime.getMcpTools()) {
 			server.addTool({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }, (input) =>
-				tool.run(input),
+				runtime.runMcpTool(tool.name, input),
 			);
 		}
 		server.addStartupHook(() => runtime.runMcpStartup());

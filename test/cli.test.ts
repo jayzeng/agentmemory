@@ -536,41 +536,49 @@ describe("CLI subprocess", () => {
 		);
 	}
 
-	test("hook stop only nags every STOP_NAG_INTERVAL (12) turns per session", { timeout: 20_000 }, () => {
-		const sessionId = "session-a";
-		for (let turn = 1; turn <= 11; turn++) {
-			const result = runHookStop(sessionId);
-			expect(result.exitCode).toBe(0);
-			expect(result.stdout.toString()).toBe("");
-		}
-		const twelfth = runHookStop(sessionId);
-		expect(twelfth.exitCode).toBe(0);
-		const decision = JSON.parse(twelfth.stdout.toString());
-		expect(decision.decision).toBe("block");
-		expect(typeof decision.reason).toBe("string");
-		expect(decision.reason.length).toBeGreaterThan(0);
+	// Must track STOP_NAG_INTERVAL in src/cli.ts.
+	const STOP_NAG_INTERVAL = 6;
 
-		// Counter resets relative to the last nag — turns 13-23 stay quiet, 24 nags again.
-		for (let turn = 13; turn <= 23; turn++) {
-			expect(runHookStop(sessionId).stdout.toString()).toBe("");
-		}
-		const twentyFourth = runHookStop(sessionId);
-		expect(JSON.parse(twentyFourth.stdout.toString()).decision).toBe("block");
-	});
+	test(
+		`hook stop only nags every STOP_NAG_INTERVAL (${STOP_NAG_INTERVAL}) turns per session`,
+		{ timeout: 20_000 },
+		() => {
+			const sessionId = "session-a";
+			for (let turn = 1; turn < STOP_NAG_INTERVAL; turn++) {
+				const result = runHookStop(sessionId);
+				expect(result.exitCode).toBe(0);
+				expect(result.stdout.toString()).toBe("");
+			}
+			const nagTurn = runHookStop(sessionId);
+			expect(nagTurn.exitCode).toBe(0);
+			const decision = JSON.parse(nagTurn.stdout.toString());
+			expect(decision.decision).toBe("block");
+			expect(typeof decision.reason).toBe("string");
+			expect(decision.reason.length).toBeGreaterThan(0);
+
+			// Counter resets relative to the last nag — the next STOP_NAG_INTERVAL - 1
+			// turns stay quiet, then it nags again.
+			for (let turn = 1; turn < STOP_NAG_INTERVAL; turn++) {
+				expect(runHookStop(sessionId).stdout.toString()).toBe("");
+			}
+			const secondNagTurn = runHookStop(sessionId);
+			expect(JSON.parse(secondNagTurn.stdout.toString()).decision).toBe("block");
+		},
+	);
 
 	test("hook stop never nags twice in a row when stop_hook_active is true", { timeout: 15_000 }, () => {
 		const sessionId = "session-b";
-		for (let turn = 1; turn <= 12; turn++) {
+		for (let turn = 1; turn <= STOP_NAG_INTERVAL; turn++) {
 			runHookStop(sessionId, true);
 		}
-		// Even after 12 calls, stop_hook_active always short-circuits to "allow".
+		// Even after a full interval's worth of calls, stop_hook_active always short-circuits to "allow".
 		const result = runHookStop(sessionId, true);
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.toString()).toBe("");
 	});
 
 	test("hook stop tracks each session_id independently", { timeout: 15_000 }, () => {
-		for (let turn = 1; turn <= 11; turn++) {
+		for (let turn = 1; turn < STOP_NAG_INTERVAL; turn++) {
 			expect(runHookStop("session-c").stdout.toString()).toBe("");
 		}
 		// A different session starts its own counter from zero.
@@ -660,6 +668,39 @@ describe("CLI subprocess", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.toString()).not.toContain(token);
 		expect(result.stdout.toString()).toContain("[REDACTED_SECRET]");
+	});
+
+	test("serve --mcp points memory_read toward recall when MEMORY.md is empty", { timeout: 15_000 }, () => {
+		const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "memory_read", arguments: {} } };
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "serve", "--mcp", "--dir", tmpDir],
+			{
+				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const out = result.stdout.toString();
+		expect(out).toContain("agent-memory recall");
+		expect(out).toContain("session_recall");
+	});
+
+	test("serve --mcp does not show the recall hint once MEMORY.md has content", { timeout: 15_000 }, () => {
+		fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "# Memory\n\nDeploys go through the staging gate first.\n");
+		const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "memory_read", arguments: {} } };
+		const result = Bun.spawnSync(
+			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "serve", "--mcp", "--dir", tmpDir],
+			{
+				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		expect(result.exitCode).toBe(0);
+		const out = result.stdout.toString();
+		expect(out).toContain("Deploys go through the staging gate first.");
+		expect(out).not.toContain("agent-memory recall");
 	});
 
 	test("status shows config", async () => {

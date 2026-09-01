@@ -176,6 +176,7 @@ export interface PluginMcpToolInputSchema {
 export interface PluginMcpToolV1 {
 	name: string;
 	description: string;
+	requiredCapability: string;
 	inputSchema: PluginMcpToolInputSchema;
 	run(input: Record<string, unknown>): unknown | Promise<unknown>;
 }

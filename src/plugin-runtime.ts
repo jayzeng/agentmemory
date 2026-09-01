@@ -278,6 +278,24 @@ export class InstalledPluginRuntimeV1 {
 		return [...this.mcpTools];
 	}
 
+	/**
+	 * Invoke a registered MCP tool by name, re-checking entitlement on every
+	 * call — matching `run()`'s behavior for commands. MCP tools are
+	 * registered once at `serve --mcp` startup and the server process can
+	 * live for a long session, so a tool's entitlement must be re-verified
+	 * per-call rather than trusted from registration time (e.g. a trial
+	 * expiring mid-session must actually stop the tool from working).
+	 */
+	async runMcpTool(name: string, input: Record<string, unknown>): Promise<unknown> {
+		if (!(await this.load())) return { error: `Unknown MCP tool: ${name}` };
+		const tool = this.mcpTools.find((candidate) => candidate.name === name);
+		if (!tool) return { error: `Unknown MCP tool: ${name}` };
+		const entitlement = await this.refreshEntitlement();
+		if (!isPluginCapabilityEnabled(entitlement, tool.requiredCapability))
+			return { error: `Capability ${tool.requiredCapability} is not enabled for the ${name} tool` };
+		return tool.run(input);
+	}
+
 	async runMcpStartup(): Promise<void> {
 		for (const hook of this.mcpStartupHooks) await hook();
 	}
@@ -349,6 +367,11 @@ export class InstalledPluginRuntimeV1 {
 				this.contextProviders.push({ provider, pluginId: manifest.id });
 			},
 			registerMcpTool: (tool) => {
+				if (!(manifest.capabilities ?? []).includes(tool.requiredCapability))
+					throw new PluginBootstrapFailure(
+						"plugin_mcp_tool_invalid",
+						`Plugin ${manifest.id} registered an MCP tool with an undeclared capability`,
+					);
 				if (!tool.name || this.mcpTools.some((existing) => existing.name === tool.name))
 					throw new PluginBootstrapFailure(
 						"plugin_mcp_tool_invalid",
