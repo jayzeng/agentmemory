@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-09-01
+
+### Fixed
+
+- Enforced entitlement checks on MCP tools registered by plugins — previously they ran with no capability gating at all, unlike commands, hooks, and context providers. `PluginMcpToolV1` now requires a `requiredCapability`, registration rejects an undeclared one, and a new `runMcpTool()` re-checks entitlement on every call so a lapsed trial actually disables a tool mid-session instead of only at registration.
+- Lowered the Stop-hook memory-write nudge interval from 12 to 6 turns — most real sessions never reached 12, so the nudge almost never fired in practice.
+- Pointed `memory_read`'s empty-state message at `agent-memory recall` / `session_recall` / `session_search` instead of a bare `(empty)`, so cross-session history stays discoverable even when curated memory has nothing saved yet.
+
 ## [0.5.1] - 2026-09-01
 
 ### Fixed
