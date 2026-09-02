@@ -71,7 +71,7 @@ export const COMMAND_DESCRIPTIONS: Record<(typeof COMMANDS)[number], string> = {
 	dashboard: "open the private local Memory Dashboard",
 	plugin: "discover, install, update, or remove optional official plugins",
 	serve: "run as a Model Context Protocol (MCP) server over stdio",
-	upgrade: "check for and install newer agent-memory CLI and Pro plugin releases",
+	upgrade: "check for, and auto-install by default, newer agent-memory CLI and Pro plugin releases",
 	version: "print the installed agent-memory version",
 	help: "show this command overview",
 };
@@ -133,7 +133,7 @@ export const COMMAND_OPTIONS: Record<string, readonly string[]> = {
 	learn: ["--preview"],
 	dashboard: ["--no-browser"],
 	serve: ["--mcp", "--register", "--only"],
-	upgrade: ["--check", "--refresh", "--yes", "--quiet", "--cli", "--plugin"],
+	upgrade: ["--check", "--refresh", "--yes", "--quiet", "--cli", "--plugin", "--background"],
 	version: [],
 	help: [],
 };
@@ -306,6 +306,10 @@ export const OPTION_SPECS: Record<string, CliOptionSpec> = {
 	"--quiet": { description: "upgrade: suppress non-error output (used by the passive session-start refresh)" },
 	"--cli": { description: "upgrade: limit action to the CLI binary" },
 	"--plugin": { description: "upgrade: limit action to the Pro plugin bundle" },
+	"--background": {
+		description:
+			"upgrade: non-interactive; installs only targets whose policy is 'auto' (see: agent-memory upgrade policy)",
+	},
 };
 
 export const SHELL_DESCRIPTIONS: Record<string, string> = {
@@ -353,7 +357,8 @@ const COMMAND_USAGE: Record<string, string> = {
 	dashboard: "agent-memory dashboard [--no-browser]",
 	plugin:
 		"agent-memory plugin <list|status|install|update|uninstall|manage> [--channel stable] [--yes] [--no-browser]",
-	upgrade: "agent-memory upgrade [--check] [--yes] [--cli|--plugin] [--refresh] [--json]",
+	upgrade:
+		"agent-memory upgrade [--check] [--yes] [--cli|--plugin] [--refresh] [--json]\n  agent-memory upgrade policy [off|notify|auto] [--cli|--plugin] [--json]  (default: auto for both)",
 	version: "agent-memory version",
 	help: "agent-memory help [<command>]",
 };

@@ -2836,8 +2836,10 @@ import {
 	formatUpgradeNotice,
 	isCacheFresh,
 	readUpgradeCache,
+	readUpgradePolicy,
 	type UpgradeCache,
 	writeUpgradeCache,
+	writeUpgradePolicy,
 } from "../src/upgrade.js";
 
 describe("detectInstallMethod", () => {
@@ -2912,6 +2914,88 @@ describe("upgrade cache", () => {
 		expect(isCacheFresh(fresh)).toBe(true);
 		expect(isCacheFresh(stale)).toBe(false);
 		expect(isCacheFresh(null)).toBe(false);
+	});
+
+	test("round-trips an auto-upgrade outcome (success and failure)", () => {
+		const record: UpgradeCache = {
+			checkedAt: new Date().toISOString(),
+			cliCurrent: "0.4.17",
+			cliLatest: "0.5.0",
+			pluginCurrent: "0.2.1",
+			pluginLatest: "0.3.0",
+			cliAuto: { at: new Date().toISOString(), ok: true, version: "0.5.0" },
+			pluginAuto: { at: new Date().toISOString(), ok: false, version: "0.2.1", error: "signature_invalid" },
+		};
+		writeUpgradeCache(record);
+		expect(readUpgradeCache()).toEqual(record);
+	});
+
+	test("drops a malformed auto-upgrade outcome instead of rejecting the whole cache", () => {
+		const file = path.join(getMemoryDir(), "state", "upgrade-check.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(
+			file,
+			JSON.stringify({
+				checkedAt: new Date().toISOString(),
+				cliCurrent: "0.4.17",
+				cliLatest: "0.5.0",
+				pluginCurrent: null,
+				pluginLatest: null,
+				cliAuto: { ok: "not-a-boolean" },
+			}),
+		);
+		const read = readUpgradeCache();
+		expect(read).not.toBeNull();
+		expect(read?.cliAuto).toBeUndefined();
+	});
+});
+
+describe("upgrade policy", () => {
+	beforeEach(setupTmpDir);
+	afterEach(cleanupTmpDir);
+
+	test("defaults to auto for both targets when unset", () => {
+		const policy = readUpgradePolicy();
+		expect(policy.cli).toBe("auto");
+		expect(policy.plugin).toBe("auto");
+		expect(policy.existed).toBe(false);
+	});
+
+	test("persists a written policy and reports existed=true on re-read", () => {
+		writeUpgradePolicy({ cli: "off" });
+		const policy = readUpgradePolicy();
+		expect(policy.cli).toBe("off");
+		expect(policy.plugin).toBe("auto"); // untouched target keeps its prior/default value
+		expect(policy.existed).toBe(true);
+	});
+
+	test("writeUpgradePolicy merges rather than clobbering the other target", () => {
+		writeUpgradePolicy({ cli: "notify", plugin: "off" });
+		writeUpgradePolicy({ cli: "auto" });
+		const policy = readUpgradePolicy();
+		expect(policy.cli).toBe("auto");
+		expect(policy.plugin).toBe("off");
+	});
+
+	test("env var overrides the persisted file, per target", () => {
+		writeUpgradePolicy({ cli: "auto", plugin: "auto" });
+		process.env.AGENT_MEMORY_AUTO_UPGRADE_CLI = "off";
+		try {
+			const policy = readUpgradePolicy();
+			expect(policy.cli).toBe("off");
+			expect(policy.plugin).toBe("auto");
+		} finally {
+			delete process.env.AGENT_MEMORY_AUTO_UPGRADE_CLI;
+		}
+	});
+
+	test("rejects an invalid stored value and falls back to default", () => {
+		const file = path.join(getMemoryDir(), "state", "upgrade-policy.json");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, JSON.stringify({ cli: "sometimes", plugin: "auto" }));
+		const policy = readUpgradePolicy();
+		expect(policy.cli).toBe("auto");
+		expect(policy.plugin).toBe("auto");
 	});
 });
 
@@ -3005,5 +3089,70 @@ describe("checkForUpgrades", () => {
 			fromCache: true,
 		});
 		expect(notice).toBeNull();
+	});
+
+	test("formatUpgradeNotice reports a completed auto-upgrade the process hasn't caught up to yet", () => {
+		// status.cli.current is what THIS process is running; cache.cliAuto.version is what
+		// the background --background run just installed to disk — a long-running process
+		// (e.g. serve --mcp) would see these diverge until it restarts.
+		const notice = formatUpgradeNotice(
+			{
+				cli: { current: "0.4.17", latest: "0.5.0", upgradeAvailable: false },
+				plugin: { current: "0.2.1", latest: "0.2.1", upgradeAvailable: false },
+				checkedAt: new Date().toISOString(),
+				fromCache: true,
+			},
+			{
+				checkedAt: new Date().toISOString(),
+				cliCurrent: "0.4.17",
+				cliLatest: "0.5.0",
+				pluginCurrent: "0.2.1",
+				pluginLatest: "0.2.1",
+				cliAuto: { at: new Date().toISOString(), ok: true, version: "0.5.0" },
+			},
+		);
+		expect(notice).toContain("auto-upgraded → 0.5.0");
+		expect(notice).not.toContain("agent-memory upgrade");
+	});
+
+	test("formatUpgradeNotice stays silent once the running process matches the auto-upgraded version", () => {
+		const notice = formatUpgradeNotice(
+			{
+				cli: { current: "0.5.0", latest: "0.5.0", upgradeAvailable: false },
+				plugin: { current: "0.2.1", latest: "0.2.1", upgradeAvailable: false },
+				checkedAt: new Date().toISOString(),
+				fromCache: true,
+			},
+			{
+				checkedAt: new Date().toISOString(),
+				cliCurrent: "0.5.0",
+				cliLatest: "0.5.0",
+				pluginCurrent: "0.2.1",
+				pluginLatest: "0.2.1",
+				cliAuto: { at: new Date().toISOString(), ok: true, version: "0.5.0" },
+			},
+		);
+		expect(notice).toBeNull();
+	});
+
+	test("formatUpgradeNotice surfaces a failed auto-upgrade with a manual fallback", () => {
+		const notice = formatUpgradeNotice(
+			{
+				cli: { current: "0.4.17", latest: "0.5.0", upgradeAvailable: true },
+				plugin: { current: "0.2.1", latest: "0.2.1", upgradeAvailable: false },
+				checkedAt: new Date().toISOString(),
+				fromCache: true,
+			},
+			{
+				checkedAt: new Date().toISOString(),
+				cliCurrent: "0.4.17",
+				cliLatest: "0.5.0",
+				pluginCurrent: "0.2.1",
+				pluginLatest: "0.2.1",
+				cliAuto: { at: new Date().toISOString(), ok: false, version: "0.4.17", error: "EACCES" },
+			},
+		);
+		expect(notice).toContain("CLI auto-upgrade failed (EACCES)");
+		expect(notice).toContain("agent-memory upgrade");
 	});
 });

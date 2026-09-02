@@ -1545,6 +1545,59 @@ describe("CLI subprocess", () => {
 		fs.rmSync(projectDir, { recursive: true, force: true });
 		fs.rmSync(homeDir, { recursive: true, force: true });
 	});
+
+	test("upgrade policy defaults to auto and can be set per-target", () => {
+		const readPolicy = () =>
+			Bun.spawnSync(
+				["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "upgrade", "policy", "--dir", tmpDir, "--json"],
+				{ stdout: "pipe", stderr: "pipe" },
+			);
+
+		const initial = readPolicy();
+		expect(initial.exitCode).toBe(0);
+		expect(JSON.parse(initial.stdout.toString())).toEqual({ cli: "auto", plugin: "auto" });
+
+		const setResult = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"upgrade",
+				"policy",
+				"off",
+				"--cli",
+				"--dir",
+				tmpDir,
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(setResult.exitCode).toBe(0);
+		expect(JSON.parse(setResult.stdout.toString())).toEqual({ cli: "off", plugin: "auto" });
+
+		const after = readPolicy();
+		expect(JSON.parse(after.stdout.toString())).toEqual({ cli: "off", plugin: "auto" });
+	});
+
+	test("upgrade policy rejects an invalid value", () => {
+		const result = Bun.spawnSync(
+			[
+				"bun",
+				"run",
+				path.join(__dirname, "..", "src", "cli.ts"),
+				"upgrade",
+				"policy",
+				"sometimes",
+				"--dir",
+				tmpDir,
+				"--json",
+			],
+			{ stdout: "pipe", stderr: "pipe" },
+		);
+		expect(result.exitCode).toBe(1);
+		const out = JSON.parse(result.stderr.toString());
+		expect(out.error).toContain("off, notify, auto");
+	});
 });
 
 // ---------------------------------------------------------------------------

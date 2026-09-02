@@ -109,14 +109,19 @@ import {
 import type { PluginContextSectionV1 } from "./plugin-host.js";
 import { InstalledPluginRuntimeV1 } from "./plugin-runtime.js";
 import {
+	type AutoUpgradeOutcome,
 	checkForUpgrades,
 	detectInstallMethod,
 	formatUpgradeNotice,
 	isCacheFresh,
 	readUpgradeCache,
+	readUpgradePolicy,
 	refreshUpgradeCacheBackground,
 	runInstaller,
+	type UpgradePolicyValue,
 	type UpgradeStatus,
+	writeUpgradeCache,
+	writeUpgradePolicy,
 } from "./upgrade.js";
 
 declare const __VERSION__: string;
@@ -2260,6 +2265,16 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 		}
 	}
 
+	// Auto-upgrade policy
+	const upgradePolicy = readUpgradePolicy();
+	rows.push({
+		status: "ok",
+		label: "Auto-upgrade",
+		detail: `CLI: ${upgradePolicy.cli}, Pro: ${upgradePolicy.plugin}`,
+		fix:
+			upgradePolicy.cli === "off" && upgradePolicy.plugin === "off" ? "agent-memory upgrade policy auto" : undefined,
+	});
+
 	// Skills + hooks per detected host
 	const { homeDir, targets } = detectHookAgents();
 	const detected = targets.filter((target) => target.detected);
@@ -2894,16 +2909,113 @@ async function resolvePluginLatestHint(): Promise<{
 	}
 }
 
-async function cmdUpgrade(flags: Record<string, string | boolean>): Promise<void> {
+async function cmdUpgradePolicy(flags: Record<string, string | boolean>, positional: string[]): Promise<void> {
+	const json = hasFlag(flags, "json");
+	const value = positional[0];
+
+	if (!value) {
+		const policy = readUpgradePolicy();
+		if (json) output({ cli: policy.cli, plugin: policy.plugin }, true);
+		else console.log(`  cli:    ${policy.cli}\n  plugin: ${policy.plugin}`);
+		return;
+	}
+
+	if (value !== "off" && value !== "notify" && value !== "auto") {
+		exitError(`Invalid policy '${value}'. Expected one of: off, notify, auto.`, json);
+	}
+
+	const onlyCli = hasFlag(flags, "cli");
+	const onlyPlugin = hasFlag(flags, "plugin");
+	const patch: { cli?: UpgradePolicyValue; plugin?: UpgradePolicyValue } = {};
+	if (onlyCli || !onlyPlugin) patch.cli = value;
+	if (onlyPlugin || !onlyCli) patch.plugin = value;
+
+	const next = writeUpgradePolicy(patch);
+	if (json) output(next, true);
+	else console.log(`  cli:    ${next.cli}\n  plugin: ${next.plugin}`);
+}
+
+/**
+ * `--background`-mode install: only touches a target when its persisted policy
+ * (see `readUpgradePolicy`) is `"auto"`. Always non-interactive — this path is
+ * only ever reached from a detached, non-TTY child spawned by
+ * `refreshUpgradeCacheBackground()`. Failures are recorded, never thrown.
+ */
+async function runAutoUpgrade(
+	status: UpgradeStatus,
+	policy: { cli: UpgradePolicyValue; plugin: UpgradePolicyValue },
+	pluginCurrent: string | null,
+	quiet: boolean,
+): Promise<{ cliAuto?: AutoUpgradeOutcome; pluginAuto?: AutoUpgradeOutcome }> {
+	const now = new Date().toISOString();
+	let cliAuto: AutoUpgradeOutcome | undefined;
+	let pluginAuto: AutoUpgradeOutcome | undefined;
+
+	if (policy.cli === "auto" && status.cli.upgradeAvailable) {
+		const method = detectInstallMethod();
+		if (!quiet) console.log(`Auto-upgrading CLI via: ${method.command.join(" ")}`);
+		try {
+			const result = runInstaller(method);
+			cliAuto = result.ok
+				? { at: now, ok: true, version: status.cli.latest }
+				: {
+						at: now,
+						ok: false,
+						version: status.cli.current,
+						error: (result.stderr || result.stdout || `exit ${result.code}`).trim(),
+					};
+		} catch (error) {
+			cliAuto = {
+				at: now,
+				ok: false,
+				version: status.cli.current,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	if (policy.plugin === "auto" && status.plugin.upgradeAvailable) {
+		if (!quiet) console.log("Auto-upgrading Pro plugin bundle…");
+		try {
+			const pluginResult = await cmdPlugin({ json: true }, ["update"]);
+			const ok = Boolean(pluginResult?.ok);
+			pluginAuto = ok
+				? { at: now, ok: true, version: status.plugin.latest }
+				: {
+						at: now,
+						ok: false,
+						version: pluginCurrent,
+						error: pluginResult?.error?.message ?? "plugin update failed",
+					};
+		} catch (error) {
+			pluginAuto = {
+				at: now,
+				ok: false,
+				version: pluginCurrent,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	return { cliAuto, pluginAuto };
+}
+
+async function cmdUpgrade(flags: Record<string, string | boolean>, positional: string[] = []): Promise<void> {
+	if (positional[0] === "policy") {
+		await cmdUpgradePolicy(flags, positional.slice(1));
+		return;
+	}
+
 	const json = hasFlag(flags, "json");
 	const quiet = hasFlag(flags, "quiet");
 	const checkOnly = hasFlag(flags, "check");
+	const background = hasFlag(flags, "background");
 	const refresh = hasFlag(flags, "refresh");
 	const onlyCli = hasFlag(flags, "cli");
 	const onlyPlugin = hasFlag(flags, "plugin");
 	const targetCli = onlyCli || !onlyPlugin;
 	const targetPlugin = onlyPlugin || !onlyCli;
-	const applyAll = hasFlag(flags, "yes") || !process.stdin.isTTY || !process.stdout.isTTY;
+	const applyAll = hasFlag(flags, "yes") || background || !process.stdin.isTTY || !process.stdout.isTTY;
 
 	const pluginCurrent = await readPluginCurrentVersion();
 	const pluginProbe = targetPlugin ? await resolvePluginLatestHint() : { latest: null, updateAvailable: false };
@@ -2919,6 +3031,33 @@ async function cmdUpgrade(flags: Record<string, string | boolean>): Promise<void
 	if (checkOnly) {
 		if (json) output(status, true);
 		else if (!quiet) printUpgradeStatus(status, { targetCli, targetPlugin });
+		return;
+	}
+
+	if (background) {
+		const policy = readUpgradePolicy();
+		const { cliAuto, pluginAuto } = await runAutoUpgrade(status, policy, pluginCurrent, quiet);
+		writeUpgradeCache({
+			checkedAt: status.checkedAt,
+			cliCurrent: VERSION,
+			cliLatest: status.cli.latest,
+			pluginCurrent,
+			pluginLatest: status.plugin.latest,
+			cliAuto,
+			pluginAuto,
+		});
+		if (json) output({ ...status, cliAuto, pluginAuto }, true);
+		else if (!quiet) {
+			if (cliAuto)
+				console.log(
+					`  ${cliAuto.ok ? MARK_OK : MARK_FAIL} CLI auto-upgrade: ${cliAuto.ok ? `→ ${cliAuto.version}` : cliAuto.error}`,
+				);
+			if (pluginAuto)
+				console.log(
+					`  ${pluginAuto.ok ? MARK_OK : MARK_FAIL} Pro auto-upgrade: ${pluginAuto.ok ? `→ ${pluginAuto.version}` : pluginAuto.error}`,
+				);
+		}
+		if ((cliAuto && !cliAuto.ok) || (pluginAuto && !pluginAuto.ok)) process.exitCode = 1;
 		return;
 	}
 
@@ -3505,6 +3644,15 @@ async function main() {
 			const layer = readHookMode() === "per-turn" ? "stable" : undefined;
 			await cmdContext(layer ? { "no-search": true, layer } : { "no-search": true });
 			try {
+				const policy = readUpgradePolicy();
+				if (!policy.existed) {
+					// Persist the (possibly env-overridden) defaults now, so this notice
+					// only ever fires once — the file's mere existence is the "seen" flag.
+					writeUpgradePolicy({ cli: policy.cli, plugin: policy.plugin });
+					console.error(
+						"agent-memory: auto-upgrade is on by default (CLI + Pro plugin). Disable with: agent-memory upgrade policy off",
+					);
+				}
 				const cache = readUpgradeCache();
 				if (cache) {
 					const status = await checkForUpgrades({
@@ -3512,7 +3660,7 @@ async function main() {
 						pluginCurrent: cache.pluginCurrent,
 						cacheOnly: true,
 					});
-					const notice = formatUpgradeNotice(status);
+					const notice = formatUpgradeNotice(status, cache);
 					if (notice) console.error(notice);
 				}
 				if (!isCacheFresh(cache) && !process.env.AGENT_MEMORY_UPGRADE_BACKGROUND) {
@@ -3557,7 +3705,7 @@ async function main() {
 			await cmdPro(flags, positional);
 			break;
 		case "upgrade":
-			await cmdUpgrade(flags);
+			await cmdUpgrade(flags, positional);
 			break;
 		case "serve":
 			await cmdServe(flags);

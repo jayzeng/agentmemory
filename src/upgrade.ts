@@ -1,12 +1,18 @@
 /**
  * Upgrade orchestration for the `agent-memory` CLI and its official Pro plugin bundle.
  *
- * Two consumers:
+ * Three consumers:
  *   1. `agent-memory upgrade` — explicit user command; checks and (optionally) installs.
- *   2. `agent-memory hook session-start` — passive notice from a 24h-cached record.
+ *   2. `agent-memory upgrade --background` — detached, non-interactive; checks, then
+ *      installs any target whose `readUpgradePolicy()` value is `"auto"` (the default).
+ *      Spawned by `refreshUpgradeCacheBackground()` from `hook session-start`.
+ *   3. `agent-memory hook session-start` — passive notice from a 24h-cached record,
+ *      including the outcome of the last `--background` auto-install attempt.
  *
  * Network calls always have a hard timeout and always fail closed (upgrade is a
- * quality-of-life feature; a flaky registry must never break the CLI).
+ * quality-of-life feature; a flaky registry must never break the CLI). Same fail-closed
+ * contract applies to auto-install: a failed background install is recorded, never
+ * retried before the next cache refresh, and never thrown.
  */
 
 import { type SpawnOptions, spawn, spawnSync } from "node:child_process";
@@ -40,6 +46,18 @@ export interface UpgradeCache {
 	cliLatest: string | null;
 	pluginCurrent: string | null;
 	pluginLatest: string | null;
+	/** Outcome of the most recent `--background` auto-upgrade attempt, if any. */
+	cliAuto?: AutoUpgradeOutcome;
+	pluginAuto?: AutoUpgradeOutcome;
+}
+
+export interface AutoUpgradeOutcome {
+	at: string;
+	ok: boolean;
+	/** Version installed (ok) or the previous/current version (failure). */
+	version: string | null;
+	/** Failure reason; absent when ok. */
+	error?: string;
 }
 
 export interface UpgradeStatus {
@@ -89,6 +107,17 @@ function upgradeCachePath(): string {
 	return path.join(getMemoryDir(), "state", "upgrade-check.json");
 }
 
+function isValidAutoOutcome(value: unknown): value is AutoUpgradeOutcome {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as Partial<AutoUpgradeOutcome>;
+	return (
+		typeof candidate.at === "string" &&
+		typeof candidate.ok === "boolean" &&
+		(candidate.version === null || typeof candidate.version === "string") &&
+		(candidate.error === undefined || typeof candidate.error === "string")
+	);
+}
+
 export function readUpgradeCache(): UpgradeCache | null {
 	try {
 		const raw = fs.readFileSync(upgradeCachePath(), "utf-8");
@@ -110,6 +139,8 @@ export function readUpgradeCache(): UpgradeCache | null {
 			cliLatest: parsed.cliLatest ?? null,
 			pluginCurrent: parsed.pluginCurrent ?? null,
 			pluginLatest: parsed.pluginLatest ?? null,
+			cliAuto: isValidAutoOutcome(parsed.cliAuto) ? parsed.cliAuto : undefined,
+			pluginAuto: isValidAutoOutcome(parsed.pluginAuto) ? parsed.pluginAuto : undefined,
 		};
 	} catch {
 		return null;
@@ -131,6 +162,76 @@ export function isCacheFresh(record: UpgradeCache | null, now = Date.now()): boo
 	const checked = Date.parse(record.checkedAt);
 	if (!Number.isFinite(checked)) return false;
 	return now - checked < CACHE_TTL_MS;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-upgrade policy (off / notify / auto), per target
+// ---------------------------------------------------------------------------
+
+export type UpgradePolicyValue = "off" | "notify" | "auto";
+export interface UpgradePolicy {
+	cli: UpgradePolicyValue;
+	plugin: UpgradePolicyValue;
+}
+
+const UPGRADE_POLICY_FILENAME = "upgrade-policy.json";
+const UPGRADE_POLICY_DEFAULT: UpgradePolicy = { cli: "auto", plugin: "auto" };
+
+function upgradePolicyPath(): string {
+	return path.join(getMemoryDir(), "state", UPGRADE_POLICY_FILENAME);
+}
+
+function isPolicyValue(value: unknown): value is UpgradePolicyValue {
+	return value === "off" || value === "notify" || value === "auto";
+}
+
+/**
+ * Resolve the persisted auto-upgrade policy.
+ * Precedence per target: `AGENT_MEMORY_AUTO_UPGRADE_{CLI,PLUGIN}` env var →
+ * `<memoryDir>/state/upgrade-policy.json` → default `"auto"`.
+ *
+ * `existed` tells callers whether the policy file was already on disk —
+ * used to fire a one-time "auto-upgrade is on" notice on first read.
+ */
+export function readUpgradePolicy(): UpgradePolicy & { existed: boolean } {
+	let stored: Partial<UpgradePolicy> = {};
+	let existed = false;
+	try {
+		const raw = fs.readFileSync(upgradePolicyPath(), "utf-8");
+		const parsed = JSON.parse(raw) as Partial<UpgradePolicy>;
+		if (isPolicyValue(parsed.cli) || isPolicyValue(parsed.plugin)) {
+			stored = parsed;
+			existed = true;
+		}
+	} catch {}
+
+	const envCli = process.env.AGENT_MEMORY_AUTO_UPGRADE_CLI;
+	const envPlugin = process.env.AGENT_MEMORY_AUTO_UPGRADE_PLUGIN;
+
+	return {
+		cli: isPolicyValue(envCli) ? envCli : isPolicyValue(stored.cli) ? stored.cli : UPGRADE_POLICY_DEFAULT.cli,
+		plugin: isPolicyValue(envPlugin)
+			? envPlugin
+			: isPolicyValue(stored.plugin)
+				? stored.plugin
+				: UPGRADE_POLICY_DEFAULT.plugin,
+		existed,
+	};
+}
+
+/** Atomically persist the auto-upgrade policy. Merges with whatever is already on disk. */
+export function writeUpgradePolicy(patch: Partial<UpgradePolicy>): UpgradePolicy {
+	const current = readUpgradePolicy();
+	const next: UpgradePolicy = {
+		cli: patch.cli ?? current.cli,
+		plugin: patch.plugin ?? current.plugin,
+	};
+	const target = upgradePolicyPath();
+	fs.mkdirSync(path.dirname(target), { recursive: true });
+	const temporary = `${target}.${process.pid}.tmp`;
+	fs.writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+	fs.renameSync(temporary, target);
+	return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,15 +323,17 @@ export function runInstaller(method: InstallMethod, opts: SpawnOptions = {}): In
 
 /**
  * Fire-and-forget: spawn a detached child that runs `agent-memory upgrade
- * --check --refresh --quiet` so the next session-start has a fresh cache.
- * Never awaits, never throws.
+ * --background --refresh --quiet` so the next session-start has a fresh
+ * cache. Unlike a plain check, `--background` also installs any target whose
+ * policy is `"auto"` (see `readUpgradePolicy`) — this is the one place
+ * auto-upgrade actually happens. Never awaits, never throws.
  */
 export function refreshUpgradeCacheBackground(): void {
 	try {
 		const binary = process.argv[0];
 		const script = process.argv[1];
 		if (!binary || !script) return;
-		const child = spawn(binary, [script, "upgrade", "--check", "--refresh", "--quiet", "--json"], {
+		const child = spawn(binary, [script, "upgrade", "--background", "--refresh", "--quiet", "--json"], {
 			detached: true,
 			stdio: "ignore",
 			env: { ...process.env, AGENT_MEMORY_UPGRADE_BACKGROUND: "1" },
@@ -311,11 +414,40 @@ export async function checkForUpgrades(opts: CheckOptions): Promise<UpgradeStatu
 	};
 }
 
-export function formatUpgradeNotice(status: UpgradeStatus): string | null {
+/**
+ * `cache` (when passed) lets this distinguish a plain "notify" signal from the
+ * outcome of the last `--background` auto-install attempt for that target:
+ *   - succeeded, but this process is running older code than what's on disk
+ *     (e.g. a long-running `serve --mcp`) → "auto-upgraded, restart to use it"
+ *   - failed → surface the error and point at the manual command
+ *   - succeeded and already caught up (this process's own version matches) → silent
+ */
+export function formatUpgradeNotice(status: UpgradeStatus, cache?: UpgradeCache | null): string | null {
 	const parts: string[] = [];
-	if (status.cli.upgradeAvailable) parts.push(`CLI ${status.cli.current} → ${status.cli.latest ?? "new"}`);
-	if (status.plugin.upgradeAvailable)
+	let needsManualRun = false;
+
+	if (cache?.cliAuto && !cache.cliAuto.ok) {
+		parts.push(`CLI auto-upgrade failed (${cache.cliAuto.error ?? "unknown error"})`);
+		needsManualRun = true;
+	} else if (cache?.cliAuto?.ok && cache.cliAuto.version && cache.cliAuto.version !== status.cli.current) {
+		parts.push(
+			`CLI auto-upgraded → ${cache.cliAuto.version} (restart any long-running agent-memory process to use it)`,
+		);
+	} else if (status.cli.upgradeAvailable) {
+		parts.push(`CLI ${status.cli.current} → ${status.cli.latest ?? "new"}`);
+		needsManualRun = true;
+	}
+
+	if (cache?.pluginAuto && !cache.pluginAuto.ok) {
+		parts.push(`Pro auto-upgrade failed (${cache.pluginAuto.error ?? "unknown error"})`);
+		needsManualRun = true;
+	} else if (cache?.pluginAuto?.ok && cache.pluginAuto.version && cache.pluginAuto.version !== status.plugin.current) {
+		parts.push(`Pro auto-upgraded → ${cache.pluginAuto.version}`);
+	} else if (status.plugin.upgradeAvailable) {
 		parts.push(`Pro ${status.plugin.current ?? "?"} → ${status.plugin.latest ?? "new"}`);
+		needsManualRun = true;
+	}
+
 	if (!parts.length) return null;
-	return `agent-memory: upgrade available (${parts.join(", ")}). Run: agent-memory upgrade`;
+	return `agent-memory: ${parts.join("; ")}${needsManualRun ? ". Run: agent-memory upgrade" : ""}`;
 }
