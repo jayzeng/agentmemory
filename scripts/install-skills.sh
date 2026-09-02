@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install (or uninstall) agent-memory skills for Claude Code, Codex, Cursor, and Agent CLI.
+# Install (or uninstall) agent-memory skills for Claude Code, Codex, Cursor, Agent CLI, and Qoder.
 # Usage: bash scripts/install-skills.sh [--uninstall]
 
 set -euo pipefail
@@ -63,12 +63,14 @@ SKILL_DIRS=(
   "$HOME/.codex/skills/agent-memory"
   "$HOME/.cursor/skills/agent-memory"
   "$HOME/.agents/skills/agent-memory"
+  "$HOME/.qoder/skills/agent-memory"
 )
 SKILL_LABELS=(
   "Claude Code skill"
   "Codex skill"
   "Cursor skill"
   "Agent CLI skill"
+  "Qoder skill"
 )
 
 if $UNINSTALL; then
@@ -84,6 +86,7 @@ else
   install_skill "Codex skill" "$PROJECT_DIR/skills/codex" "$HOME/.codex/skills/agent-memory" "$HOME/.codex" '[ -f "$HOME/.codex/config.toml" ] || command_exists codex'
   install_skill "Cursor skill" "$PROJECT_DIR/skills/cursor" "$HOME/.cursor/skills/agent-memory" "$HOME/.cursor"
   install_skill "Agent CLI skill" "$PROJECT_DIR/skills/agent" "$HOME/.agents/skills/agent-memory" "$HOME/.agents"
+  install_skill "Qoder skill" "$PROJECT_DIR/skills/qoder" "$HOME/.qoder/skills/agent-memory" "$HOME/.qoder" '[ -f "$HOME/.qoder/settings.json" ] || [ -f "$HOME/.qoder/settings.local.json" ] || command_exists qoder'
   echo ""
   echo "Done."
 fi
