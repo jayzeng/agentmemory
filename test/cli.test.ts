@@ -40,6 +40,9 @@ import {
 	uninstallHooks,
 } from "../src/hooks.js";
 
+const PACKAGE_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8"))
+	.version as string;
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -626,7 +629,7 @@ describe("CLI subprocess", () => {
 			.trim()
 			.split("\n")
 			.map((line) => JSON.parse(line));
-		expect(responses[0]?.result.serverInfo).toEqual({ name: "agent-memory", version: "0.5.2" });
+		expect(responses[0]?.result.serverInfo).toEqual({ name: "agent-memory", version: PACKAGE_VERSION });
 		const toolNames = responses[1]?.result.tools.map((tool: { name: string }) => tool.name);
 		expect(toolNames).toContain("memory_read");
 		expect(toolNames).toContain("memory_write");
