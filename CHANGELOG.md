@@ -4,9 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-09-02
+
 ### Added
 
 - `agent-memory uninstall [--data] [--yes]` — removes hooks, skills, MCP registrations, shell completions, and the Pro plugin in one step. By default your memory data (`MEMORY.md`, daily logs, scratchpad, topics, qmd index) is left untouched; pass `--data` to also delete it and the plugin install root, after explicit confirmation.
+- Qoder CLI support — skill installation (`~/.qoder/skills/agent-memory/`) and a `SessionStart` hook (`~/.qoder/settings.json`) for automatic memory context injection, using the same idempotent marker-based install/uninstall as Claude Code.
+- `pi` (Pi Coding Agent) is now a first-class hook target alongside Claude Code, Codex, Cursor, and opencode. Since pi has no JSON/TOML hook config to edit, `agent-memory setup`/`install-hooks` delegates to the [`pi-memory`](https://github.com/jayzeng/pi-memory) extension via `pi install npm:pi-memory` rather than shipping a competing extension; `doctor` reports the install outcome/history from a local `pi-memory-state.json`.
+- `agent-memory upgrade policy [off|notify|auto]` — per-target (CLI/Pro) control over whether upgrades install automatically, just notify, or are left alone. `doctor` gets an "Auto-upgrade" row reporting the current policy.
+- `agent-memory upgrade --background` — a detached, non-interactive install path spawned from `hook session-start` that only installs a target whose persisted policy is `"auto"`; failures are recorded and surfaced passively on the next session start, never thrown.
 
 ## [0.5.2] - 2026-09-01
 
