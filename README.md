@@ -11,6 +11,8 @@ agent-memory setup     # one-shot: memory dir, skills, hooks, MCP, local Pro pre
 
 Then open your agent and ask *"what do you remember about me?"* — that's the wow.
 
+Prefer to have an agent drive the whole thing — install, configure, verify, then show you what to do next? Feed [this onboarding doc](https://jayzeng.github.io/agentmemory/onboarding.md) to your coding agent or chat LLM and let it run the setup for you.
+
 [![npm version](https://img.shields.io/npm/v/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
 [![npm downloads](https://img.shields.io/npm/dm/myagentmemory?color=cb3837&logo=npm)](https://www.npmjs.com/package/myagentmemory)
 [![license](https://img.shields.io/npm/l/myagentmemory)](LICENSE)

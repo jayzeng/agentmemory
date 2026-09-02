@@ -270,6 +270,36 @@
 			cursor: pointer;
 		}
 
+		.prompt-block {
+			margin-top: 16px;
+			background: #171b23;
+			border-radius: 12px;
+			padding: 14px 16px;
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+			max-width: 640px;
+		}
+
+		.prompt-block p {
+			margin: 0;
+			color: #cbd5e3;
+			font-size: 0.82rem;
+		}
+
+		.prompt-block code {
+			display: block;
+			color: #daf9f0;
+			font-family: "DM Mono", "SFMono-Regular", "Menlo", monospace;
+			font-size: 0.82rem;
+			white-space: pre-wrap;
+			line-height: 1.5;
+		}
+
+		.prompt-block .copy {
+			align-self: flex-start;
+		}
+
 		.agent-row {
 			margin-top: 16px;
 			display: flex;
@@ -626,6 +656,11 @@
 				<span class="agent-pill">Cursor</span>
 				<span class="agent-pill">Agent CLI</span>
 			</div>
+			<div class="prompt-block">
+				<p>Prefer to have your coding agent do the install and setup for you? Copy this and paste it in:</p>
+				<code id="cmd-onboarding">Read https://jayzeng.github.io/agentmemory/onboarding.md and follow it: set me up with AgentMemory on this machine, fix anything that isn't configured yet, then show me how to get more value out of it.</code>
+				<button class="copy" type="button" data-copy="cmd-onboarding">Copy starter prompt</button>
+			</div>
 		</section>
 
 		<section class="pro-section reveal" id="pro" aria-labelledby="pro-title">
@@ -845,16 +880,16 @@ Neovim + LazyVim. Conventional commits. Run tests before every push.
 				</div>
 			</article>
 			<article class="card reveal">
-				<h2>Initialize memory</h2>
-				<p>Create the memory directory and wire optional qmd integration.</p>
+				<h2>One-shot setup</h2>
+				<p>Idempotent: creates the memory directory, wires qmd, skills, hooks, MCP registration, and a local Pro preview scan — all in one command.</p>
 				<div class="command">
-					<code id="cmd-init">agent-memory init</code>
-					<button class="copy" type="button" data-copy="cmd-init">Copy</button>
+					<code id="cmd-setup">agent-memory setup</code>
+					<button class="copy" type="button" data-copy="cmd-setup">Copy</button>
 				</div>
 			</article>
 			<article class="card reveal">
-				<h2>Install skill files</h2>
-				<p>Wire memory workflows into Claude Code, Codex, Cursor, and Agent CLI in one command.</p>
+				<h2>Install skill files only</h2>
+				<p>Already covered by <code>setup</code> above — run this on its own only if you want just the Claude Code, Codex, Cursor, or Agent CLI skill files.</p>
 				<div class="command">
 					<code id="cmd-skills">agent-memory install-skills</code>
 					<button class="copy" type="button" data-copy="cmd-skills">Copy</button>
@@ -863,12 +898,12 @@ Neovim + LazyVim. Conventional commits. Run tests before every push.
 		</section>
 
 		<section class="steps reveal">
-			<h2>Setup in three steps</h2>
+			<h2>Setup in two steps</h2>
 			<ol>
 				<li>Install `agent-memory` from npm or Homebrew.</li>
-				<li>Run `agent-memory init` to create local memory storage.</li>
-				<li>Run `agent-memory install-skills` to enable shared memory workflows across agents.</li>
+				<li>Run `agent-memory setup` — one-shot: memory dir, skills, hooks, MCP registration, local Pro preview.</li>
 			</ol>
+			<p>Then open your agent and ask <em>"what do you remember about me?"</em></p>
 		</section>
 
 		<p class="footer reveal">
@@ -903,9 +938,9 @@ Neovim + LazyVim. Conventional commits. Run tests before every push.
 					const target = id ? document.getElementById(id) : null;
 					const text = target ? target.textContent ?? "" : "";
 					if (!text) return;
+					const prev = button.textContent;
 					try {
 						await navigator.clipboard.writeText(text);
-						const prev = button.textContent;
 						button.textContent = "Copied";
 						setTimeout(() => {
 							button.textContent = prev;
@@ -913,7 +948,7 @@ Neovim + LazyVim. Conventional commits. Run tests before every push.
 					} catch {
 						button.textContent = "Failed";
 						setTimeout(() => {
-							button.textContent = "Copy";
+							button.textContent = prev;
 						}, 1200);
 					}
 				});

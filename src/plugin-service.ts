@@ -459,14 +459,8 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 			value.entitlement.state !== "active" ||
 			value.entitlement.capabilities.recall?.enabled !== true ||
 			!recallQuota ||
-			recallQuota.limit !== 20 ||
-			recallQuota.scope !== "device" ||
-			recallQuota.window !== "day" ||
 			value.entitlement.capabilities.learning?.enabled !== true ||
 			!learningQuota ||
-			learningQuota.limit !== 5 ||
-			learningQuota.scope !== "device" ||
-			learningQuota.window !== "day" ||
 			value.entitlement.capabilities["session-index"]?.enabled !== true ||
 			value.entitlement.capabilities["session-worker"]?.enabled !== false ||
 			value.entitlement.capabilities["web-console"]?.enabled !== true
