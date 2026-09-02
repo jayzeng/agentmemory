@@ -2286,7 +2286,7 @@ describe("core-owned hooks and completion", () => {
 		}
 	});
 
-	test("pi uninstall is informational only and never touches pi-memory-state.json", () => {
+	test("pi uninstall is informational only, never touches pi-memory-state.json, and reports it when pi-memory is still active", () => {
 		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
 		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
 		const fakePi = makeFakePiOnPath();
@@ -2298,13 +2298,18 @@ describe("core-owned hooks and completion", () => {
 			installHooks(new Set(["pi"]));
 			const stateBefore = getPiMemoryState();
 			expect(stateBefore?.ok).toBe(true);
+			// Simulate pi-memory actually being live (the mocked exec above never really
+			// ran `pi`, so this directory wouldn't otherwise exist).
+			fs.mkdirSync(path.join(home, ".pi", "agent", "memory"), { recursive: true });
 
 			const result = uninstallHooks(new Set(["pi"])).results[0];
 			expect(result?.installed).toBe(false);
 			expect(result?.reason).toContain("pi uninstall pi-memory");
 
-			// Uninstall never owned this install — the state record must survive untouched.
+			// Uninstall never owned this install — the state record must survive untouched,
+			// and the live directory (what pi-memory itself owns) is left alone too.
 			expect(getPiMemoryState()).toEqual(stateBefore);
+			expect(fs.existsSync(path.join(home, ".pi", "agent", "memory"))).toBe(true);
 		} finally {
 			_resetHookExecForTest();
 			fakePi.restore();
@@ -2315,17 +2320,47 @@ describe("core-owned hooks and completion", () => {
 		}
 	});
 
-	test("isHookInstalled(pi) falls back to the ~/.pi/agent/memory directory when no delegate attempt is on record", () => {
+	test("pi uninstall reports plain 'not installed' when pi-memory was never actually active", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			const result = uninstallHooks(new Set(["pi"])).results[0];
+			expect(result?.installed).toBe(false);
+			expect(result?.reason).toBe("not installed");
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("isHookInstalled(pi) checks the live ~/.pi/agent/memory directory, ignoring a stale attempt record", () => {
 		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
 		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
 		try {
 			_setHookHomeDirForTest(home);
 			_setBaseDir(memDir);
 			expect(isHookInstalled(home, "pi")).toBe(false);
-			// pi-memory was installed manually (pre-dating this delegate feature) — its
-			// memory directory exists even though agent-memory never ran an install.
+			// pi-memory was installed manually (pre-dating this delegate feature, or after a
+			// failed delegate attempt) — its memory directory exists even though agent-memory
+			// never ran a successful install itself.
 			fs.mkdirSync(path.join(home, ".pi", "agent", "memory"), { recursive: true });
 			expect(isHookInstalled(home, "pi")).toBe(true);
+
+			// A stale recorded failure must never override the live directory that now exists.
+			fs.writeFileSync(
+				path.join(memDir, "pi-memory-state.json"),
+				JSON.stringify({ lastAttemptAt: new Date(0).toISOString(), ok: false, detail: "boom" }),
+			);
+			expect(isHookInstalled(home, "pi")).toBe(true);
+
+			// Conversely, a stale recorded success must not paper over a real, live removal.
+			fs.rmSync(path.join(home, ".pi", "agent", "memory"), { recursive: true, force: true });
+			fs.writeFileSync(
+				path.join(memDir, "pi-memory-state.json"),
+				JSON.stringify({ lastAttemptAt: new Date(0).toISOString(), ok: true, detail: "installed" }),
+			);
+			expect(isHookInstalled(home, "pi")).toBe(false);
 		} finally {
 			_setHookHomeDirForTest(null);
 			_resetBaseDir();

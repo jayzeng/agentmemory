@@ -180,11 +180,11 @@ export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 			return list.includes(instructionsPath);
 		}
 		if (key === "pi") {
-			// Prefer our own record of a successful `pi install npm:pi-memory` run. Fall
-			// back to the directory pi-memory creates on first real session, which covers
-			// pi-memory having been installed manually (pre-dating this delegate installer).
-			const state = getPiMemoryState();
-			if (state) return state.ok;
+			// Live filesystem state is authoritative — pi-memory can be installed or
+			// removed outside agent-memory (manually, or via `pi uninstall`) at any
+			// time, so a recorded delegate attempt must never override what's
+			// actually on disk. The state file is diagnostic-only (surfaced
+			// separately in `doctor`'s detail text), not a substitute for this check.
 			return fs.existsSync(path.join(homeDir, ".pi", "agent", "memory"));
 		}
 	} catch {
@@ -349,12 +349,19 @@ function installPiMemoryDelegate(homeDir: string): HookInstallResult {
 	}
 }
 
-function uninstallPiMemoryDelegate(): HookInstallResult {
+function uninstallPiMemoryDelegate(homeDir: string): HookInstallResult {
+	// agent-memory never owns this install, so it never runs `pi uninstall pi-memory` — but
+	// silently doing nothing would let an `agent-memory uninstall` report read as "fully cleaned
+	// up" while pi-memory keeps running. Phrase the reason distinctly when it's actually still
+	// active so callers (and cmdUninstall's step detail) can surface that honestly.
+	const stillActive = fs.existsSync(path.join(homeDir, ".pi", "agent", "memory"));
 	return {
 		key: "pi",
 		label: "pi (via pi-memory)",
 		installed: false,
-		reason: "pi-memory is a separate extension — run `pi uninstall pi-memory` to remove it",
+		reason: stillActive
+			? "pi-memory left installed (not managed by agent-memory) — run `pi uninstall pi-memory` to remove it"
+			: "not installed",
 	};
 }
 
@@ -872,7 +879,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 			else if (key === "codex") results.push(uninstallCodexHook(homeDir));
 			else if (key === "cursor") results.push(uninstallCursorHook(homeDir));
 			else if (key === "opencode") results.push(uninstallOpencodeInstructions(homeDir));
-			else if (key === "pi") results.push(uninstallPiMemoryDelegate());
+			else if (key === "pi") results.push(uninstallPiMemoryDelegate(homeDir));
 		} catch (err) {
 			results.push({
 				key,
