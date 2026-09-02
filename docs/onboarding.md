@@ -19,7 +19,7 @@ AgentMemory (`myagentmemory` on npm, `agent-memory` as the installed binary) giv
 
 1. **Detect before you act.** `agent-memory doctor --json` is the source of truth for what's already configured. Run it before deciding what to do, and again after any fix to confirm it worked.
 2. **Prefer doing over describing.** If you have shell/tool access, run the commands yourself. If you don't, print the exact command in a code block and wait for the human to paste back the output before deciding the next step.
-3. **State intent before installing anything.** A global npm install, a Homebrew tap, or `agent-memory pro install` all touch the user's machine or make a network call. Say what you're about to run and why in one line, and get a go-ahead the first time — especially for `pro install` (see the privacy note in Step 5).
+3. **State intent before installing anything, one thing at a time.** A global npm install, a Homebrew tap, or `agent-memory pro install` all touch the user's machine or make a network call. Say what you're about to run and why in one line, and get a go-ahead the first time — especially for `pro install` (see the privacy note in Step 5). If more than one action needs consent, ask about each separately — bundling unrelated approvals into a single combined prompt makes a calm setup look like a stack of risky installs.
 4. **Never run destructive commands without explicit confirmation** — that means `agent-memory uninstall --data` (deletes MEMORY.md, daily logs, scratchpad, topics) and anything involving `rm -rf ~/.agent-memory`. There is normally no reason to run either during onboarding.
 5. **Only use the `fix` a doctor row actually gives you.** Don't improvise a different command for a problem doctor already told you how to solve.
 
@@ -133,18 +133,25 @@ If anything is still not `ok`, go to Step 4. Otherwise go to Step 5.
 
 ## Step 4 — Repair specific gaps
 
-Apply the exact `fix` from each non-`ok` doctor row — don't guess at an alternative. The table below is only so you know what to expect (it may not match your OS or path exactly — e.g. `chmod` doesn't exist on Windows); when it conflicts with what doctor actually printed, doctor wins:
+Apply the exact `fix` from each non-`ok` doctor row — don't guess at an alternative. The table below is only so you know what to expect (it may not match your OS or path exactly — e.g. `chmod` doesn't exist on Windows); when it conflicts with what doctor actually printed, doctor wins.
+
+Most rows are safe to fix immediately — local, reversible, nothing outside the memory dir:
 
 | Doctor row | Typical fix |
 |---|---|
 | Memory directory not writable | `chmod u+w ~/.agent-memory` (or whatever path doctor reports) |
 | MEMORY.md empty | `agent-memory write --target long_term --content "…first fact…"` |
-| qmd search index not installed | `bun install -g https://github.com/tobi/qmd` (optional — core works without it) |
 | qmd collection not configured | `agent-memory setup` |
 | No supported agent hosts detected | Install Claude Code, Codex, Cursor, or opencode first, then `agent-memory install-skills` |
 | Skill missing for a detected host | `agent-memory install-skills` |
 | Hook missing for a detected host | `agent-memory install-hooks --mode per-turn` (or `--mode stable` if the human prefers one context load per session over per-turn refresh) |
-| AgentMemory Pro not installed | `agent-memory pro install` — see the privacy note in Step 5 before running this |
+
+Two rows are different — each is a real change outside the memory dir and needs its own explicit go-ahead, asked about **separately, one at a time**, even if doctor reports both as missing in the same run:
+
+| Doctor row | What's involved | How to ask |
+|---|---|---|
+| qmd search index not installed | `bun install -g https://github.com/tobi/qmd` — a global binary install from a raw GitHub URL. Genuinely optional: writing, reading, scratchpad, and hooks all work without it: only keyword/semantic search is degraded. | State plainly what the command does and that it's optional. Offer to run it yourself if approved, or let the human run it and paste back confirmation. Skipping is a perfectly fine default — don't treat this as a gap that must be closed. |
+| AgentMemory Pro not installed | `agent-memory pro install` | See the privacy note in Step 5 before running this. |
 
 Re-run `agent-memory doctor --json` after each fix. Once clean (or clean enough for what the human cares about), move to Step 5.
 
