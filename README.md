@@ -90,9 +90,9 @@ The npm package installs a platform-neutral Node.js executable. The optional Hom
 - `%USERPROFILE%\.cursor\skills\agent-memory\SKILL.md` — Cursor skill (Windows)
 - `%USERPROFILE%\.agents\skills\agent-memory\SKILL.md` — Agent CLI skill (Windows)
 
-### Pi users
+### Pi
 
-If you're on Pi and prefer a native extension, use `pi-memory` (https://github.com/jayzeng/pi-memory) instead of installing this skill. The CLI + skill workflow here is the cross-platform alternative, and works fine on Pi without any extension.
+Pi doesn't use SKILL.md or a JSON hook config — its extensibility model is a registered native extension. So instead of writing a skill file, `agent-memory setup`/`install-hooks` detects `pi` on your `PATH` and installs [`pi-memory`](https://github.com/jayzeng/pi-memory) for you, via `pi install npm:pi-memory` — same author, same memory-file conventions, native pi tools (`memory_write`, `memory_read`, `scratchpad`, `memory_search`). It's prompted for like any other detected agent and auto-applied under `--yes`; run `agent-memory install-hooks --only pi` to target just pi, or check `agent-memory doctor` for its status.
 
 ### Optional: Enable search with qmd
 

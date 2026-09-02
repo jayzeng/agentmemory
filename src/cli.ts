@@ -92,6 +92,7 @@ import {
 } from "./core.js";
 import {
 	detectHookAgents,
+	getPiMemoryState,
 	type HookAgentKey,
 	installHooks,
 	isHookInstalled,
@@ -1287,7 +1288,13 @@ async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise
 	const applyAll = hasFlag(flags, "yes") || hasFlag(flags, "all") || !process.stdin.isTTY;
 	const hookLabel = mode === "per-turn" ? "SessionStart + UserPromptSubmit hooks" : "SessionStart hook";
 	for (const target of pending) {
-		if (applyAll || (await promptYesNo(`Install ${hookLabel} for ${target.label}?`, true))) selected.add(target.key);
+		// pi gets a real package install (`pi install npm:pi-memory`), not a config-file hook edit —
+		// word the prompt accordingly so the confirmation matches what actually happens.
+		const question =
+			target.key === "pi"
+				? `Install pi-memory (native pi extension) for ${target.label}?`
+				: `Install ${hookLabel} for ${target.label}?`;
+		if (applyAll || (await promptYesNo(question, true))) selected.add(target.key);
 	}
 	if (!selected.size) {
 		if (json) return output({ ok: true, homeDir, results: [] }, true);
@@ -2276,7 +2283,7 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 		rows.push({
 			status: "warn",
 			label: "Agent hosts",
-			detail: "no supported agents detected (Claude Code, Codex, Cursor, opencode)",
+			detail: "no supported agents detected (Claude Code, Codex, Cursor, opencode, pi)",
 			fix: "install one of the agents first, then: agent-memory install-skills",
 		});
 	} else {
@@ -2287,7 +2294,32 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 		});
 		for (const target of detected) {
 			if (!target.supported) {
-				// Skip skill/hook rows for hosts we don't yet integrate with (e.g. pi has its own extension).
+				// Skip skill/hook rows for hosts we don't yet integrate with.
+				continue;
+			}
+			if (target.key === "pi") {
+				// pi has no SKILL.md — agent-memory delegates entirely to the pi-memory
+				// extension, installed via `pi install npm:pi-memory` rather than a
+				// config-file edit, so it gets its own row instead of the generic
+				// Skill:/Hook: pair below.
+				const installed = homeDir ? isHookInstalled(homeDir, "pi") : false;
+				const state = getPiMemoryState();
+				let detail: string;
+				if (installed) {
+					detail = "pi-memory extension active (github.com/jayzeng/pi-memory)";
+				} else if (state && !state.ok) {
+					detail = `pi-memory not detected — last install attempt (${state.lastAttemptAt}) failed: ${state.detail}`;
+				} else if (state?.ok) {
+					detail = `pi-memory installed (${state.lastAttemptAt}) but no session has run yet`;
+				} else {
+					detail = "pi-memory not detected — agent-memory can install it";
+				}
+				rows.push({
+					status: installed ? "ok" : "warn",
+					label: "Memory: pi",
+					detail,
+					fix: installed ? undefined : "agent-memory install-hooks --only pi",
+				});
 				continue;
 			}
 			const skillPath = homeDir ? `${target.homeMarker}/skills/agent-memory/SKILL.md` : null;

@@ -29,7 +29,10 @@ import {
 	todayStr,
 } from "../src/core.js";
 import {
+	_resetHookExecForTest,
+	_setHookExecForTest,
 	_setHookHomeDirForTest,
+	getPiMemoryState,
 	installHooks,
 	isHookInstalled,
 	isStopHookInstalled,
@@ -2197,6 +2200,137 @@ describe("core-owned hooks and completion", () => {
 		} finally {
 			_setHookHomeDirForTest(null);
 			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	// pi has no JSON/TOML hook config — agent-memory delegates to the pi-memory
+	// extension via `pi install npm:pi-memory`. Detection still requires a real
+	// `pi` on PATH, so these tests fake one (a no-op executable) purely to
+	// satisfy commandExists(); the actual install call is mocked separately via
+	// _setHookExecForTest so no network/subprocess call ever happens.
+	function makeFakePiOnPath(): { restore: () => void } {
+		const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-pi-bin-"));
+		const piPath = path.join(binDir, "pi");
+		fs.writeFileSync(piPath, "#!/bin/sh\nexit 0\n");
+		fs.chmodSync(piPath, 0o755);
+		const originalPath = process.env.PATH;
+		process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+		return {
+			restore: () => {
+				process.env.PATH = originalPath;
+				fs.rmSync(binDir, { recursive: true, force: true });
+			},
+		};
+	}
+
+	test("pi delegate install (success) records state and reports installed, with no filesystem writes under ~/.pi", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		const fakePi = makeFakePiOnPath();
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			_setHookExecForTest((() => "pi-memory@0.4.2 installed\n") as any);
+
+			const report = installHooks(new Set(["pi"]));
+			const result = report.results[0];
+			expect(result?.key).toBe("pi");
+			expect(result?.installed).toBe(true);
+			expect(result?.reason).toContain("pi-memory@0.4.2");
+
+			const state = getPiMemoryState();
+			expect(state?.ok).toBe(true);
+			expect(state?.detail).toContain("pi-memory@0.4.2");
+
+			// agent-memory never writes into ~/.pi itself — only the delegate command runs.
+			expect(fs.existsSync(path.join(home, ".pi", "agent"))).toBe(false);
+		} finally {
+			_resetHookExecForTest();
+			fakePi.restore();
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("pi delegate install (failure) surfaces the error and records a failed state", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		const fakePi = makeFakePiOnPath();
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			_setHookExecForTest((() => {
+				throw Object.assign(new Error("command failed"), { stderr: "network unreachable" });
+			}) as any);
+
+			const report = installHooks(new Set(["pi"]));
+			const result = report.results[0];
+			expect(result?.installed).toBe(false);
+			expect(result?.reason).toContain("network unreachable");
+
+			const state = getPiMemoryState();
+			expect(state?.ok).toBe(false);
+			expect(state?.detail).toContain("network unreachable");
+			expect(isHookInstalled(home, "pi")).toBe(false);
+		} finally {
+			_resetHookExecForTest();
+			fakePi.restore();
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("pi uninstall is informational only and never touches pi-memory-state.json", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		const fakePi = makeFakePiOnPath();
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			_setHookExecForTest((() => "installed\n") as any);
+			installHooks(new Set(["pi"]));
+			const stateBefore = getPiMemoryState();
+			expect(stateBefore?.ok).toBe(true);
+
+			const result = uninstallHooks(new Set(["pi"])).results[0];
+			expect(result?.installed).toBe(false);
+			expect(result?.reason).toContain("pi uninstall pi-memory");
+
+			// Uninstall never owned this install — the state record must survive untouched.
+			expect(getPiMemoryState()).toEqual(stateBefore);
+		} finally {
+			_resetHookExecForTest();
+			fakePi.restore();
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("isHookInstalled(pi) falls back to the ~/.pi/agent/memory directory when no delegate attempt is on record", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			expect(isHookInstalled(home, "pi")).toBe(false);
+			// pi-memory was installed manually (pre-dating this delegate feature) — its
+			// memory directory exists even though agent-memory never ran an install.
+			fs.mkdirSync(path.join(home, ".pi", "agent", "memory"), { recursive: true });
+			expect(isHookInstalled(home, "pi")).toBe(true);
+		} finally {
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
 		}
 	});
 

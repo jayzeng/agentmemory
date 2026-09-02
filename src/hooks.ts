@@ -1,8 +1,22 @@
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { type HookMode, writeHookMode } from "./core.js";
+import { getMemoryDir, type HookMode, writeHookMode } from "./core.js";
+
+type ExecFileSyncFn = typeof execFileSync;
+let execFileSyncFn: ExecFileSyncFn = execFileSync;
+
+/** Override the execFileSync implementation used by hook installers (for testing). */
+export function _setHookExecForTest(fn: ExecFileSyncFn): void {
+	execFileSyncFn = fn;
+}
+
+/** Reset the execFileSync implementation to the real one. */
+export function _resetHookExecForTest(): void {
+	execFileSyncFn = execFileSync;
+}
 
 let homeDirOverride: string | null = null;
 
@@ -109,12 +123,11 @@ function hookTargets(homeDir: string): HookTargetInfo[] {
 		},
 		{
 			key: "pi",
-			label: "pi",
+			label: "pi (via pi-memory)",
 			homeMarker: path.join(homeDir, ".pi"),
 			detectFiles: [],
 			detectCommand: "pi",
-			supported: false,
-			unsupportedReason: "no documented SessionStart hook mechanism",
+			supported: true,
 		},
 	];
 }
@@ -165,6 +178,14 @@ export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 			const list = Array.isArray(raw) ? (raw as unknown[]) : [];
 			const instructionsPath = path.join(homeDir, ".agent-memory", "hooks", "opencode.md");
 			return list.includes(instructionsPath);
+		}
+		if (key === "pi") {
+			// Prefer our own record of a successful `pi install npm:pi-memory` run. Fall
+			// back to the directory pi-memory creates on first real session, which covers
+			// pi-memory having been installed manually (pre-dating this delegate installer).
+			const state = getPiMemoryState();
+			if (state) return state.ok;
+			return fs.existsSync(path.join(homeDir, ".pi", "agent", "memory"));
 		}
 	} catch {
 		return false;
@@ -267,6 +288,74 @@ function readJsonConfig(filePath: string): Record<string, unknown> {
 function writeJson(filePath: string, data: unknown) {
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
 	fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+}
+
+// ---------------------------------------------------------------------------
+// pi hook support (delegates to the pi-memory extension rather than editing
+// a JSON/TOML hook config — pi's extensibility model is a registered .ts
+// extension, installed via its own package manager).
+// ---------------------------------------------------------------------------
+
+export interface PiMemoryState {
+	lastAttemptAt: string;
+	ok: boolean;
+	detail: string;
+}
+
+function piMemoryStatePath(): string {
+	return path.join(getMemoryDir(), "pi-memory-state.json");
+}
+
+function writePiMemoryState(ok: boolean, detail: string): void {
+	try {
+		writeJson(piMemoryStatePath(), { lastAttemptAt: new Date().toISOString(), ok, detail });
+	} catch {
+		// best-effort bookkeeping only — never block the actual install/uninstall result on this.
+	}
+}
+
+/** Read the last recorded `pi install npm:pi-memory` attempt, if any. Never throws. */
+export function getPiMemoryState(): PiMemoryState | null {
+	try {
+		const filePath = piMemoryStatePath();
+		if (!fs.existsSync(filePath)) return null;
+		const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+		if (typeof parsed?.lastAttemptAt !== "string" || typeof parsed?.ok !== "boolean") return null;
+		return { lastAttemptAt: parsed.lastAttemptAt, ok: parsed.ok, detail: String(parsed.detail ?? "") };
+	} catch {
+		return null;
+	}
+}
+
+function installPiMemoryDelegate(homeDir: string): HookInstallResult {
+	const memoryPath = path.join(homeDir, ".pi", "agent", "memory");
+	try {
+		const stdout = execFileSyncFn("pi", ["install", "npm:pi-memory"], {
+			encoding: "utf-8",
+			timeout: 30_000,
+		});
+		const detail = typeof stdout === "string" ? stdout.trim() : "";
+		writePiMemoryState(true, detail);
+		return { key: "pi", label: "pi (via pi-memory)", installed: true, path: memoryPath, reason: detail || undefined };
+	} catch (err) {
+		const detail =
+			err && typeof err === "object" && "stderr" in err && err.stderr
+				? String(err.stderr).trim()
+				: err instanceof Error
+					? err.message
+					: String(err);
+		writePiMemoryState(false, detail);
+		return { key: "pi", label: "pi (via pi-memory)", installed: false, reason: detail };
+	}
+}
+
+function uninstallPiMemoryDelegate(): HookInstallResult {
+	return {
+		key: "pi",
+		label: "pi (via pi-memory)",
+		installed: false,
+		reason: "pi-memory is a separate extension — run `pi uninstall pi-memory` to remove it",
+	};
 }
 
 /**
@@ -619,6 +708,7 @@ export function installHooks(agents: Set<HookAgentKey>, mode: HookMode = "per-tu
 			else if (target.key === "codex") result = installCodexHook(homeDir, mode);
 			else if (target.key === "cursor") result = installCursorHook(homeDir);
 			else if (target.key === "opencode") result = installOpencodeInstructions(homeDir);
+			else if (target.key === "pi") result = installPiMemoryDelegate(homeDir);
 			else continue;
 			results.push(result);
 			if (result.installed) anyInstalled = true;
@@ -773,7 +863,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 			error: "Home directory not found. Set HOME (or USERPROFILE on Windows) and retry.",
 		};
 	}
-	const keys: HookAgentKey[] = ["claude", "codex", "cursor", "opencode"];
+	const keys: HookAgentKey[] = ["claude", "codex", "cursor", "opencode", "pi"];
 	const results: HookInstallResult[] = [];
 	for (const key of keys) {
 		if (agents && !agents.has(key)) continue;
@@ -782,6 +872,7 @@ export function uninstallHooks(agents?: Set<HookAgentKey>): UninstallHooksReport
 			else if (key === "codex") results.push(uninstallCodexHook(homeDir));
 			else if (key === "cursor") results.push(uninstallCursorHook(homeDir));
 			else if (key === "opencode") results.push(uninstallOpencodeInstructions(homeDir));
+			else if (key === "pi") results.push(uninstallPiMemoryDelegate());
 		} catch (err) {
 			results.push({
 				key,
