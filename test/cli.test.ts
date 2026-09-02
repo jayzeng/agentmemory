@@ -2379,8 +2379,13 @@ describe("uninstall command", () => {
 			};
 			fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
 			// install-hooks/serve --register only act on agents whose config dir is
-			// already present, so seed a marker directory to make Claude Code "detected".
+			// already present. A bare marker directory relies on `commandExists("claude")`
+			// as a fallback, which is only true on machines that happen to have the real
+			// Claude Code CLI on PATH (true for local dev, false on CI runners) — so seed
+			// an actual settings.json to make detection environment-independent, matching
+			// how the Codex test below seeds a real config.toml.
 			fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
+			fs.writeFileSync(path.join(homeDir, ".claude", "settings.json"), "{}");
 
 			try {
 				expect(runCli(["install-hooks", "--yes", "--json"], env).exitCode).toBe(0);
