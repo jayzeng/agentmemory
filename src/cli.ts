@@ -3179,7 +3179,8 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
 	server.addTool(
 		{
 			name: "memory_read",
-			description: "Read the current long-term memory (MEMORY.md) and scratchpad checklist.",
+			description:
+				"Read ONLY the curated long-term memory (MEMORY.md) and open scratchpad items — a small saved snapshot, not a search. For finding things in daily logs/topics, or recalling past chat sessions, use the `agent-memory` skill (search/recall commands) instead of this tool.",
 			inputSchema: { type: "object", properties: {} },
 		},
 		async () => {

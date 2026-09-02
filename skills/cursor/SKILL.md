@@ -1,6 +1,6 @@
 ---
 name: agent-memory
-description: Persistent memory across coding sessions — long-term facts, daily logs, topic notes, scratchpad checklist, and semantic search.
+description: Persistent memory across coding sessions — long-term facts, daily logs, topic notes, scratchpad checklist, and keyword/semantic search, plus recall of past chat sessions. Use whenever the user says "remember", "recall", or asks to look up/search memory.
 ---
 
 # Agent Memory
