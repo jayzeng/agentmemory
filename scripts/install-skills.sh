@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install (or uninstall) agent-memory skills for Claude Code, Codex, Cursor, and Agent CLI.
+# Install (or uninstall) agent-memory skills for Claude Code, Codex, Cursor, Agent CLI, and Qoder.
 # Usage: bash scripts/install-skills.sh [--uninstall]
 
 set -euo pipefail
@@ -70,6 +70,7 @@ SKILL_LABELS=(
   "Codex skill"
   "Cursor skill"
   "Agent CLI skill"
+  "Qoder skill"
 )
 
 if $UNINSTALL; then
