@@ -82,7 +82,7 @@ export const PLUGIN_COMMAND_DESCRIPTIONS: Record<(typeof PLUGIN_COMMANDS)[number
 	install: "authenticate if needed, then install or upgrade the official bundle",
 	update: "upgrade an existing official bundle when a compatible release exists",
 	uninstall: "remove official plugin executables while preserving user data",
-	manage: "open the AgentMemory account and billing website",
+	manage: "open account management when that future service is available",
 };
 
 export const WORKER_ACTION_DESCRIPTIONS: Record<(typeof WORKER_ACTIONS)[number], string> = {};

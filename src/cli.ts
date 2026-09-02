@@ -237,8 +237,6 @@ function levenshtein(a: string, b: string): number {
 // Pro plan / cap-exhausted UX
 // ---------------------------------------------------------------------------
 
-const UPGRADE_URL = "https://agentmemory.paperpilot.me/upgrade";
-
 interface CapExhaustedResult {
 	code?: string;
 	message?: string;
@@ -315,13 +313,11 @@ function printCapExhaustedBox(command: string, info: CapExhaustedResult): void {
 		"─────────────────────────────────────────────────────────────",
 		usedLine,
 		"",
-		"  Upgrade for unlimited recall + automatic capture:",
-		`    ${UPGRADE_URL}`,
+		"  Paid plans are not available yet. Try again after the free-preview allowance resets.",
 		"─────────────────────────────────────────────────────────────",
 		"",
 	];
 	console.error(lines.join("\n"));
-	openExternalUrl(UPGRADE_URL);
 }
 
 // Persist the last usage decision to disk so `pro status` can show counters.
@@ -527,10 +523,10 @@ function printProOverview(installed: boolean): void {
 	console.log("");
 	console.log("AgentMemory Pro:");
 	console.log(
-		'  Remember past sessions      Ask "what did we decide about auth?" across Claude Code, Codex, and Cursor.',
+		'  Remember past sessions      Ask "what did we decide about auth?" across Claude Code, Codex, and Pi history.',
 	);
 	console.log("  Learn from your patterns    Turn repeated corrections into memory you can inspect and undo.");
-	console.log("  Private by default          Memory and session content index locally and never leave this machine.");
+	console.log("  Private by default          AgentMemory services never receive memory or session content.");
 	console.log("");
 	if (installed) {
 		printProUsageCounters();
@@ -577,7 +573,9 @@ function printPluginResult(result: PluginBootstrapResultV1, json: boolean, allow
 				console.log(`AgentMemory Pro${version} has an update available.`);
 				break;
 			case "uninstalled":
-				console.log("AgentMemory Pro executable components were removed. Memory and billing state were preserved.");
+				console.log(
+					"AgentMemory Pro executable components were removed. Memory and local activation state were preserved.",
+				);
 				break;
 			case "not_installed":
 				console.log("AgentMemory Pro is not installed.");
@@ -1912,7 +1910,7 @@ async function cmdSetup(flags: Record<string, string | boolean>) {
 			`  ${colorize("agent-memory learn", "cyan")}                                    — surface repeated corrections`,
 		);
 		console.log(
-			`  ${colorize("agent-memory worker start", "cyan")}                             — capture new sessions in real time`,
+			`  ${colorize("agent-memory index", "cyan")}                                    — refresh the supported local session index`,
 		);
 		console.log(
 			`  ${colorize("agent-memory dashboard", "cyan")}                                — private local dashboard`,
@@ -2071,14 +2069,16 @@ function printProPitch(mode: "first-run" | "reinstall"): void {
 		);
 	}
 	console.log(
-		`  ${colorize("Recall across sessions", "cyan")}   Ask "what did we decide about auth?" across Claude, Codex, Cursor.`,
+		`  ${colorize("Recall across sessions", "cyan")}   Ask "what did we decide about auth?" across Claude Code, Codex, and Pi history.`,
 	);
 	console.log(
 		`  ${colorize("Learn from corrections", "cyan")}   Turn repeated fixes into memory you can inspect and undo.`,
 	);
-	console.log(`  ${colorize("Real-time capture", "cyan")}        Local worker indexes new sessions as they happen.`);
 	console.log(
-		`  ${colorize("Private by default", "cyan")}       Memory and session content stay on this device — no account required.`,
+		`  ${colorize("Local session index", "cyan")}      Scan supported session history without uploading it to AgentMemory.`,
+	);
+	console.log(
+		`  ${colorize("Private by default", "cyan")}       AgentMemory services never receive memory or session content.`,
 	);
 	console.log(
 		`  ${colorize("Included at no cost:", "green")} ${colorize("20 recalls + 5 learning scans per day", "bold")}. Local indexing and dashboard remain free.`,
@@ -2627,9 +2627,10 @@ Usage:
   agent-memory plugin manage [--no-browser]
 
 The public core remains fully usable without AgentMemory Pro. Install uses a random
-installation identifier and requires no account or email. The free tier includes
-20 recalls and 5 learning scans per local day; indexing and the Memory Dashboard
-remain available. Memory and session content stay on this device.`);
+	installation identifier and requires no account or email. The free tier includes
+	20 recalls and 5 learning scans per local day; indexing and the Memory Dashboard
+	remain available. AgentMemory services never receive memory or session content;
+	recall results are subject to the coding agent or model provider you invoke.`);
 }
 
 function pluginCommandFailure(command: string, error: unknown): PluginBootstrapResultV1 {
@@ -3760,7 +3761,7 @@ async function main() {
 					});
 					if (decision.state === "exhausted") {
 						console.error(
-							`AgentMemory free session allowance resets in ${formatResetTime(decision.resetAt)}. Upgrade: ${UPGRADE_URL}`,
+							`AgentMemory free session allowance resets in ${formatResetTime(decision.resetAt)}. Paid plans are not available yet.`,
 						);
 					}
 				}

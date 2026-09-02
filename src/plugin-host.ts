@@ -176,7 +176,12 @@ export interface PluginMcpToolInputSchema {
 export interface PluginMcpToolV1 {
 	name: string;
 	description: string;
-	requiredCapability: string;
+	/**
+	 * Capability checked on every invocation. Optional only to keep plugin API 1
+	 * source-compatible with bundles built before capability-gated MCP tools
+	 * were introduced; legacy tools load but are denied until updated.
+	 */
+	requiredCapability?: string;
 	inputSchema: PluginMcpToolInputSchema;
 	run(input: Record<string, unknown>): unknown | Promise<unknown>;
 }

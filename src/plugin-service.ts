@@ -10,7 +10,6 @@ import {
 	type PluginBootstrapBackendV1,
 	PluginBootstrapFailure,
 	type PluginNextActionV1,
-	type PluginSessionUsageDecisionV1,
 	type SignedPluginReleaseV1,
 } from "./plugin-bootstrap.js";
 import { type PluginEntitlementStatusV1, validatePluginEntitlementStatusV1 } from "./plugin-host.js";
@@ -34,11 +33,9 @@ const MISSING_ENTITLEMENT: PluginEntitlementStatusV1 = {
 };
 
 interface LocalActivationV1 {
-	schemaVersion: 3;
+	schemaVersion: 4;
 	installationId: string;
 	activatedAt: string;
-	usageCredential: string;
-	dailySessionLimit: number;
 }
 
 interface AgentMemoryServiceBackendOptions {
@@ -179,8 +176,8 @@ function activationPage(action: string, error?: string): string {
 			<p class="terminal-note" id="terminal-note">Your terminal will finish setup after activation.</p>
 			<details>
 				<summary>What’s shared during activation</summary>
-				<p>Your email identifies your free daily allowance. The CLI also sends core and bundle versions, platform, architecture, and release channel. The service stores a daily count of opaque session-start operations. Activation records expire after 365 days without use.</p>
-				<p class="never-sent"><strong>Never sent:</strong> The request never includes memory, session content, queries, repository paths, raw agent session identifiers, IP addresses, or user-agent strings.</p>
+				<p>Your email identifies your free daily allowance. The CLI also sends core and bundle versions, platform, architecture, and release channel. The service stores bounded activation metadata. Activation records expire after 365 days without use.</p>
+				<p class="never-sent"><strong>Not included in AgentMemory's application payload:</strong> memory, session content, queries, repository paths, raw agent session identifiers, IP addresses, or user-agent strings.</p>
 			</details>
 		</section>
 	</main>
@@ -442,16 +439,10 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 		const value = (await readJson(response)) as {
 			entitlement?: unknown;
 			artifactGrant?: unknown;
-			usageCredential?: unknown;
 		};
 		validatePluginEntitlementStatusV1(value.entitlement);
 		if (typeof value.artifactGrant !== "string" || !value.artifactGrant)
 			throw new PluginBootstrapFailure("service_response_invalid", "The access response omitted its artifact grant");
-		if (typeof value.usageCredential !== "string" || !ACTIVATION_CREDENTIAL.test(value.usageCredential))
-			throw new PluginBootstrapFailure(
-				"service_response_invalid",
-				"The access response omitted its usage credential",
-			);
 		const recallQuota = value.entitlement.capabilities.recall?.quota;
 		const learningQuota = value.entitlement.capabilities.learning?.quota;
 		if (
@@ -466,20 +457,8 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 			value.entitlement.capabilities["web-console"]?.enabled !== true
 		)
 			throw new PluginBootstrapFailure("service_response_invalid", "The free preview policy is invalid");
-		this.writeActivation(installationId, value.usageCredential, 1);
+		this.writeActivation(installationId);
 		return { kind: "granted", entitlement: value.entitlement, artifactGrant: value.artifactGrant };
-	}
-
-	async reserveSession(operationId: string): Promise<PluginSessionUsageDecisionV1> {
-		return this.sessionUsage("reserve", operationId);
-	}
-
-	async commitSession(operationId: string): Promise<PluginSessionUsageDecisionV1> {
-		return this.sessionUsage("commit", operationId);
-	}
-
-	async releaseSession(operationId: string): Promise<PluginSessionUsageDecisionV1> {
-		return this.sessionUsage("release", operationId);
 	}
 
 	async listReleases(request: {
@@ -543,31 +522,34 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 			const stat = fs.lstatSync(activationPath);
 			if (!stat.isFile() || stat.isSymbolicLink() || (process.platform !== "win32" && (stat.mode & 0o077) !== 0))
 				return null;
-			const value = JSON.parse(fs.readFileSync(activationPath, "utf-8")) as LocalActivationV1;
+			const value = JSON.parse(fs.readFileSync(activationPath, "utf-8")) as LocalActivationV1 & {
+				usageCredential?: unknown;
+				dailySessionLimit?: unknown;
+			};
 			if (
-				value.schemaVersion !== 3 ||
 				typeof value.installationId !== "string" ||
 				!/^am_install_[A-Za-z0-9_-]{32}$/.test(value.installationId) ||
 				!Number.isFinite(Date.parse(value.activatedAt)) ||
-				!ACTIVATION_CREDENTIAL.test(value.usageCredential) ||
-				!Number.isSafeInteger(value.dailySessionLimit) ||
-				value.dailySessionLimit <= 0 ||
-				value.dailySessionLimit > 10_000
+				(value.schemaVersion !== 4 &&
+					(value.schemaVersion !== 3 ||
+						typeof value.usageCredential !== "string" ||
+						!ACTIVATION_CREDENTIAL.test(value.usageCredential) ||
+						!Number.isSafeInteger(value.dailySessionLimit)))
 			)
 				return null;
-			return value;
+			return {
+				schemaVersion: 4,
+				installationId: value.installationId,
+				activatedAt: value.activatedAt,
+			};
 		} catch {
 			return null;
 		}
 	}
 
-	private writeActivation(installationId: string, usageCredential: string, dailySessionLimit: number): void {
+	private writeActivation(installationId: string): void {
 		if (!/^am_install_[A-Za-z0-9_-]{32}$/.test(installationId))
 			throw new PluginBootstrapFailure("activation_failed", "The installation identifier is invalid");
-		if (!ACTIVATION_CREDENTIAL.test(usageCredential))
-			throw new PluginBootstrapFailure("activation_failed", "The activation credential is invalid");
-		if (!Number.isSafeInteger(dailySessionLimit) || dailySessionLimit <= 0 || dailySessionLimit > 10_000)
-			throw new PluginBootstrapFailure("activation_failed", "The free session allowance is invalid");
 		const target = this.activationPath();
 		fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
 		const rootStat = fs.lstatSync(this.root);
@@ -583,11 +565,9 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 			temporary,
 			`${JSON.stringify(
 				{
-					schemaVersion: 3,
+					schemaVersion: 4,
 					installationId,
 					activatedAt: new Date().toISOString(),
-					usageCredential,
-					dailySessionLimit,
 				},
 				null,
 				2,
@@ -595,40 +575,6 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 			{ mode: 0o600, flag: "wx" },
 		);
 		fs.renameSync(temporary, target);
-	}
-
-	private async sessionUsage(
-		action: "reserve" | "commit" | "release",
-		operationId: string,
-	): Promise<PluginSessionUsageDecisionV1> {
-		const activation = this.readActivation();
-		if (!activation) throw new PluginBootstrapFailure("auth_required", "Run plugin install to activate AgentMemory");
-		const response = await this.request(`${this.apiOrigin}/v1/plugin/sessions/${action}`, {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${activation.usageCredential}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ schemaVersion: 1, operationId }),
-		});
-		const value = (await readJson(response)) as { decision?: Partial<PluginSessionUsageDecisionV1> };
-		const decision = value.decision;
-		if (
-			!decision ||
-			typeof decision.allowed !== "boolean" ||
-			!["reserved", "committed", "released", "exhausted", "missing"].includes(String(decision.state)) ||
-			!Number.isSafeInteger(decision.limit) ||
-			Number(decision.limit) <= 0 ||
-			!Number.isSafeInteger(decision.used) ||
-			Number(decision.used) < 0 ||
-			!Number.isSafeInteger(decision.remaining) ||
-			Number(decision.remaining) < 0 ||
-			typeof decision.resetAt !== "string" ||
-			!Number.isFinite(Date.parse(decision.resetAt)) ||
-			typeof decision.idempotent !== "boolean"
-		)
-			throw new PluginBootstrapFailure("service_response_invalid", "The session usage response is invalid");
-		return decision as PluginSessionUsageDecisionV1;
 	}
 
 	private async request(url: string, init: RequestInit = {}): Promise<Response> {

@@ -47,9 +47,9 @@ brew --version   # Homebrew path
 git --version && bun --version   # build-from-source path
 ```
 
-Pick whichever path has its prerequisite satisfied. If none do, tell the human they need to install Node.js 20+ (or Homebrew) first — that's outside this doc's scope.
+Pick whichever path has its prerequisite satisfied. Core requires Node.js 20+; the npm-hosted Pro session index requires Node.js 22.13+. The Homebrew build includes its compatible runtime. If none of those prerequisites are satisfied, say so before continuing — installing a runtime is outside this doc's scope.
 
-**npm (cross-platform, needs Node.js 20+):**
+**npm (cross-platform; Core needs Node.js 20+, Pro needs Node.js 22.13+):**
 
 ```bash
 npm install -g myagentmemory
@@ -185,15 +185,15 @@ If doctor came back mostly green — either because you just finished setup or b
    This reports how many raw sessions it found per harness (Claude Code / Codex / Pi) and how many it actually looked at today against that cap.
 
    **Then ask before running `pro install`** — that's the command that actually builds the searchable index, and effort scales with what `preview` just found:
-   - **A handful to a few dozen sessions:** indexing is pure local text parsing (regex-based digest extraction, no LLM call per session, nothing leaves the machine) — this finishes in seconds.
+   - **A handful to a few dozen sessions:** indexing is local text parsing (regex-based digest extraction, no LLM call per session, and no session content sent to AgentMemory's services) — this finishes in seconds.
    - **Hundreds to low thousands:** still local-only, so it should stay fast, but there's no official benchmark for this — say that honestly instead of promising an exact time.
    - **10,000+ sessions:** call this out explicitly as a bigger one-time operation. The *preview* step is capped at 50 sessions/day, but the real index build is not capped — the first pass processes every discovered session in one go, so it can take noticeably longer and use more CPU/disk than a small corpus. That cost is paid once: every run after the first is incremental and only reprocesses new or changed sessions.
 
-   Ask something like: *"Found N sessions across [harnesses]. Indexing them is a one-time local operation, nothing leaves your machine, but with this many it may take a while and use noticeable CPU/disk — want me to go ahead?"* Get an explicit yes, especially at the high end, before running:
+   Ask something like: *"Found N sessions across [harnesses]. Indexing is a one-time local operation that does not send session content to AgentMemory's services, but with this many it may take a while and use noticeable CPU/disk — want me to go ahead?"* Get an explicit yes, especially at the high end, before running:
    ```bash
    agent-memory pro install     # builds the searchable index; free preview after: 20 recalls + 5 learning scans/day, no account
    ```
-   Privacy note worth stating either way: memory, session, query, and repository content stay on their machine; installation itself sends only a pseudonymous identifier and bounded compatibility metadata to obtain the signed release.
+   Privacy note worth stating either way: AgentMemory's services do not receive memory, session, query, or repository content; installation sends only a pseudonymous identifier and bounded compatibility metadata to obtain the signed release. Recall results provided locally to a coding agent are subject to that agent or model provider's data handling.
 
 3. **Learn from repeated corrections (Pro).** Turns patterns the human corrected more than once into a proposed memory they can accept or reject:
    ```bash

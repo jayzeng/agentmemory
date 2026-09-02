@@ -29,7 +29,7 @@ const NPM_LATEST_URL = `https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const FETCH_TIMEOUT_MS = 1_500;
 
-export type InstallManager = "bun" | "npm" | "pnpm" | "yarn" | "unknown";
+export type InstallManager = "bun" | "homebrew" | "npm" | "pnpm" | "yarn" | "unknown";
 
 export interface InstallMethod {
 	manager: InstallManager;
@@ -238,11 +238,39 @@ export function writeUpgradePolicy(patch: Partial<UpgradePolicy>): UpgradePolicy
 // Install-method detection
 // ---------------------------------------------------------------------------
 
+export function resolveSelfLaunch(input: {
+	execPath: string;
+	scriptCandidate: string | undefined;
+	fileExists: (candidate: string) => boolean;
+}): { command: string; args: string[] } {
+	const scriptCandidate = input.scriptCandidate;
+	const isRealScript =
+		typeof scriptCandidate === "string" &&
+		scriptCandidate.length > 0 &&
+		!scriptCandidate.startsWith("/$bunfs/") &&
+		input.fileExists(scriptCandidate);
+	return isRealScript ? { command: input.execPath, args: [scriptCandidate] } : { command: input.execPath, args: [] };
+}
+
+function currentSelfLaunch(): { command: string; args: string[] } {
+	return resolveSelfLaunch({
+		execPath: process.execPath,
+		scriptCandidate: process.argv[1],
+		fileExists: fs.existsSync,
+	});
+}
+
 function selfInstallPath(): string {
+	const launch = currentSelfLaunch();
+	const candidate = launch.args[0] ?? launch.command;
 	try {
-		return url.fileURLToPath(import.meta.url);
+		return fs.realpathSync(candidate);
 	} catch {
-		return process.argv[1] ?? "";
+		try {
+			return url.fileURLToPath(import.meta.url);
+		} catch {
+			return candidate;
+		}
 	}
 }
 
@@ -255,6 +283,17 @@ export function detectInstallMethod(location: string = selfInstallPath()): Insta
 	const normalized = location.replace(/\\/g, "/");
 	const home = os.homedir().replace(/\\/g, "/");
 	const pkg = `${NPM_PACKAGE_NAME}@latest`;
+
+	// Compiled CLI installed by the official Homebrew formula. Resolve symlinks
+	// before detection so /opt/homebrew/bin/agent-memory reaches its Cellar path.
+	if (normalized.includes("/Cellar/agent-memory/")) {
+		return {
+			manager: "homebrew",
+			global: true,
+			origin: location,
+			command: ["brew", "upgrade", "jayzeng/agentmemory/agent-memory"],
+		};
+	}
 
 	// bun global install
 	if (normalized.includes("/.bun/install/global/") || normalized.includes("/bun/install/global/")) {
@@ -330,14 +369,17 @@ export function runInstaller(method: InstallMethod, opts: SpawnOptions = {}): In
  */
 export function refreshUpgradeCacheBackground(): void {
 	try {
-		const binary = process.argv[0];
-		const script = process.argv[1];
-		if (!binary || !script) return;
-		const child = spawn(binary, [script, "upgrade", "--background", "--refresh", "--quiet", "--json"], {
-			detached: true,
-			stdio: "ignore",
-			env: { ...process.env, AGENT_MEMORY_UPGRADE_BACKGROUND: "1" },
-		});
+		const launch = currentSelfLaunch();
+		if (!launch.command) return;
+		const child = spawn(
+			launch.command,
+			[...launch.args, "upgrade", "--background", "--refresh", "--quiet", "--json"],
+			{
+				detached: true,
+				stdio: "ignore",
+				env: { ...process.env, AGENT_MEMORY_UPGRADE_BACKGROUND: "1" },
+			},
+		);
 		child.unref();
 	} catch {
 		// Background refresh is best-effort.

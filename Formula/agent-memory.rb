@@ -1,9 +1,9 @@
 class AgentMemory < Formula
   desc "agentmemory CLI: persistent memory for coding agents with qmd semantic search"
   homepage "https://github.com/jayzeng/agentmemory"
-  url "https://github.com/jayzeng/agentmemory/archive/refs/tags/v0.5.2.tar.gz"
-  sha256 "31a64b4b546769ecc8d757b433946afabe27e77b70a996bd53de7adaf62134bb"
-  version "0.5.2"
+  url "https://github.com/jayzeng/agentmemory/archive/refs/tags/v0.5.3.tar.gz"
+  sha256 "9b2a82b5338a03976495496630533fc12762289f33fcb70244d409404ad05215"
+  version "0.5.3"
   license "MIT"
 
   depends_on "bun" => :build

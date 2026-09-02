@@ -24,7 +24,7 @@ Prefer to have an agent drive the whole thing — install, configure, verify, th
 
 - AgentMemory injects your decisions, scratchpad, and daily log at session start — no copy-paste, no re-explaining.
 - Repeated corrections become durable memory you can inspect and undo (Pro).
-- Every memory is a plain Markdown file you own. Memory content, session content, queries, and repository paths stay on this machine.
+- Every memory is a plain Markdown file you own. AgentMemory's services do not receive memory content, session content, queries, or repository paths. Context you ask AgentMemory to return to a coding agent is then subject to that agent or model provider's data handling.
 
 AgentMemory does not provide a Python SDK, does not provide a vector database, and does not provide a knowledge graph. It is a local Markdown store with a CLI, agent skills, and optional full-text and semantic search via [qmd](https://github.com/tobi/qmd). See [product boundary](docs/product-boundary.md) for full scope.
 
@@ -36,9 +36,9 @@ AgentMemory does not provide a Python SDK, does not provide a vector database, a
 
 **Core remembers what you save. Pro learns from what you do.** Core remains free, MIT-licensed, and useful forever. Pro adds three things:
 
-- **Remember past sessions** — ask *"what did we decide about auth?"* across Claude Code, Codex, and Cursor.
+- **Remember past sessions** — ask *"what did we decide about auth?"* across Claude Code, Codex, and Pi session history. Cursor can use AgentMemory's skills and hooks, but Cursor transcript ingestion is not currently supported.
 - **Learn from your patterns** — turn repeated corrections into memory you can inspect and undo.
-- **Private by default** — memory and session content index locally. Pro installation uses a pseudonymous installation identifier and bounded compatibility metadata, never your memory or session content.
+- **Private by default** — memory and session content index locally. AgentMemory's services receive only a pseudonymous installation identifier and bounded compatibility metadata, never your memory or session content. Recall results provided locally to a coding agent are subject to that agent or model provider's data handling.
 
 Preview what Pro would find in your existing sessions *before* installing anything:
 
@@ -50,7 +50,7 @@ agent-memory learn
 agent-memory dashboard
 ```
 
-Pre-install preview: up to 50 local sessions per day. Free installed preview: 20 recalls + 5 learning scans per local day. Memory, session, query, and repository content stay on your machine; installation sends only a pseudonymous identifier and bounded compatibility metadata. Full detail on [privacy, signing, and installation](docs/official-plugin-bootstrap.md).
+Pre-install preview: up to 50 local sessions per day. Free installed preview: 20 recalls + 5 learning scans per local day. AgentMemory's services do not receive memory, session, query, or repository content; installation sends only a pseudonymous identifier and bounded compatibility metadata. Recall results provided locally to a coding agent are subject to that agent or model provider's data handling. Full detail on [privacy, signing, and installation](docs/official-plugin-bootstrap.md).
 
 ## Installation
 
@@ -59,7 +59,7 @@ Pre-install preview: up to 50 local sessions per day. Free installed preview: 20
 brew tap jayzeng/agentmemory https://github.com/jayzeng/agentmemory
 brew install jayzeng/agentmemory/agent-memory
 
-# Install the portable CLI globally (Node.js 20+; macOS, Linux, or Windows)
+# Install the portable Core CLI globally (Node.js 20+; Pro session recall requires Node.js 22.13+)
 npm install -g myagentmemory
 
 # If corporate TLS inspection requires a private CA, use your organization's CA file:

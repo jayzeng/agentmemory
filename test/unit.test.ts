@@ -2453,14 +2453,13 @@ describe("temporary plugin activation and runtime", () => {
 		expect(page).toContain(
 			"The CLI also sends core and bundle versions, platform, architecture, and release channel",
 		);
-		expect(page).toContain("Never sent:");
+		expect(page).toContain("The service stores bounded activation metadata");
+		expect(page).toContain("Not included in AgentMemory's application payload:");
 		expect(page).toContain('autocomplete="email"');
 		expect(page).toContain('spellcheck="false"');
 		expect(page).toContain('href="#activation"');
 		expect(page).toContain("padding:.8rem 3.5rem .8rem 1rem");
-		expect(page).toContain(
-			"never includes memory, session content, queries, repository paths, raw agent session identifiers",
-		);
+		expect(page).toContain("memory, session content, queries, repository paths, raw agent session identifiers");
 		expect(page).toContain("expire after 365 days without use");
 		expect(email).toBe("beta@example.invalid");
 	});
@@ -2554,27 +2553,12 @@ describe("temporary plugin activation and runtime", () => {
 					return "am_install_abcdefghijklmnopqrstuvwxyz012345";
 				},
 				fetch: (async (input, init) => {
-					if (String(input).includes("/v1/plugin/sessions/"))
-						return new Response(
-							JSON.stringify({
-								decision: {
-									allowed: true,
-									state: "reserved",
-									limit: 3,
-									used: 1,
-									remaining: 2,
-									resetAt: "2026-08-18T00:00:00.000Z",
-									idempotent: false,
-								},
-							}),
-							{ headers: { "Content-Type": "application/json" } },
-						);
+					void input;
 					accessRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
 					return new Response(
 						JSON.stringify({
 							entitlement,
 							artifactGrant: "grant",
-							usageCredential: "am_activation_abcdefghijklmnopqrstuvwxyz0123456789ABCD",
 						}),
 						{
 							headers: { "Content-Type": "application/json" },
@@ -2604,6 +2588,7 @@ describe("temporary plugin activation and runtime", () => {
 			expect(fs.statSync(record).mode & 0o777).toBe(0o600);
 			expect(fs.readFileSync(record, "utf-8")).toContain("am_install_abcdefghijklmnopqrstuvwxyz012345");
 			expect(fs.readFileSync(record, "utf-8")).not.toContain("email");
+			expect(fs.readFileSync(record, "utf-8")).not.toContain("usageCredential");
 			expect(accessRequest).toMatchObject({
 				schemaVersion: 2,
 				installationId: "am_install_abcdefghijklmnopqrstuvwxyz012345",
@@ -2614,7 +2599,6 @@ describe("temporary plugin activation and runtime", () => {
 				platform: process.platform,
 				architecture: process.arch,
 			});
-			expect(await backend.reserveSession("session-1")).toMatchObject({ allowed: true, limit: 3, remaining: 2 });
 			if (process.platform !== "win32") {
 				fs.chmodSync(record, 0o644);
 				expect((await backend.getLocalEntitlement()).state).toBe("missing");
@@ -2780,6 +2764,48 @@ describe("temporary plugin activation and runtime", () => {
 		}
 	});
 
+	test("loads legacy plugin API 1 MCP tools but denies invocation until the bundle is updated", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-mcp-legacy-"));
+		try {
+			const manifest: AgentMemoryBundleManifestV1 = {
+				...testBundleManifest("1.0.0"),
+				plugins: ["agentmemory.runtime-test"],
+			};
+			const source = Buffer.from(
+				`const manifest=${JSON.stringify(manifest)};export default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.runtime-test",name:"Runtime Test",version:"1.0.0",description:"Runtime test",engine:">=0.4.0",entitlement:"commercial",commands:[],permissions:[],capabilities:["learning"]},async activate(host){host.registerMcpTool?.({name:"legacy-tool",description:"Legacy",inputSchema:{type:"object",properties:{}},run(){return {unsafe:true}}})},async healthCheck(){return {ok:true}}}]};\n`,
+			);
+			const artifact = encodePluginPackage({
+				schemaVersion: 1,
+				manifest,
+				files: [{ path: manifest.entrypoint, sha256: sha256(source), contentBase64: source.toString("base64") }],
+			});
+			const release: SignedPluginReleaseV1 = {
+				schemaVersion: 1,
+				manifest,
+				platform: "any",
+				architecture: "any",
+				packageSha256: sha256(artifact),
+				size: artifact.byteLength,
+				signature: { algorithm: "ed25519", keyId: "test", value: Buffer.alloc(64).toString("base64") },
+			};
+			const store = new FilePluginInstallStore(root);
+			await store.install(artifact, release);
+			const runtime = new InstalledPluginRuntimeV1({
+				coreVersion: "0.5.2",
+				store,
+				backend: new FakePluginBackend(),
+			});
+
+			expect(await runtime.load()).toBe(true);
+			expect(runtime.getMcpTools().map((tool) => tool.name)).toEqual(["legacy-tool"]);
+			expect(await runtime.runMcpTool("legacy-tool", {})).toEqual({
+				error: "The legacy-tool tool was built for an older plugin API and must be updated before it can run",
+			});
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test("meters account-scoped SessionStart hooks and skips paid work when the daily allowance is exhausted", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-hook-"));
 		try {
@@ -2837,12 +2863,19 @@ import {
 	isCacheFresh,
 	readUpgradeCache,
 	readUpgradePolicy,
+	resolveSelfLaunch,
 	type UpgradeCache,
 	writeUpgradeCache,
 	writeUpgradePolicy,
 } from "../src/upgrade.js";
 
 describe("detectInstallMethod", () => {
+	test("recognizes the compiled CLI in the Homebrew Cellar", () => {
+		const method = detectInstallMethod("/opt/homebrew/Cellar/agent-memory/0.5.2/libexec/bin/agent-memory");
+		expect(method.manager).toBe("homebrew");
+		expect(method.command).toEqual(["brew", "upgrade", "jayzeng/agentmemory/agent-memory"]);
+	});
+
 	test("recognizes bun global install", () => {
 		const method = detectInstallMethod("/Users/anyone/.bun/install/global/node_modules/myagentmemory/dist/cli.js");
 		expect(method.manager).toBe("bun");
@@ -2875,6 +2908,34 @@ describe("detectInstallMethod", () => {
 		const method = detectInstallMethod("/tmp/local/checkout/agentmemory/dist/cli.js");
 		expect(method.manager).toBe("unknown");
 		expect(method.command).toEqual(["npm", "install", "-g", "myagentmemory@latest"]);
+	});
+});
+
+describe("resolveSelfLaunch", () => {
+	test("keeps a real script for Node and Bun package installs", () => {
+		expect(
+			resolveSelfLaunch({
+				execPath: "/usr/local/bin/node",
+				scriptCandidate: "/usr/local/lib/node_modules/myagentmemory/dist/cli.js",
+				fileExists: () => true,
+			}),
+		).toEqual({
+			command: "/usr/local/bin/node",
+			args: ["/usr/local/lib/node_modules/myagentmemory/dist/cli.js"],
+		});
+	});
+
+	test("drops Bun's virtual script path for a compiled Homebrew binary", () => {
+		expect(
+			resolveSelfLaunch({
+				execPath: "/opt/homebrew/Cellar/agent-memory/0.5.2/libexec/bin/agent-memory",
+				scriptCandidate: "/$bunfs/root/agent-memory",
+				fileExists: () => false,
+			}),
+		).toEqual({
+			command: "/opt/homebrew/Cellar/agent-memory/0.5.2/libexec/bin/agent-memory",
+			args: [],
+		});
 	});
 });
 

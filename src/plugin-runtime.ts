@@ -290,6 +290,10 @@ export class InstalledPluginRuntimeV1 {
 		if (!(await this.load())) return { error: `Unknown MCP tool: ${name}` };
 		const tool = this.mcpTools.find((candidate) => candidate.name === name);
 		if (!tool) return { error: `Unknown MCP tool: ${name}` };
+		if (!tool.requiredCapability)
+			return {
+				error: `The ${name} tool was built for an older plugin API and must be updated before it can run`,
+			};
 		const entitlement = await this.refreshEntitlement();
 		if (!isPluginCapabilityEnabled(entitlement, tool.requiredCapability))
 			return { error: `Capability ${tool.requiredCapability} is not enabled for the ${name} tool` };
@@ -367,7 +371,7 @@ export class InstalledPluginRuntimeV1 {
 				this.contextProviders.push({ provider, pluginId: manifest.id });
 			},
 			registerMcpTool: (tool) => {
-				if (!(manifest.capabilities ?? []).includes(tool.requiredCapability))
+				if (tool.requiredCapability && !(manifest.capabilities ?? []).includes(tool.requiredCapability))
 					throw new PluginBootstrapFailure(
 						"plugin_mcp_tool_invalid",
 						`Plugin ${manifest.id} registered an MCP tool with an undeclared capability`,

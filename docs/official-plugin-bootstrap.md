@@ -89,7 +89,7 @@ The `pro` namespace is the user-facing surface. The `plugin` namespace remains s
 - `status` is read-only. It reports the installed bundle, selected channel, compatibility, entitlement state, and update availability.
 - `install` authenticates when necessary, then installs, upgrades, or reports current state.
 - `update` requires an existing installation and never starts a new purchase implicitly.
-- `uninstall` removes executable plugin material and the active receipt. It preserves core memory, plugin state, and the permission-restricted activation credential.
+- `uninstall` removes executable plugin material and the active receipt. It preserves core memory, plugin state, and the permission-restricted local activation record.
 - `manage` remains unavailable until authenticated account and billing management exists.
 
 Installed plugins contribute top-level commands including `recall` and `learn`; `dashboard` is a product-facing alias for the lower-level `web` command. Bootstrap command names are reserved by the core and cannot be replaced by a plugin.
@@ -172,7 +172,6 @@ An Enterprise administrator may pre-provision an organization entitlement or man
 The service exposes:
 
 - `POST /v1/plugin/access` for an anonymous free-preview policy, compatibility credential, and short-lived artifact grant;
-- `POST /v1/plugin/sessions/reserve|commit|release` for migration compatibility with activation-v2 clients;
 - `GET /v1/plugin/releases` for an Ed25519-signed release selected from the private R2 catalog;
 - `GET|HEAD /v1/artifacts/download` for the exact content-addressed object authorized by the bearer grant.
 
@@ -191,7 +190,7 @@ The bootstrap may send only:
 - core version, plugin-host API version, platform, and architecture;
 - requested bundle ID, installed bundle version, and release channel;
 - a pseudonymous license or organization identifier;
-- protocol nonces, opaque quota operation IDs, and authentication material required for the request.
+- protocol nonces and authentication material required for the request.
 
 It must never send memory contents, search queries, session contents, raw agent session identifiers, working-directory names, repository names, filesystem paths, or qmd data. The bounded allowance counter is authorization state, not general product telemetry.
 
@@ -267,7 +266,7 @@ An install or upgrade must:
 
 Failure before activation leaves the previous version active. Failure immediately after activation restores the previous receipt. Concurrent installers do not interleave. The core never invokes package-manager lifecycle scripts or elevates privileges.
 
-Uninstall removes executable versions, the active receipt, contributed skills, and managed hooks. It does not remove `MEMORY.md`, daily logs, topics, scratchpad items, source session logs, plugin-created review data, or billing state. The top-level `agent-memory uninstall` command composes this with hook/skill/MCP/completion removal in one step; its explicit `--data` flag additionally deletes the memory directory and the entire plugin install root (bundles, receipts, and the activation credential) once the user opts in and confirms.
+Uninstall removes executable versions, the active receipt, contributed skills, and managed hooks. It does not remove `MEMORY.md`, daily logs, topics, scratchpad items, source session logs, plugin-created review data, or local activation state. The top-level `agent-memory uninstall` command composes this with hook/skill/MCP/completion removal in one step; its explicit `--data` flag additionally deletes the memory directory and the entire plugin install root (bundles, receipts, and activation state) once the user opts in and confirms.
 
 ## Plugin host API v1
 

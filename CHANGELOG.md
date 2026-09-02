@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Removed unavailable paid-plan and automatic-capture calls to action from free-preview CLI output, corrected supported transcript hosts, and qualified remaining privacy copy for coding-agent/model-provider handling.
+- Documented the Node.js 22.13+ requirement for npm-hosted Pro session indexing while preserving Core's Node.js 20+ support.
+
+### Fixed
+
+- Updated the Homebrew formula to the tagged Core 0.5.3 source archive and checksum.
+
 ## [0.5.3] - 2026-09-02
 
 ### Added
@@ -13,6 +22,17 @@ All notable changes to this project will be documented in this file.
 - `pi` (Pi Coding Agent) is now a first-class hook target alongside Claude Code, Codex, Cursor, and opencode. Since pi has no JSON/TOML hook config to edit, `agent-memory setup`/`install-hooks` delegates to the [`pi-memory`](https://github.com/jayzeng/pi-memory) extension via `pi install npm:pi-memory` rather than shipping a competing extension; `doctor` reports the install outcome/history from a local `pi-memory-state.json`.
 - `agent-memory upgrade policy [off|notify|auto]` — per-target (CLI/Pro) control over whether upgrades install automatically, just notify, or are left alone. `doctor` gets an "Auto-upgrade" row reporting the current policy.
 - `agent-memory upgrade --background` — a detached, non-interactive install path spawned from `hook session-start` that only installs a target whose persisted policy is `"auto"`; failures are recorded and surfaced passively on the next session start, never thrown.
+
+### Changed
+
+- Kept plugin API 1 source-compatible after MCP capability gating: legacy MCP tool descriptors may omit `requiredCapability`, but Core refuses to execute them until the bundle is updated.
+- Replaced the deprecated server-side SessionStart metering client with a versioned pseudonymous activation record that stores no unused usage credential.
+- Qualified local-first privacy copy so it distinguishes data AgentMemory's services never receive from recall context subsequently handled by the user's coding-agent/model provider.
+
+### Fixed
+
+- Detect the official Homebrew Cellar install and upgrade it through `brew` instead of falling back to a second global npm install.
+- Relaunch compiled Bun/Homebrew executables without passing their virtual `/$bunfs/` script path, while preserving the newer background auto-upgrade policy.
 
 ## [0.5.2] - 2026-09-01
 
