@@ -29,7 +29,10 @@ import {
 	todayStr,
 } from "../src/core.js";
 import {
+	_resetHookExecForTest,
+	_setHookExecForTest,
 	_setHookHomeDirForTest,
+	getPiMemoryState,
 	installHooks,
 	isHookInstalled,
 	isStopHookInstalled,
@@ -2200,6 +2203,172 @@ describe("core-owned hooks and completion", () => {
 		}
 	});
 
+	// pi has no JSON/TOML hook config — agent-memory delegates to the pi-memory
+	// extension via `pi install npm:pi-memory`. Detection still requires a real
+	// `pi` on PATH, so these tests fake one (a no-op executable) purely to
+	// satisfy commandExists(); the actual install call is mocked separately via
+	// _setHookExecForTest so no network/subprocess call ever happens.
+	function makeFakePiOnPath(): { restore: () => void } {
+		const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-pi-bin-"));
+		const piPath = path.join(binDir, "pi");
+		fs.writeFileSync(piPath, "#!/bin/sh\nexit 0\n");
+		fs.chmodSync(piPath, 0o755);
+		const originalPath = process.env.PATH;
+		process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+		return {
+			restore: () => {
+				process.env.PATH = originalPath;
+				fs.rmSync(binDir, { recursive: true, force: true });
+			},
+		};
+	}
+
+	test("pi delegate install (success) records state and reports installed, with no filesystem writes under ~/.pi", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		const fakePi = makeFakePiOnPath();
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			_setHookExecForTest((() => "pi-memory@0.4.2 installed\n") as any);
+
+			const report = installHooks(new Set(["pi"]));
+			const result = report.results[0];
+			expect(result?.key).toBe("pi");
+			expect(result?.installed).toBe(true);
+			expect(result?.reason).toContain("pi-memory@0.4.2");
+
+			const state = getPiMemoryState();
+			expect(state?.ok).toBe(true);
+			expect(state?.detail).toContain("pi-memory@0.4.2");
+
+			// agent-memory never writes into ~/.pi itself — only the delegate command runs.
+			expect(fs.existsSync(path.join(home, ".pi", "agent"))).toBe(false);
+		} finally {
+			_resetHookExecForTest();
+			fakePi.restore();
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("pi delegate install (failure) surfaces the error and records a failed state", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		const fakePi = makeFakePiOnPath();
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			_setHookExecForTest((() => {
+				throw Object.assign(new Error("command failed"), { stderr: "network unreachable" });
+			}) as any);
+
+			const report = installHooks(new Set(["pi"]));
+			const result = report.results[0];
+			expect(result?.installed).toBe(false);
+			expect(result?.reason).toContain("network unreachable");
+
+			const state = getPiMemoryState();
+			expect(state?.ok).toBe(false);
+			expect(state?.detail).toContain("network unreachable");
+			expect(isHookInstalled(home, "pi")).toBe(false);
+		} finally {
+			_resetHookExecForTest();
+			fakePi.restore();
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("pi uninstall is informational only, never touches pi-memory-state.json, and reports it when pi-memory is still active", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		const fakePi = makeFakePiOnPath();
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			_setHookExecForTest((() => "installed\n") as any);
+			installHooks(new Set(["pi"]));
+			const stateBefore = getPiMemoryState();
+			expect(stateBefore?.ok).toBe(true);
+			// Simulate pi-memory actually being live (the mocked exec above never really
+			// ran `pi`, so this directory wouldn't otherwise exist).
+			fs.mkdirSync(path.join(home, ".pi", "agent", "memory"), { recursive: true });
+
+			const result = uninstallHooks(new Set(["pi"])).results[0];
+			expect(result?.installed).toBe(false);
+			expect(result?.reason).toContain("pi uninstall pi-memory");
+
+			// Uninstall never owned this install — the state record must survive untouched,
+			// and the live directory (what pi-memory itself owns) is left alone too.
+			expect(getPiMemoryState()).toEqual(stateBefore);
+			expect(fs.existsSync(path.join(home, ".pi", "agent", "memory"))).toBe(true);
+		} finally {
+			_resetHookExecForTest();
+			fakePi.restore();
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
+	test("pi uninstall reports plain 'not installed' when pi-memory was never actually active", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		try {
+			_setHookHomeDirForTest(home);
+			fs.mkdirSync(path.join(home, ".pi"), { recursive: true });
+			const result = uninstallHooks(new Set(["pi"])).results[0];
+			expect(result?.installed).toBe(false);
+			expect(result?.reason).toBe("not installed");
+		} finally {
+			_setHookHomeDirForTest(null);
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+
+	test("isHookInstalled(pi) checks the live ~/.pi/agent/memory directory, ignoring a stale attempt record", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-hooks-"));
+		const memDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-mem-"));
+		try {
+			_setHookHomeDirForTest(home);
+			_setBaseDir(memDir);
+			expect(isHookInstalled(home, "pi")).toBe(false);
+			// pi-memory was installed manually (pre-dating this delegate feature, or after a
+			// failed delegate attempt) — its memory directory exists even though agent-memory
+			// never ran a successful install itself.
+			fs.mkdirSync(path.join(home, ".pi", "agent", "memory"), { recursive: true });
+			expect(isHookInstalled(home, "pi")).toBe(true);
+
+			// A stale recorded failure must never override the live directory that now exists.
+			fs.writeFileSync(
+				path.join(memDir, "pi-memory-state.json"),
+				JSON.stringify({ lastAttemptAt: new Date(0).toISOString(), ok: false, detail: "boom" }),
+			);
+			expect(isHookInstalled(home, "pi")).toBe(true);
+
+			// Conversely, a stale recorded success must not paper over a real, live removal.
+			fs.rmSync(path.join(home, ".pi", "agent", "memory"), { recursive: true, force: true });
+			fs.writeFileSync(
+				path.join(memDir, "pi-memory-state.json"),
+				JSON.stringify({ lastAttemptAt: new Date(0).toISOString(), ok: true, detail: "installed" }),
+			);
+			expect(isHookInstalled(home, "pi")).toBe(false);
+		} finally {
+			_setHookHomeDirForTest(null);
+			_resetBaseDir();
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(memDir, { recursive: true, force: true });
+		}
+	});
+
 	test("CLI prints shell completion without changing the user profile", () => {
 		const cli = path.join(__dirname, "..", "src", "cli.ts");
 		const result = Bun.spawnSync(["bun", "run", cli, "completion", "zsh", "--stdout"], {
@@ -2245,8 +2414,13 @@ describe("uninstall command", () => {
 			};
 			fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
 			// install-hooks/serve --register only act on agents whose config dir is
-			// already present, so seed a marker directory to make Claude Code "detected".
+			// already present. A bare marker directory relies on `commandExists("claude")`
+			// as a fallback, which is only true on machines that happen to have the real
+			// Claude Code CLI on PATH (true for local dev, false on CI runners) — so seed
+			// an actual settings.json to make detection environment-independent, matching
+			// how the Codex test below seeds a real config.toml.
 			fs.mkdirSync(path.join(homeDir, ".claude"), { recursive: true });
+			fs.writeFileSync(path.join(homeDir, ".claude", "settings.json"), "{}");
 
 			try {
 				expect(runCli(["install-hooks", "--yes", "--json"], env).exitCode).toBe(0);

@@ -92,7 +92,9 @@ import {
 } from "./core.js";
 import {
 	detectHookAgents,
+	getPiMemoryState,
 	type HookAgentKey,
+	type InstallHooksReport,
 	installHooks,
 	isHookInstalled,
 	isStopHookInstalled,
@@ -1224,10 +1226,15 @@ async function promptYesNo(question: string, defaultYes: boolean): Promise<boole
 	}
 }
 
-async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise<void> {
+async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise<InstallHooksReport | undefined> {
 	const json = hasFlag(flags, "json");
 	const requested = getFlag(flags, "only");
 	const requestedKeys = requested ? new Set(requested.split(",").map((value) => value.trim())) : null;
+	// Internal-only signal from cmdSetup: pi's action is a real network package
+	// install (`pi install npm:pi-memory`), not a local config-file edit like
+	// every other agent here — so setup's internally-manufactured `yes: true`
+	// must not cover it. Not a public flag; never documented in cli-spec.
+	const deferPi = hasFlag(flags, "_setup-defer-pi");
 	const modeFlag = getFlag(flags, "mode");
 	if (modeFlag !== undefined && modeFlag !== "stable" && modeFlag !== "per-turn") {
 		exitError(`--mode must be 'stable' or 'per-turn' (got ${modeFlag})`, json);
@@ -1235,12 +1242,16 @@ async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise
 	const mode: HookMode = (modeFlag as HookMode | undefined) ?? "per-turn";
 	const { homeDir, targets } = detectHookAgents();
 	if (!homeDir) exitError("Home directory not found.", json);
-	const eligible = targets.filter(
-		(target) => target.supported && target.detected && (!requestedKeys || requestedKeys.has(target.key)),
-	);
+	const eligible = targets.filter((target) => {
+		if (!(target.supported && target.detected)) return false;
+		if (requestedKeys && !requestedKeys.has(target.key)) return false;
+		if (target.key === "pi" && deferPi) return false;
+		return true;
+	});
 	if (!eligible.length) {
-		if (json) return output({ ok: true, homeDir, results: [] }, true);
-		return output("No eligible agents. Nothing to install.", false);
+		const report: InstallHooksReport = { ok: true, homeDir, results: [] };
+		output(json ? report : "No eligible agents. Nothing to install.", json);
+		return report;
 	}
 	// Consider an agent "already installed" only when the wiring matches the requested mode.
 	// per-turn requires BOTH SessionStart and UserPromptSubmit; stable requires SessionStart AND
@@ -1265,37 +1276,43 @@ async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise
 		console.log(`Automatic context already active for: ${labels}.`);
 	}
 	if (!pending.length) {
-		if (json) {
-			return output(
-				{
-					ok: true,
-					homeDir,
-					results: alreadyInstalled.map((target) => ({
-						key: target.key,
-						label: target.label,
-						installed: false,
-						reason: "already installed",
-						mode,
-					})),
-				},
-				true,
-			);
-		}
-		return output("Nothing to install.", false);
+		const report: InstallHooksReport = {
+			ok: true,
+			homeDir,
+			results: alreadyInstalled.map((target) => ({
+				key: target.key,
+				label: target.label,
+				installed: false,
+				reason: "already installed",
+				mode,
+			})),
+		};
+		output(json ? report : "Nothing to install.", json);
+		return report;
 	}
 	const selected = new Set<HookAgentKey>();
 	const applyAll = hasFlag(flags, "yes") || hasFlag(flags, "all") || !process.stdin.isTTY;
 	const hookLabel = mode === "per-turn" ? "SessionStart + UserPromptSubmit hooks" : "SessionStart hook";
 	for (const target of pending) {
-		if (applyAll || (await promptYesNo(`Install ${hookLabel} for ${target.label}?`, true))) selected.add(target.key);
+		// pi gets a real package install (`pi install npm:pi-memory`), not a config-file hook edit —
+		// word the prompt accordingly so the confirmation matches what actually happens.
+		const question =
+			target.key === "pi"
+				? `Install pi-memory (native pi extension) for ${target.label}?`
+				: `Install ${hookLabel} for ${target.label}?`;
+		if (applyAll || (await promptYesNo(question, true))) selected.add(target.key);
 	}
 	if (!selected.size) {
-		if (json) return output({ ok: true, homeDir, results: [] }, true);
-		return output("Nothing selected. Skipped.", false);
+		const report: InstallHooksReport = { ok: true, homeDir, results: [] };
+		output(json ? report : "Nothing selected. Skipped.", json);
+		return report;
 	}
 	const report = installHooks(selected, mode);
 	if (!report.ok) exitError(report.error ?? "install failed", json);
-	if (json) return output(report, true);
+	if (json) {
+		output(report, true);
+		return report;
+	}
 	for (const result of report.results) {
 		console.log(
 			result.installed
@@ -1303,6 +1320,7 @@ async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise
 				: `Skipped ${result.label} (${result.reason ?? "unknown"})`,
 		);
 	}
+	return report;
 }
 
 function cmdUninstallHooks(flags: Record<string, string | boolean>): void {
@@ -1632,17 +1650,16 @@ async function cmdSetup(flags: Record<string, string | boolean>) {
 	const subFlags = { yes: true } as Record<string, string | boolean>;
 	const steps: Array<{ name: string; ok: boolean; detail?: string }> = [];
 
-	const runQuiet = async (fn: () => Promise<void> | void): Promise<void> => {
+	const runQuiet = async <T>(fn: () => Promise<T> | T): Promise<T> => {
 		if (!json) {
-			await fn();
-			return;
+			return await fn();
 		}
 		const originalLog = console.log;
 		const originalInfo = console.info;
 		console.log = () => {};
 		console.info = () => {};
 		try {
-			await fn();
+			return await fn();
 		} finally {
 			console.log = originalLog;
 			console.info = originalInfo;
@@ -1672,8 +1689,32 @@ async function cmdSetup(flags: Record<string, string | boolean>) {
 	// Step 3: hooks (uses the improved preflight — silent when all already installed)
 	if (!skipHooks) {
 		try {
-			await runQuiet(() => cmdInstallHooks(subFlags));
-			steps.push({ name: "hooks", ok: true });
+			const userSuppliedYes = hasFlag(flags, "yes");
+			// pi's install is a real network package fetch (`pi install npm:pi-memory`),
+			// unlike every other agent here (local config-file edits) — setup's
+			// manufactured `yes: true` above must not silently cover that unless the
+			// user actually asked for --yes themselves.
+			const { homeDir: detectedHomeDir, targets: detectedTargets } = detectHookAgents();
+			const piTarget = detectedTargets.find((target) => target.key === "pi");
+			const piDetected = Boolean(piTarget?.supported && piTarget?.detected);
+			const piAlreadyActive = piDetected && detectedHomeDir ? isHookInstalled(detectedHomeDir, "pi") : false;
+			const hooksFlags = userSuppliedYes ? subFlags : { ...subFlags, "_setup-defer-pi": true };
+			const report = await runQuiet(() => cmdInstallHooks(hooksFlags));
+			const piFailure = report?.results.find(
+				(result) =>
+					result.key === "pi" && !result.installed && result.reason && result.reason !== "already installed",
+			);
+			if (piFailure) {
+				steps.push({ name: "hooks", ok: false, detail: `pi-memory install failed: ${piFailure.reason}` });
+			} else if (piDetected && !piAlreadyActive && !userSuppliedYes) {
+				steps.push({
+					name: "hooks",
+					ok: true,
+					detail: "pi-memory deferred — re-run with --yes, or agent-memory install-hooks --only pi",
+				});
+			} else {
+				steps.push({ name: "hooks", ok: true });
+			}
 		} catch (error) {
 			steps.push({ name: "hooks", ok: false, detail: (error as Error).message });
 		}
@@ -1933,7 +1974,15 @@ async function cmdUninstall(flags: Record<string, string | boolean>): Promise<vo
 		const report = uninstallHooks();
 		if (!report.ok) throw new Error(report.error ?? "failed to remove hooks");
 		const removed = report.results.filter((r) => r.installed).length;
-		steps.push({ name: "hooks", ok: true, detail: removed ? `removed ${removed}` : "not installed" });
+		// agent-memory never removes pi-memory itself (see uninstallPiMemoryDelegate) — make that
+		// explicit here rather than letting a generic "removed N" detail imply everything is gone.
+		const piResult = report.results.find((r) => r.key === "pi");
+		const piNote = piResult?.reason?.startsWith("pi-memory left installed") ? `; ${piResult.reason}` : "";
+		steps.push({
+			name: "hooks",
+			ok: true,
+			detail: (removed ? `removed ${removed}` : "not installed") + piNote,
+		});
 	} catch (error) {
 		steps.push({ name: "hooks", ok: false, detail: (error as Error).message });
 	}
@@ -2276,7 +2325,7 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 		rows.push({
 			status: "warn",
 			label: "Agent hosts",
-			detail: "no supported agents detected (Claude Code, Codex, Cursor, opencode)",
+			detail: "no supported agents detected (Claude Code, Codex, Cursor, opencode, pi)",
 			fix: "install one of the agents first, then: agent-memory install-skills",
 		});
 	} else {
@@ -2287,7 +2336,32 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 		});
 		for (const target of detected) {
 			if (!target.supported) {
-				// Skip skill/hook rows for hosts we don't yet integrate with (e.g. pi has its own extension).
+				// Skip skill/hook rows for hosts we don't yet integrate with.
+				continue;
+			}
+			if (target.key === "pi") {
+				// pi has no SKILL.md — agent-memory delegates entirely to the pi-memory
+				// extension, installed via `pi install npm:pi-memory` rather than a
+				// config-file edit, so it gets its own row instead of the generic
+				// Skill:/Hook: pair below.
+				const installed = homeDir ? isHookInstalled(homeDir, "pi") : false;
+				const state = getPiMemoryState();
+				let detail: string;
+				if (installed) {
+					detail = "pi-memory extension active (github.com/jayzeng/pi-memory)";
+				} else if (state && !state.ok) {
+					detail = `pi-memory not detected — last install attempt (${state.lastAttemptAt}) failed: ${state.detail}`;
+				} else if (state?.ok) {
+					detail = `pi-memory installed (${state.lastAttemptAt}) but no session has run yet`;
+				} else {
+					detail = "pi-memory not detected — agent-memory can install it";
+				}
+				rows.push({
+					status: installed ? "ok" : "warn",
+					label: "Memory: pi",
+					detail,
+					fix: installed ? undefined : "agent-memory install-hooks --only pi",
+				});
 				continue;
 			}
 			const skillPath = homeDir ? `${target.homeMarker}/skills/agent-memory/SKILL.md` : null;
