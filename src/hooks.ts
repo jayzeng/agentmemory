@@ -156,7 +156,13 @@ function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string):
 		for (const hook of list) {
 			if (!hook || typeof hook !== "object") continue;
 			const h = hook as Record<string, unknown>;
-			if (h[HOOK_MARKER_JSON] === true && h.command === command) return true;
+			// Match by command alone (marker is optional) — legacy entries that
+			// predate HOOK_MARKER_JSON already run this exact command, and the
+			// command string is specific enough to agent-memory that it's a safe
+			// signal on its own. Otherwise a pre-marker install is invisible here,
+			// doctor/isHookInstalled falsely report "not installed" for hooks that
+			// are actually live, and upsertClaudeHookGroup can't find them to dedupe.
+			if (h.command === command) return true;
 		}
 	}
 	return false;
@@ -388,55 +394,81 @@ function upsertClaudeHookGroup(
 	command: string,
 ): { changed: boolean; hadManaged: boolean } {
 	const groups = Array.isArray(hooks[eventKey]) ? [...(hooks[eventKey] as unknown[])] : [];
-	const managedIndexes: number[] = [];
-	for (let i = 0; i < groups.length; i++) {
-		const group = groups[i];
+
+	// Locate every agent-memory-owned hook entry — matched by marker, or by
+	// exact command string for legacy pre-marker installs — wherever it lives.
+	const owned: Array<{ group: Record<string, unknown>; hook: Record<string, unknown> }> = [];
+	for (const group of groups) {
 		if (!group || typeof group !== "object") continue;
 		const g = group as Record<string, unknown>;
 		const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
 		for (const hook of list) {
 			if (!hook || typeof hook !== "object") continue;
 			const h = hook as Record<string, unknown>;
-			if (h[HOOK_MARKER_JSON] === true) {
-				managedIndexes.push(i);
-				break;
-			}
+			if (h[HOOK_MARKER_JSON] === true || h.command === command) owned.push({ group: g, hook: h });
 		}
 	}
 
-	if (managedIndexes.length > 0) {
-		const keep = managedIndexes[0];
-		const dupes = managedIndexes.slice(1);
-		for (const idx of dupes.reverse()) groups.splice(idx, 1);
-		const group = groups[keep] as Record<string, unknown>;
-		let changed = dupes.length > 0;
-		if ("matcher" in group) {
-			delete group.matcher;
-			changed = true;
-		}
-		const list = group.hooks as Record<string, unknown>[];
-		for (const h of list) {
-			if (h[HOOK_MARKER_JSON] === true && h.command !== command) {
-				h.command = command;
-				changed = true;
-			}
-		}
+	if (owned.length === 0) {
+		// No existing managed hook anywhere — add a fresh group without a matcher so it fires on all harnesses.
+		groups.push({ hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }] });
 		hooks[eventKey] = groups;
-		return { changed, hadManaged: true };
+		return { changed: true, hadManaged: false };
 	}
 
-	// No existing managed group — add a fresh one without a matcher so it fires on all harnesses.
-	groups.push({ hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }] });
-	hooks[eventKey] = groups;
-	return { changed: true, hadManaged: false };
+	// Keep the first owned entry in place — fixed up in place, preserving its
+	// identity so a no-op re-install reports unchanged — and remove every
+	// other owned entry from its own group's hooks array, whether it's a
+	// duplicate in another group or piled up alongside the keeper in the same
+	// group. Never delete a whole group, since it could carry unrelated
+	// hand-added hooks.
+	const keeper = owned[0];
+	let changed = false;
+	if (keeper.hook.command !== command) {
+		keeper.hook.command = command;
+		changed = true;
+	}
+	if (keeper.hook[HOOK_MARKER_JSON] !== true) {
+		keeper.hook[HOOK_MARKER_JSON] = true;
+		changed = true;
+	}
+	for (const dupe of owned.slice(1)) {
+		const list = dupe.group.hooks as unknown[];
+		const idx = list.indexOf(dupe.hook);
+		if (idx !== -1) list.splice(idx, 1);
+		changed = true;
+	}
+
+	// Only clear the keeper's group matcher when that group is exclusively
+	// ours (no unrelated hooks left in it after dedup) — never when it also
+	// carries an unrelated hand-added hook.
+	const keeperList = keeper.group.hooks as unknown[];
+	if (keeperList.length === 1 && "matcher" in keeper.group) {
+		delete keeper.group.matcher;
+		changed = true;
+	}
+
+	// Drop any group left with zero hooks; never drop one that still has
+	// unrelated hooks in it.
+	const filtered = groups.filter((group) => {
+		if (!group || typeof group !== "object") return true;
+		const g = group as Record<string, unknown>;
+		return !Array.isArray(g.hooks) || (g.hooks as unknown[]).length > 0;
+	});
+	hooks[eventKey] = filtered;
+	return { changed, hadManaged: true };
 }
 
 /**
  * Remove all agent-memory-managed hook entries for `eventKey`. Used when
  * downgrading from per-turn back to stable (drops UserPromptSubmit).
+ * `command`, when given, also matches legacy entries that predate
+ * HOOK_MARKER_JSON — the same broadened detection upsertClaudeHookGroup and
+ * hasClaudeHookGroup use — so a pre-marker install isn't left behind after a
+ * downgrade/uninstall that reports success.
  * Returns true if anything was removed.
  */
-function removeClaudeHookGroup(hooks: Record<string, unknown>, eventKey: string): boolean {
+function removeClaudeHookGroup(hooks: Record<string, unknown>, eventKey: string, command?: string): boolean {
 	const groups = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
 	if (groups.length === 0) return false;
 	let removed = 0;
@@ -446,7 +478,8 @@ function removeClaudeHookGroup(hooks: Record<string, unknown>, eventKey: string)
 			const g = { ...(group as Record<string, unknown>) };
 			const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
 			const kept = list.filter((h) => {
-				const isOurs = h && typeof h === "object" && (h as Record<string, unknown>)[HOOK_MARKER_JSON] === true;
+				const hook = h && typeof h === "object" ? (h as Record<string, unknown>) : null;
+				const isOurs = !!hook && (hook[HOOK_MARKER_JSON] === true || (!!command && hook.command === command));
 				if (isOurs) removed++;
 				return !isOurs;
 			});
@@ -478,7 +511,7 @@ function installClaudeCodeHook(homeDir: string, mode: HookMode = "per-turn"): Ho
 		promptChanged = prompt.changed;
 		promptHadManaged = prompt.hadManaged;
 	} else {
-		promptChanged = removeClaudeHookGroup(hooks, "UserPromptSubmit");
+		promptChanged = removeClaudeHookGroup(hooks, "UserPromptSubmit", userPromptSubmitHookCommand("claude"));
 	}
 	// Stop backs the write side of memory with a periodic nudge. It is orthogonal
 	// to stable/per-turn context injection, so it is installed unconditionally.
@@ -848,9 +881,9 @@ function uninstallClaudeCodeHook(homeDir: string): HookInstallResult {
 	}
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const sessionRemoved = removeClaudeHookGroup(hooks, "SessionStart");
-	const promptRemoved = removeClaudeHookGroup(hooks, "UserPromptSubmit");
-	const stopRemoved = removeClaudeHookGroup(hooks, "Stop");
+	const sessionRemoved = removeClaudeHookGroup(hooks, "SessionStart", sessionStartHookCommand("claude"));
+	const promptRemoved = removeClaudeHookGroup(hooks, "UserPromptSubmit", userPromptSubmitHookCommand("claude"));
+	const stopRemoved = removeClaudeHookGroup(hooks, "Stop", stopHookCommand("claude"));
 	const legacyPreCompactRemoved = removeClaudeHookGroup(hooks, "PreCompact");
 	if (!sessionRemoved && !promptRemoved && !stopRemoved && !legacyPreCompactRemoved) {
 		return { key: "claude", label: "Claude Code", installed: false, reason: "not installed" };
