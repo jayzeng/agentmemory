@@ -4,14 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-09-03
+
 ### Changed
 
 - Removed unavailable paid-plan and automatic-capture calls to action from free-preview CLI output, corrected supported transcript hosts, and qualified remaining privacy copy for coding-agent/model-provider handling.
 - Documented the Node.js 22.13+ requirement for npm-hosted Pro session indexing while preserving Core's Node.js 20+ support.
+- Stop hook's memory-write nag now uses `hookSpecificOutput.additionalContext` instead of `decision: "block"` — same effect (still holds the turn open via `stop_hook_active`), but renders as "Stop hook feedback" instead of "Stop hook error" in the transcript.
 
 ### Fixed
 
 - Updated the Homebrew formula to the tagged Core 0.5.3 source archive and checksum.
+- `serve --mcp` now exits promptly after stdin closes even when a Pro plugin keeps a resource open, such as the session-intelligence plugin's `fs.watch` handles on the pi/codex/claude session roots. `StdioMcpServer` gained a shutdown-hook mechanism (`registerMcpShutdown`) plus a hard `process.exit(0)` backstop.
 
 ## [0.5.3] - 2026-09-02
 
