@@ -195,6 +195,7 @@ export interface AgentMemoryPluginHostV1 {
 	registerContextProvider?(provider: PluginContextProviderV1): void;
 	registerMcpTool?(tool: PluginMcpToolV1): void;
 	registerMcpStartup?(fn: () => void | Promise<void>): void;
+	registerMcpShutdown?(fn: () => void | Promise<void>): void;
 	getStateDirectory(): string;
 	getMemoryDirectory(): string;
 	getEntitlement(): Promise<PluginEntitlementStatusV1>;

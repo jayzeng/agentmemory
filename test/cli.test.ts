@@ -39,6 +39,14 @@ import {
 	isUserPromptSubmitInstalled,
 	uninstallHooks,
 } from "../src/hooks.js";
+import {
+	encodePluginPackage,
+	FilePluginInstallStore,
+	OFFICIAL_BUNDLE_ID,
+	type SignedPluginReleaseV1,
+	sha256,
+} from "../src/plugin-bootstrap.js";
+import type { AgentMemoryBundleManifestV1 } from "../src/plugin-host.js";
 
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf-8"))
 	.version as string;
@@ -557,10 +565,14 @@ describe("CLI subprocess", () => {
 			}
 			const nagTurn = runHookStop(sessionId);
 			expect(nagTurn.exitCode).toBe(0);
-			const decision = JSON.parse(nagTurn.stdout.toString());
-			expect(decision.decision).toBe("block");
-			expect(typeof decision.reason).toBe("string");
-			expect(decision.reason.length).toBeGreaterThan(0);
+			const output = JSON.parse(nagTurn.stdout.toString());
+			// additionalContext (not decision:"block") — same effect (continues the
+			// conversation via stop_hook_active), but renders as "Stop hook feedback"
+			// rather than the alarming-looking "Stop hook error" in the transcript.
+			expect(output.decision).toBeUndefined();
+			expect(output.hookSpecificOutput.hookEventName).toBe("Stop");
+			expect(typeof output.hookSpecificOutput.additionalContext).toBe("string");
+			expect(output.hookSpecificOutput.additionalContext.length).toBeGreaterThan(0);
 
 			// Counter resets relative to the last nag — the next STOP_NAG_INTERVAL - 1
 			// turns stay quiet, then it nags again.
@@ -568,7 +580,7 @@ describe("CLI subprocess", () => {
 				expect(runHookStop(sessionId).stdout.toString()).toBe("");
 			}
 			const secondNagTurn = runHookStop(sessionId);
-			expect(JSON.parse(secondNagTurn.stdout.toString()).decision).toBe("block");
+			expect(JSON.parse(secondNagTurn.stdout.toString()).hookSpecificOutput.hookEventName).toBe("Stop");
 		},
 	);
 
@@ -621,6 +633,7 @@ describe("CLI subprocess", () => {
 				stdin: Buffer.from(`${requests.map((request) => JSON.stringify(request)).join("\n")}\n`),
 				stdout: "pipe",
 				stderr: "pipe",
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: path.join(tmpDir, "plugins") },
 			},
 		);
 		expect(result.exitCode).toBe(0);
@@ -649,6 +662,7 @@ describe("CLI subprocess", () => {
 				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
 				stdout: "pipe",
 				stderr: "pipe",
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: path.join(tmpDir, "plugins") },
 			},
 		);
 		expect(result.exitCode).toBe(0);
@@ -669,6 +683,7 @@ describe("CLI subprocess", () => {
 				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
 				stdout: "pipe",
 				stderr: "pipe",
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: path.join(tmpDir, "plugins") },
 			},
 		);
 		expect(result.exitCode).toBe(0);
@@ -684,6 +699,7 @@ describe("CLI subprocess", () => {
 				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
 				stdout: "pipe",
 				stderr: "pipe",
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: path.join(tmpDir, "plugins") },
 			},
 		);
 		expect(result.exitCode).toBe(0);
@@ -701,6 +717,7 @@ describe("CLI subprocess", () => {
 				stdin: Buffer.from(`${JSON.stringify(request)}\n`),
 				stdout: "pipe",
 				stderr: "pipe",
+				env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: path.join(tmpDir, "plugins") },
 			},
 		);
 		expect(result.exitCode).toBe(0);
@@ -708,6 +725,67 @@ describe("CLI subprocess", () => {
 		expect(out).toContain("Deploys go through the staging gate first.");
 		expect(out).not.toContain("agent-memory recall");
 	});
+
+	test(
+		"serve --mcp still exits after stdin closes even when a Pro plugin leaves a timer running",
+		{ timeout: 15_000 },
+		async () => {
+			// Regression test: a Pro plugin that opens a long-lived resource at MCP
+			// startup (e.g. a file watcher) must not be able to keep the process
+			// alive past stdin close. The shutdown hook here intentionally leaves
+			// a setInterval uncleared to prove the cli.ts `process.exit(0)`
+			// backstop works even when a plugin's own cleanup is incomplete.
+			const pluginDir = path.join(tmpDir, "plugin-shutdown-hang");
+			const startedMarker = path.join(tmpDir, "startup-ran");
+			const stoppedMarker = path.join(tmpDir, "shutdown-ran");
+			const manifest: AgentMemoryBundleManifestV1 = {
+				schemaVersion: 1,
+				id: OFFICIAL_BUNDLE_ID,
+				version: "1.0.0",
+				channel: "stable",
+				core: ">=0.4.0 <1.0.0",
+				pluginApi: 1,
+				entrypoint: "bundle/index.js",
+				plugins: ["agentmemory.hang-test"],
+			};
+			const source = Buffer.from(
+				`import * as fs from "node:fs";\nconst manifest=${JSON.stringify(manifest)};\nexport default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.hang-test",name:"Hang Test",version:"1.0.0",description:"Hang test",engine:">=0.4.0",entitlement:"commercial",commands:[],permissions:[],capabilities:[]},async activate(host){host.registerMcpStartup?.(()=>{setInterval(()=>{},1_000_000);fs.writeFileSync(${JSON.stringify(startedMarker)},"1")});host.registerMcpShutdown?.(()=>{fs.writeFileSync(${JSON.stringify(stoppedMarker)},"1")})},async healthCheck(){return {ok:true}}}]};\n`,
+			);
+			const artifact = encodePluginPackage({
+				schemaVersion: 1,
+				manifest,
+				files: [{ path: manifest.entrypoint, sha256: sha256(source), contentBase64: source.toString("base64") }],
+			});
+			const release: SignedPluginReleaseV1 = {
+				schemaVersion: 1,
+				manifest,
+				platform: "any",
+				architecture: "any",
+				packageSha256: sha256(artifact),
+				size: artifact.byteLength,
+				signature: { algorithm: "ed25519", keyId: "test", value: Buffer.alloc(64).toString("base64") },
+			};
+			const store = new FilePluginInstallStore(pluginDir);
+			await store.install(artifact, release);
+
+			const requests = [
+				{ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } },
+				{ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+			];
+			const result = Bun.spawnSync(
+				["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "serve", "--mcp", "--dir", tmpDir],
+				{
+					stdin: Buffer.from(`${requests.map((request) => JSON.stringify(request)).join("\n")}\n`),
+					stdout: "pipe",
+					stderr: "pipe",
+					env: { ...process.env, AGENT_MEMORY_PLUGIN_DIR: pluginDir },
+				},
+			);
+			expect(result.exitCode).toBe(0);
+			expect(fs.existsSync(startedMarker)).toBe(true);
+			expect(fs.existsSync(stoppedMarker)).toBe(true);
+		},
+	);
 
 	test("status shows config", async () => {
 		const result = Bun.spawnSync(

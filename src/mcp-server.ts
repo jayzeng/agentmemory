@@ -28,6 +28,7 @@ export type McpToolHandler = (input: Record<string, unknown>) => unknown | Promi
 export class StdioMcpServer {
 	private readonly tools = new Map<string, { definition: McpToolDefinition; handler: McpToolHandler }>();
 	private readonly startupHooks: Array<() => void | Promise<void>> = [];
+	private readonly shutdownHooks: Array<() => void | Promise<void>> = [];
 
 	constructor(private readonly version = "0.0.0") {}
 
@@ -37,6 +38,10 @@ export class StdioMcpServer {
 
 	addStartupHook(fn: () => void | Promise<void>): void {
 		this.startupHooks.push(fn);
+	}
+
+	addShutdownHook(fn: () => void | Promise<void>): void {
+		this.shutdownHooks.push(fn);
 	}
 
 	async start(): Promise<void> {
@@ -61,6 +66,17 @@ export class StdioMcpServer {
 			rl.on("close", resolve);
 			process.stdin.on("end", resolve);
 		});
+
+		// A hook may hold resources (e.g. fs.watch handles) that keep the event
+		// loop alive past stdin close — run them, but don't let one broken hook
+		// block the others or block process exit.
+		for (const hook of this.shutdownHooks) {
+			try {
+				await hook();
+			} catch {
+				// Non-fatal — the caller still hard-exits after start() returns.
+			}
+		}
 	}
 
 	private handleMessage(msg: Record<string, unknown>): void {

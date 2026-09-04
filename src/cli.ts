@@ -814,10 +814,15 @@ const STOP_NAG_REASON =
 
 /**
  * Stop hook handler — fires at the end of every assistant turn (not once per
- * session). Blocks at most once every STOP_NAG_INTERVAL turns per session_id
- * to nudge a memory-write check without being disruptive. Always allows the
- * stop (empty stdout) on missing session_id, `stop_hook_active` (Claude Code's
- * own re-entrancy signal — never block twice in a row), or any internal error.
+ * session). Continues the conversation at most once every STOP_NAG_INTERVAL
+ * turns per session_id to nudge a memory-write check without being
+ * disruptive. Uses `hookSpecificOutput.additionalContext` rather than
+ * `decision: "block"` — functionally identical (both go through the same
+ * `stop_hook_active` re-entry check and Claude Code's loop-protection cap),
+ * but additionalContext renders as "Stop hook feedback" in the transcript
+ * instead of the alarming-looking "Stop hook error". Always allows the stop
+ * (empty stdout) on missing session_id, `stop_hook_active` (Claude Code's own
+ * re-entrancy signal — never nag twice in a row), or any internal error.
  */
 async function cmdStop(_flags: Record<string, string | boolean>): Promise<void> {
 	const TIMEOUT_MS = 3_000;
@@ -835,7 +840,11 @@ async function cmdStop(_flags: Record<string, string | boolean>): Promise<void> 
 		const sessionId = typeof payload?.session_id === "string" ? payload.session_id : "";
 		if (!sessionId || payload?.stop_hook_active === true) return;
 		if (shouldNagOnStop(sessionId, Date.now())) {
-			process.stdout.write(JSON.stringify({ decision: "block", reason: STOP_NAG_REASON }));
+			process.stdout.write(
+				JSON.stringify({
+					hookSpecificOutput: { hookEventName: "Stop", additionalContext: STOP_NAG_REASON },
+				}),
+			);
 		}
 	})().catch(() => {
 		// Any failure in the Stop hook must be swallowed — never trap the user
@@ -3454,11 +3463,16 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
 			);
 		}
 		server.addStartupHook(() => runtime.runMcpStartup());
+		server.addShutdownHook(() => runtime.runMcpShutdown());
 	} catch {
 		// Pro not installed or failed to load — serve with core tools only.
 	}
 
 	await server.start();
+	// Hard backstop: a Pro plugin's fs.watch handles (or any other resource
+	// that keeps the event loop alive) must never prevent this process from
+	// exiting once stdin has closed.
+	process.exit(0);
 }
 
 // ---------------------------------------------------------------------------

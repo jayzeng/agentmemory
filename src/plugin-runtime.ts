@@ -144,6 +144,7 @@ export class InstalledPluginRuntimeV1 {
 	private readonly contextProviders: RegisteredContextProvider[] = [];
 	private readonly mcpTools: PluginMcpToolV1[] = [];
 	private readonly mcpStartupHooks: Array<() => void | Promise<void>> = [];
+	private readonly mcpShutdownHooks: Array<() => void | Promise<void>> = [];
 	private loaded = false;
 
 	constructor(private readonly options: PluginRuntimeOptionsV1) {
@@ -304,6 +305,10 @@ export class InstalledPluginRuntimeV1 {
 		for (const hook of this.mcpStartupHooks) await hook();
 	}
 
+	async runMcpShutdown(): Promise<void> {
+		for (const hook of this.mcpShutdownHooks) await hook();
+	}
+
 	private createHost(manifest: AgentMemoryPluginManifestV1): AgentMemoryPluginHostV1 {
 		const descriptors = new Map(manifest.commands.map((command) => [command.name, command]));
 		const stateRoot = path.join(this.store.root, "state");
@@ -385,6 +390,9 @@ export class InstalledPluginRuntimeV1 {
 			},
 			registerMcpStartup: (fn) => {
 				this.mcpStartupHooks.push(fn);
+			},
+			registerMcpShutdown: (fn) => {
+				this.mcpShutdownHooks.push(fn);
 			},
 			getStateDirectory: () => stateDirectory,
 			getMemoryDirectory: () => {

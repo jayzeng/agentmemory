@@ -2727,6 +2727,55 @@ describe("temporary plugin activation and runtime", () => {
 		}
 	});
 
+	test("runs MCP shutdown hooks registered lazily inside a startup hook", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-mcp-shutdown-"));
+		try {
+			const manifest: AgentMemoryBundleManifestV1 = {
+				...testBundleManifest("1.0.0"),
+				plugins: ["agentmemory.runtime-test"],
+			};
+			// Mirrors the real-world shape (a file watcher started at MCP startup,
+			// registering its own cleanup on shutdown so a serve --mcp process
+			// doesn't hang forever on an open handle).
+			const source = Buffer.from(
+				`const manifest=${JSON.stringify(manifest)};export default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.runtime-test",name:"Runtime Test",version:"1.0.0",description:"Runtime test",engine:">=0.4.0",entitlement:"commercial",commands:[],permissions:[],capabilities:[]},async activate(host){let closed=false;globalThis.__runtimeTestClosed=()=>closed;host.registerMcpStartup?.(()=>{host.registerMcpShutdown?.(()=>{closed=true})})},async healthCheck(){return {ok:true}}}]};\n`,
+			);
+			const artifact = encodePluginPackage({
+				schemaVersion: 1,
+				manifest,
+				files: [{ path: manifest.entrypoint, sha256: sha256(source), contentBase64: source.toString("base64") }],
+			});
+			const release: SignedPluginReleaseV1 = {
+				schemaVersion: 1,
+				manifest,
+				platform: "any",
+				architecture: "any",
+				packageSha256: sha256(artifact),
+				size: artifact.byteLength,
+				signature: { algorithm: "ed25519", keyId: "test", value: Buffer.alloc(64).toString("base64") },
+			};
+			const store = new FilePluginInstallStore(root);
+			await store.install(artifact, release);
+			const backend = new FakePluginBackend();
+			const runtime = new InstalledPluginRuntimeV1({ coreVersion: "0.4.13", store, backend });
+			await runtime.load();
+
+			// Shutdown before startup: no hook has been registered yet, so this
+			// must be a no-op rather than throwing.
+			await expect(runtime.runMcpShutdown()).resolves.toBeUndefined();
+
+			await runtime.runMcpStartup();
+			const closedFlag = (globalThis as Record<string, unknown>).__runtimeTestClosed as () => boolean;
+			expect(closedFlag()).toBe(false);
+
+			await runtime.runMcpShutdown();
+			expect(closedFlag()).toBe(true);
+		} finally {
+			delete (globalThis as Record<string, unknown>).__runtimeTestClosed;
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test("rejects an MCP tool registered with a capability the plugin never declared", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-mcp-undeclared-"));
 		try {
