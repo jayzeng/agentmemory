@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-09-04
+
+### Fixed
+
+- `upsertClaudeHookGroup` now recognizes legacy, pre-`HOOK_MARKER_JSON` hook entries by command string without collapsing a whole duplicate group — an unrelated hand-added hook sharing that group is preserved, and duplicate entries within a single group are deduplicated down to one instead of both being individually "fixed" in place. Clearing a group's stale `matcher` is now scoped to groups that are exclusively agent-memory's.
+- `removeClaudeHookGroup` (used by downgrade from per-turn to stable, and by full uninstall) now matches legacy pre-marker hooks the same way install already does, so downgrading no longer reports success while leaving a legacy `UserPromptSubmit` hook active.
+
 ## [0.5.4] - 2026-09-03
 
 ### Changed
