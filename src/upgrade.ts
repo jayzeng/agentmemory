@@ -4,7 +4,7 @@
  * Three consumers:
  *   1. `agent-memory upgrade` — explicit user command; checks and (optionally) installs.
  *   2. `agent-memory upgrade --background` — detached, non-interactive; checks, then
- *      installs any target whose `readUpgradePolicy()` value is `"auto"` (the default).
+ *      installs any target whose `readUpgradePolicy()` value is `"auto"` (an explicit opt-in).
  *      Spawned by `refreshUpgradeCacheBackground()` from `hook session-start`.
  *   3. `agent-memory hook session-start` — passive notice from a 24h-cached record,
  *      including the outcome of the last `--background` auto-install attempt.
@@ -26,6 +26,7 @@ import { compareVersions } from "./plugin-bootstrap.js";
 
 const NPM_PACKAGE_NAME = "myagentmemory";
 const NPM_LATEST_URL = `https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`;
+const CLI_RELEASE_NOTES_URL = "https://github.com/jayzeng/agentmemory/releases/latest";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const FETCH_TIMEOUT_MS = 1_500;
 
@@ -175,7 +176,7 @@ export interface UpgradePolicy {
 }
 
 const UPGRADE_POLICY_FILENAME = "upgrade-policy.json";
-const UPGRADE_POLICY_DEFAULT: UpgradePolicy = { cli: "auto", plugin: "auto" };
+const UPGRADE_POLICY_DEFAULT: UpgradePolicy = { cli: "notify", plugin: "notify" };
 
 function upgradePolicyPath(): string {
 	return path.join(getMemoryDir(), "state", UPGRADE_POLICY_FILENAME);
@@ -188,10 +189,10 @@ function isPolicyValue(value: unknown): value is UpgradePolicyValue {
 /**
  * Resolve the persisted auto-upgrade policy.
  * Precedence per target: `AGENT_MEMORY_AUTO_UPGRADE_{CLI,PLUGIN}` env var →
- * `<memoryDir>/state/upgrade-policy.json` → default `"auto"`.
+ * `<memoryDir>/state/upgrade-policy.json` → default `"notify"`.
  *
  * `existed` tells callers whether the policy file was already on disk —
- * used to fire a one-time "auto-upgrade is on" notice on first read.
+ * used to fire a one-time update-policy notice on first read.
  */
 export function readUpgradePolicy(): UpgradePolicy & { existed: boolean } {
 	let stored: Partial<UpgradePolicy> = {};
@@ -456,6 +457,44 @@ export async function checkForUpgrades(opts: CheckOptions): Promise<UpgradeStatu
 	};
 }
 
+function displayWidth(value: string): number {
+	let width = 0;
+	for (const character of value) {
+		if (/\p{Mark}/u.test(character) || character === "\uFE0F") continue;
+		width += /\p{Extended_Pictographic}/u.test(character) ? 2 : 1;
+	}
+	return width;
+}
+
+function renderNoticeBox(lines: string[]): string {
+	const contentWidth = Math.max(...lines.map(displayWidth));
+	const border = "─".repeat(contentWidth + 2);
+	return [
+		`╭${border}╮`,
+		...lines.map((line) => `│ ${line}${" ".repeat(contentWidth - displayWidth(line))} │`),
+		`╰${border}╯`,
+	].join("\n");
+}
+
+function formatAvailableUpgradeNotice(status: UpgradeStatus): string {
+	const lines: string[] = [];
+	if (status.cli.upgradeAvailable) {
+		lines.push(`✨ Update available! ${status.cli.current} -> ${status.cli.latest ?? "new"}`);
+		if (status.plugin.upgradeAvailable) {
+			lines.push(`AgentMemory Pro ${status.plugin.current ?? "?"} -> ${status.plugin.latest ?? "new"}`);
+		}
+	} else {
+		lines.push(
+			`✨ Update available! AgentMemory Pro ${status.plugin.current ?? "?"} -> ${status.plugin.latest ?? "new"}`,
+		);
+	}
+	lines.push("Run agent-memory upgrade to update.");
+	if (status.cli.upgradeAvailable) {
+		lines.push("", "See full release notes:", CLI_RELEASE_NOTES_URL);
+	}
+	return renderNoticeBox(lines);
+}
+
 /**
  * `cache` (when passed) lets this distinguish a plain "notify" signal from the
  * outcome of the last `--background` auto-install attempt for that target:
@@ -464,32 +503,62 @@ export async function checkForUpgrades(opts: CheckOptions): Promise<UpgradeStatu
  *   - failed → surface the error and point at the manual command
  *   - succeeded and already caught up (this process's own version matches) → silent
  */
-export function formatUpgradeNotice(status: UpgradeStatus, cache?: UpgradeCache | null): string | null {
+export function formatUpgradeNotice(
+	status: UpgradeStatus,
+	cache?: UpgradeCache | null,
+	policy?: Pick<UpgradePolicy, "cli" | "plugin">,
+): string | null {
 	const parts: string[] = [];
 	let needsManualRun = false;
+	let reportedAutoOutcome = false;
+	const cliEnabled = policy?.cli !== "off";
+	const pluginEnabled = policy?.plugin !== "off";
+	const cliUpgradeAvailable = cliEnabled && status.cli.upgradeAvailable;
+	const pluginUpgradeAvailable = pluginEnabled && status.plugin.upgradeAvailable;
 
-	if (cache?.cliAuto && !cache.cliAuto.ok) {
+	if (cliEnabled && cache?.cliAuto && !cache.cliAuto.ok) {
 		parts.push(`CLI auto-upgrade failed (${cache.cliAuto.error ?? "unknown error"})`);
 		needsManualRun = true;
-	} else if (cache?.cliAuto?.ok && cache.cliAuto.version && cache.cliAuto.version !== status.cli.current) {
+		reportedAutoOutcome = true;
+	} else if (
+		cliEnabled &&
+		cache?.cliAuto?.ok &&
+		cache.cliAuto.version &&
+		cache.cliAuto.version !== status.cli.current
+	) {
 		parts.push(
 			`CLI auto-upgraded → ${cache.cliAuto.version} (restart any long-running agent-memory process to use it)`,
 		);
-	} else if (status.cli.upgradeAvailable) {
+		reportedAutoOutcome = true;
+	} else if (cliUpgradeAvailable) {
 		parts.push(`CLI ${status.cli.current} → ${status.cli.latest ?? "new"}`);
 		needsManualRun = true;
 	}
 
-	if (cache?.pluginAuto && !cache.pluginAuto.ok) {
+	if (pluginEnabled && cache?.pluginAuto && !cache.pluginAuto.ok) {
 		parts.push(`Pro auto-upgrade failed (${cache.pluginAuto.error ?? "unknown error"})`);
 		needsManualRun = true;
-	} else if (cache?.pluginAuto?.ok && cache.pluginAuto.version && cache.pluginAuto.version !== status.plugin.current) {
+		reportedAutoOutcome = true;
+	} else if (
+		pluginEnabled &&
+		cache?.pluginAuto?.ok &&
+		cache.pluginAuto.version &&
+		cache.pluginAuto.version !== status.plugin.current
+	) {
 		parts.push(`Pro auto-upgraded → ${cache.pluginAuto.version}`);
-	} else if (status.plugin.upgradeAvailable) {
+		reportedAutoOutcome = true;
+	} else if (pluginUpgradeAvailable) {
 		parts.push(`Pro ${status.plugin.current ?? "?"} → ${status.plugin.latest ?? "new"}`);
 		needsManualRun = true;
 	}
 
 	if (!parts.length) return null;
+	if (needsManualRun && !reportedAutoOutcome) {
+		return formatAvailableUpgradeNotice({
+			...status,
+			cli: { ...status.cli, upgradeAvailable: cliUpgradeAvailable },
+			plugin: { ...status.plugin, upgradeAvailable: pluginUpgradeAvailable },
+		});
+	}
 	return `agent-memory: ${parts.join("; ")}${needsManualRun ? ". Run: agent-memory upgrade" : ""}`;
 }

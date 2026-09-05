@@ -529,6 +529,61 @@ describe("CLI subprocess", () => {
 		expect(stdout).toContain("Today's dynamic entry");
 	});
 
+	test(
+		"hook session-start renders cached updates as a stderr banner without corrupting context",
+		{ timeout: 15_000 },
+		() => {
+			fs.writeFileSync(path.join(tmpDir, "MEMORY.md"), "Durable fact", "utf-8");
+			const stateDir = path.join(tmpDir, "state");
+			fs.mkdirSync(stateDir, { recursive: true });
+			fs.writeFileSync(
+				path.join(stateDir, "upgrade-policy.json"),
+				`${JSON.stringify({ cli: "notify", plugin: "notify" })}\n`,
+				"utf-8",
+			);
+			fs.writeFileSync(
+				path.join(stateDir, "upgrade-check.json"),
+				`${JSON.stringify({
+					checkedAt: new Date().toISOString(),
+					cliCurrent: PACKAGE_VERSION,
+					cliLatest: "99.0.0",
+					pluginCurrent: null,
+					pluginLatest: null,
+				})}\n`,
+				"utf-8",
+			);
+
+			const result = Bun.spawnSync(
+				[
+					"bun",
+					"run",
+					path.join(__dirname, "..", "src", "cli.ts"),
+					"hook",
+					"session-start",
+					"--agent",
+					"claude",
+					"--dir",
+					tmpDir,
+				],
+				{
+					stdout: "pipe",
+					stderr: "pipe",
+					env: { ...process.env, AGENT_MEMORY_UPGRADE_BACKGROUND: "1" },
+				},
+			);
+			expect(result.exitCode).toBe(0);
+			const stdout = result.stdout.toString();
+			const stderr = result.stderr.toString();
+			expect(stdout).toContain("Durable fact");
+			expect(stdout).not.toContain("Update available");
+			expect(stderr).toContain(`✨ Update available! ${PACKAGE_VERSION} -> 99.0.0`);
+			expect(stderr).toContain("Run agent-memory upgrade to update.");
+			expect(stderr).toContain("https://github.com/jayzeng/agentmemory/releases/latest");
+			expect(stderr).toContain("╭");
+			expect(stderr).toContain("╯");
+		},
+	);
+
 	function runHookStop(sessionId: string, stopHookActive = false) {
 		return Bun.spawnSync(
 			[
@@ -1630,7 +1685,7 @@ describe("CLI subprocess", () => {
 		fs.rmSync(homeDir, { recursive: true, force: true });
 	});
 
-	test("upgrade policy defaults to auto and can be set per-target", () => {
+	test("upgrade policy defaults to notify and can be set per-target", () => {
 		const readPolicy = () =>
 			Bun.spawnSync(
 				["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "upgrade", "policy", "--dir", tmpDir, "--json"],
@@ -1639,7 +1694,7 @@ describe("CLI subprocess", () => {
 
 		const initial = readPolicy();
 		expect(initial.exitCode).toBe(0);
-		expect(JSON.parse(initial.stdout.toString())).toEqual({ cli: "auto", plugin: "auto" });
+		expect(JSON.parse(initial.stdout.toString())).toEqual({ cli: "notify", plugin: "notify" });
 
 		const setResult = Bun.spawnSync(
 			[
@@ -1657,10 +1712,10 @@ describe("CLI subprocess", () => {
 			{ stdout: "pipe", stderr: "pipe" },
 		);
 		expect(setResult.exitCode).toBe(0);
-		expect(JSON.parse(setResult.stdout.toString())).toEqual({ cli: "off", plugin: "auto" });
+		expect(JSON.parse(setResult.stdout.toString())).toEqual({ cli: "off", plugin: "notify" });
 
 		const after = readPolicy();
-		expect(JSON.parse(after.stdout.toString())).toEqual({ cli: "off", plugin: "auto" });
+		expect(JSON.parse(after.stdout.toString())).toEqual({ cli: "off", plugin: "notify" });
 	});
 
 	test("upgrade policy rejects an invalid value", () => {

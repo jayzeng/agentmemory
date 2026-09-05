@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Cached session-start update notices now use a Codex-style bordered banner with the installed and latest Core versions, a copy-paste `agent-memory upgrade` command, and a link to the full Core release notes. New setups default to notify-before-install instead of automatic installation; `agent-memory upgrade policy auto` remains available as an explicit opt-in. The banner stays on stderr so hook context and machine-readable stdout remain clean.
+
 ## [0.5.5] - 2026-09-04
 
 ### Fixed

@@ -224,6 +224,7 @@ If doctor came back mostly green — either because you just finished setup or b
    ```bash
    agent-memory upgrade --check
    ```
+   Managed session-start hooks also check in a detached process at most once every 24 hours. New setups notify before installing; use `agent-memory upgrade policy auto` to opt into automatic Core and Pro updates, or `agent-memory upgrade policy off` to disable checks.
 
 Close the loop by pointing at `agent-memory status` (quick health readout) and `agent-memory doctor` (deeper diagnostic) as the two commands to reach for any time something feels off, and `agent-memory tutorial` as a 3-minute guided walkthrough that runs entirely in a throwaway sandbox if the human wants a no-risk second pass through all of this themselves.
 

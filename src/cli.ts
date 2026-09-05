@@ -3097,9 +3097,14 @@ async function cmdUpgrade(flags: Record<string, string | boolean>, positional: s
 	const refresh = hasFlag(flags, "refresh");
 	const onlyCli = hasFlag(flags, "cli");
 	const onlyPlugin = hasFlag(flags, "plugin");
-	const targetCli = onlyCli || !onlyPlugin;
-	const targetPlugin = onlyPlugin || !onlyCli;
+	const backgroundPolicy = background ? readUpgradePolicy() : null;
+	const targetCli = (onlyCli || !onlyPlugin) && backgroundPolicy?.cli !== "off";
+	const targetPlugin = (onlyPlugin || !onlyCli) && backgroundPolicy?.plugin !== "off";
 	const applyAll = hasFlag(flags, "yes") || background || !process.stdin.isTTY || !process.stdout.isTTY;
+	if (background && !targetCli && !targetPlugin) {
+		if (json) output({ action: "disabled" }, true);
+		return;
+	}
 
 	const pluginCurrent = await readPluginCurrentVersion();
 	const pluginProbe = targetPlugin ? await resolvePluginLatestHint() : { latest: null, updateAvailable: false };
@@ -3110,6 +3115,7 @@ async function cmdUpgrade(flags: Record<string, string | boolean>, positional: s
 		refresh,
 		pluginLatestHint: pluginProbe.latest,
 		pluginUpgradeAvailable: pluginProbe.updateAvailable,
+		...(targetCli ? {} : { fetchCliLatest: async () => null }),
 	});
 
 	if (checkOnly) {
@@ -3119,7 +3125,7 @@ async function cmdUpgrade(flags: Record<string, string | boolean>, positional: s
 	}
 
 	if (background) {
-		const policy = readUpgradePolicy();
+		const policy = backgroundPolicy ?? readUpgradePolicy();
 		const { cliAuto, pluginAuto } = await runAutoUpgrade(status, policy, pluginCurrent, quiet);
 		writeUpgradeCache({
 			checkedAt: status.checkedAt,
@@ -3739,7 +3745,7 @@ async function main() {
 					// only ever fires once — the file's mere existence is the "seen" flag.
 					writeUpgradePolicy({ cli: policy.cli, plugin: policy.plugin });
 					console.error(
-						"agent-memory: auto-upgrade is on by default (CLI + Pro plugin). Disable with: agent-memory upgrade policy off",
+						"agent-memory: update checks are on (CLI + Pro); you will be notified before anything installs. Change with: agent-memory upgrade policy auto|off",
 					);
 				}
 				const cache = readUpgradeCache();
@@ -3749,10 +3755,14 @@ async function main() {
 						pluginCurrent: cache.pluginCurrent,
 						cacheOnly: true,
 					});
-					const notice = formatUpgradeNotice(status, cache);
+					const notice = formatUpgradeNotice(status, cache, policy);
 					if (notice) console.error(notice);
 				}
-				if (!isCacheFresh(cache) && !process.env.AGENT_MEMORY_UPGRADE_BACKGROUND) {
+				if (
+					(policy.cli !== "off" || policy.plugin !== "off") &&
+					!isCacheFresh(cache) &&
+					!process.env.AGENT_MEMORY_UPGRADE_BACKGROUND
+				) {
 					refreshUpgradeCacheBackground();
 				}
 			} catch {

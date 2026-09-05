@@ -71,7 +71,7 @@ export const COMMAND_DESCRIPTIONS: Record<(typeof COMMANDS)[number], string> = {
 	dashboard: "open the private local Memory Dashboard",
 	plugin: "discover, install, update, or remove optional official plugins",
 	serve: "run as a Model Context Protocol (MCP) server over stdio",
-	upgrade: "check for, and auto-install by default, newer agent-memory CLI and Pro plugin releases",
+	upgrade: "check for and install newer agent-memory CLI and Pro plugin releases; session starts notify by default",
 	version: "print the installed agent-memory version",
 	help: "show this command overview",
 };
@@ -358,7 +358,7 @@ const COMMAND_USAGE: Record<string, string> = {
 	plugin:
 		"agent-memory plugin <list|status|install|update|uninstall|manage> [--channel stable] [--yes] [--no-browser]",
 	upgrade:
-		"agent-memory upgrade [--check] [--yes] [--cli|--plugin] [--refresh] [--json]\n  agent-memory upgrade policy [off|notify|auto] [--cli|--plugin] [--json]  (default: auto for both)",
+		"agent-memory upgrade [--check] [--yes] [--cli|--plugin] [--refresh] [--json]\n  agent-memory upgrade policy [off|notify|auto] [--cli|--plugin] [--json]  (default: notify for both)",
 	version: "agent-memory version",
 	help: "agent-memory help [<command>]",
 };

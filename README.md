@@ -189,6 +189,8 @@ Run `agent-memory help` for the full generated list, or `agent-memory <command> 
 
 Global flags: `--dir <path>` (override directory), `--json` (machine output), `--help`, `--version`
 
+With managed session-start hooks installed, AgentMemory checks for Core and Pro updates in a detached process at most once every 24 hours. New setups default to `notify`: an available Core release appears on the next session as a bordered stderr notice with the installed/latest versions, `agent-memory upgrade`, and the full release notes link. Use `agent-memory upgrade policy auto` to opt into background installation, or `agent-memory upgrade policy off` to disable update checks.
+
 ### memory_search modes
 
 | Mode | Speed | Method | Best for |

@@ -3064,10 +3064,10 @@ describe("upgrade policy", () => {
 	beforeEach(setupTmpDir);
 	afterEach(cleanupTmpDir);
 
-	test("defaults to auto for both targets when unset", () => {
+	test("defaults to notify for both targets when unset", () => {
 		const policy = readUpgradePolicy();
-		expect(policy.cli).toBe("auto");
-		expect(policy.plugin).toBe("auto");
+		expect(policy.cli).toBe("notify");
+		expect(policy.plugin).toBe("notify");
 		expect(policy.existed).toBe(false);
 	});
 
@@ -3075,7 +3075,7 @@ describe("upgrade policy", () => {
 		writeUpgradePolicy({ cli: "off" });
 		const policy = readUpgradePolicy();
 		expect(policy.cli).toBe("off");
-		expect(policy.plugin).toBe("auto"); // untouched target keeps its prior/default value
+		expect(policy.plugin).toBe("notify"); // untouched target keeps its prior/default value
 		expect(policy.existed).toBe(true);
 	});
 
@@ -3104,7 +3104,7 @@ describe("upgrade policy", () => {
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		fs.writeFileSync(file, JSON.stringify({ cli: "sometimes", plugin: "auto" }));
 		const policy = readUpgradePolicy();
-		expect(policy.cli).toBe("auto");
+		expect(policy.cli).toBe("notify");
 		expect(policy.plugin).toBe("auto");
 	});
 });
@@ -3186,9 +3186,37 @@ describe("checkForUpgrades", () => {
 			checkedAt: new Date().toISOString(),
 			fromCache: true,
 		});
-		expect(notice).toContain("CLI 0.4.17 → 0.5.0");
-		expect(notice).toContain("Pro 0.2.1 → new");
+		expect(notice).toContain("✨ Update available! 0.4.17 -> 0.5.0");
+		expect(notice).toContain("AgentMemory Pro 0.2.1 -> new");
 		expect(notice).toContain("agent-memory upgrade");
+		expect(notice).toContain("https://github.com/jayzeng/agentmemory/releases/latest");
+		expect(notice?.startsWith("╭")).toBe(true);
+		expect(notice?.endsWith("╯")).toBe(true);
+	});
+
+	test("formatUpgradeNotice gives Pro-only updates a compact banner without Core release notes", () => {
+		const notice = formatUpgradeNotice({
+			cli: { current: "0.5.0", latest: "0.5.0", upgradeAvailable: false },
+			plugin: { current: "0.2.1", latest: "0.3.0", upgradeAvailable: true },
+			checkedAt: new Date().toISOString(),
+			fromCache: true,
+		});
+		expect(notice).toContain("✨ Update available! AgentMemory Pro 0.2.1 -> 0.3.0");
+		expect(notice).toContain("Run agent-memory upgrade to update.");
+		expect(notice).not.toContain("releases/latest");
+	});
+
+	test("formatUpgradeNotice suppresses targets whose passive policy is off", () => {
+		const status = {
+			cli: { current: "0.4.17", latest: "0.5.0", upgradeAvailable: true },
+			plugin: { current: "0.2.1", latest: "0.3.0", upgradeAvailable: true },
+			checkedAt: new Date().toISOString(),
+			fromCache: true,
+		};
+		const proOnly = formatUpgradeNotice(status, null, { cli: "off", plugin: "notify" });
+		expect(proOnly).toContain("AgentMemory Pro 0.2.1 -> 0.3.0");
+		expect(proOnly).not.toContain("0.4.17");
+		expect(formatUpgradeNotice(status, null, { cli: "off", plugin: "off" })).toBeNull();
 	});
 
 	test("formatUpgradeNotice returns null when nothing is available", () => {
