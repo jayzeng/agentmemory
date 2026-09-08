@@ -17,9 +17,9 @@ AgentMemory can only recall a durable fact after some harness actually captures 
 
 `mechanizedExplicitRequestCoverage` measures the narrower question: for how many locally measured harnesses can AgentMemory deterministically surface an explicit user request to remember something? This is 50% (`claude` + `codex`).
 
-`mechanizedImmediateCoverage` remains stricter. A harness only counts when AgentMemory can deterministically observe both an explicit memory request and completed work as pending capture signals. A successful AgentMemory write must also clear the signal for the fully mechanized path to pass.
+`mechanizedImmediateCoverage` is stricter. A harness counts only when all three conditions are deterministically verified: an explicit memory request is surfaced, completed work creates a pending capture signal, and a verified AgentMemory write clears that signal.
 
-Codex reaches that stricter bar through two independent surfaces: `UserPromptSubmit` injects the explicit-request capture check, while the installed `Stop` hook reads the bounded persisted rollout through the Codex parser. The Stop adapter translates AgentMemory's shared capture decision into Codex's native `decision: "block"` plus non-empty `reason` continuation protocol; an empty Core decision or adapter failure fails open.
+Codex reaches that stricter bar through two surfaces that share Core semantics. `UserPromptSubmit` injects the explicit-request capture check. The mode-independent `Stop` hook invokes `agent-memory hook stop --agent codex` directly; Core reads the bounded persisted rollout through the Codex parser and, when uncaptured work remains, emits Codex's native `decision: "block"` plus non-empty `reason`. There is no adapter or additional runtime dependency. Empty/unusable evidence and `stop_hook_active` re-entry fail open.
 
 The expected baseline is now:
 
@@ -29,7 +29,7 @@ The expected baseline is now:
 - mechanized immediate coverage: 50% (`claude`, `codex`)
 - delegated harnesses: 1 (`pi` via `pi-memory`)
 
-The stricter number moves only because CI now proves both Codex completed-work detection and verified-write clearing, and the installer tests prove the Codex Stop protocol adapter is present, idempotent, repairable, and fail-open. Future host-specific mechanisms should raise the metric only with the same kind of executable evidence.
+The stricter number moves only because CI proves Codex completed-work detection, verified-write clearing, direct Stop installation, host-native continuation output, stable/per-turn behavior, idempotent reinstall, and uninstall. Future host-specific mechanisms should raise the metric only with the same kind of executable evidence.
 
 ## What this does not claim
 
