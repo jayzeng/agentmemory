@@ -11,14 +11,14 @@ const datasetUrl = new URL("../eval/datasets/external-feedback-v1.json", import.
 const expandedDatasetUrl = new URL("../eval/datasets/agent-memory-regression-v1.json", import.meta.url);
 
 describe("cross-harness capture reliability", () => {
-	test("measures partial Codex mechanization without overstating completed-work coverage", () => {
+	test("measures Claude and Codex as fully mechanized without overstating delegated Pi coverage", () => {
 		const report = runCaptureReliabilityEvaluation();
 		expect(report.passed).toBe(true);
 		expect(report.schemaVersion).toBe("capture-reliability-v1");
 		expect(report.metrics.measuredHarnesses).toBe(4);
 		expect(report.metrics.instructionCoverage).toBe(1);
 		expect(report.metrics.mechanizedExplicitRequestCoverage).toBe(0.5);
-		expect(report.metrics.mechanizedImmediateCoverage).toBe(0.25);
+		expect(report.metrics.mechanizedImmediateCoverage).toBe(0.5);
 		expect(report.metrics.delegatedHarnesses).toBe(1);
 
 		const claude = report.harnesses.find((result) => result.harness === "claude");
@@ -29,10 +29,10 @@ describe("cross-harness capture reliability", () => {
 
 		const codex = report.harnesses.find((result) => result.harness === "codex");
 		expect(codex?.instructionContract).toBe(true);
-		expect(codex?.enforcement).toBe("partially-mechanized");
+		expect(codex?.enforcement).toBe("mechanized");
 		expect(codex?.mechanizedExplicitRequest).toBe(true);
-		expect(codex?.mechanizedCompletedWork).toBeNull();
-		expect(codex?.mechanizedWriteClearsSignal).toBeNull();
+		expect(codex?.mechanizedCompletedWork).toBe(true);
+		expect(codex?.mechanizedWriteClearsSignal).toBe(true);
 
 		for (const harness of ["cursor", "qoder"]) {
 			const result = report.harnesses.find((entry) => entry.harness === harness);
