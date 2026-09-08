@@ -118,7 +118,9 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 		notes:
 			harness === "claude"
 				? claudeMechanism.notes
-				: ["Capture relies on the installed skill/checkpoint discipline; model compliance is not deterministically measured here."],
+				: [
+						"Capture relies on the installed skill/checkpoint discipline; model compliance is not deterministically measured here.",
+					],
 	}));
 	const pi: CaptureHarnessResult = {
 		harness: "pi",
@@ -128,15 +130,16 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 		mechanizedExplicitRequest: null,
 		mechanizedCompletedWork: null,
 		mechanizedWriteClearsSignal: null,
-		notes: ["Pi capture is delegated to the separately versioned pi-memory extension and is intentionally excluded from this repo's denominator."],
+		notes: [
+			"Pi capture is delegated to the separately versioned pi-memory extension and is intentionally excluded from this repo's denominator.",
+		],
 	};
 	const harnesses = [...localResults, pi];
 	const measured = harnesses.filter((result) => result.measured);
 	const instructionCoverage = measured.filter((result) => result.instructionContract).length / measured.length;
 	const mechanizedImmediateCoverage =
-		measured.filter(
-			(result) => result.mechanizedExplicitRequest === true && result.mechanizedCompletedWork === true,
-		).length / measured.length;
+		measured.filter((result) => result.mechanizedExplicitRequest === true && result.mechanizedCompletedWork === true)
+			.length / measured.length;
 	const passed =
 		instructionCoverage === 1 &&
 		claudeMechanism.mechanizedExplicitRequest === true &&
