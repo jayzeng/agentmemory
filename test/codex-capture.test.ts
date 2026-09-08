@@ -16,19 +16,40 @@ function writeRollout(items: unknown[]): string {
 }
 
 function meta(sessionId = SESSION): unknown {
-	return { timestamp: "2026-09-08T22:00:00Z", type: "session_meta", payload: { session_id: sessionId, id: sessionId, cwd: "/repo", source: "cli" } };
+	return {
+		timestamp: "2026-09-08T22:00:00Z",
+		type: "session_meta",
+		payload: { session_id: sessionId, id: sessionId, cwd: "/repo", source: "cli" },
+	};
 }
 
 function user(message: string): unknown {
-	return { timestamp: "2026-09-08T22:00:01Z", ordinal: 1, type: "event_msg", payload: { type: "user_message", message, kind: "plain" } };
+	return {
+		timestamp: "2026-09-08T22:00:01Z",
+		ordinal: 1,
+		type: "event_msg",
+		payload: { type: "user_message", message, kind: "plain" },
+	};
 }
 
 function call(type: "function_call" | "custom_tool_call", name: string, callId: string, args: unknown): unknown {
-	return { timestamp: "2026-09-08T22:00:02Z", type: "response_item", payload: { type, name, call_id: callId, arguments: typeof args === "string" ? args : JSON.stringify(args) } };
+	return {
+		timestamp: "2026-09-08T22:00:02Z",
+		type: "response_item",
+		payload: { type, name, call_id: callId, arguments: typeof args === "string" ? args : JSON.stringify(args) },
+	};
 }
 
-function output(type: "function_call_output" | "custom_tool_call_output", callId: string, value: unknown): unknown {
-	return { timestamp: "2026-09-08T22:00:03Z", type: "response_item", payload: { type, call_id: callId, output: value } };
+function output(
+	type: "function_call_output" | "custom_tool_call_output",
+	callId: string,
+	value: unknown,
+): unknown {
+	return {
+		timestamp: "2026-09-08T22:00:03Z",
+		type: "response_item",
+		payload: { type, call_id: callId, output: value },
+	};
 }
 
 describe("Codex rollout capture parser", () => {
@@ -73,8 +94,14 @@ describe("Codex rollout capture parser", () => {
 			meta(),
 			call("custom_tool_call", "apply_patch", "patch-1", "*** Begin Patch\n*** End Patch"),
 			output("custom_tool_call_output", "patch-1", { content: "Done!", success: true }),
-			call("function_call", "exec_command", "write-1", { cmd: 'agent-memory write --content "staging uses PostgreSQL"' }),
-			output("function_call_output", "write-1", { content: "Chunk ID: abc\nProcess exited with code 0\nFinal output:\nAppended to daily log: /memory/daily/2026-09-08.md", success: true }),
+			call("function_call", "exec_command", "write-1", {
+				cmd: 'agent-memory write --content "staging uses PostgreSQL"',
+			}),
+			output("function_call_output", "write-1", {
+				content:
+					"Chunk ID: abc\nProcess exited with code 0\nFinal output:\nAppended to daily log: /memory/daily/2026-09-08.md",
+				success: true,
+			}),
 		]);
 		try {
 			expect(checkCaptureTranscript(file, SESSION)?.pendingSignal).toBeUndefined();
