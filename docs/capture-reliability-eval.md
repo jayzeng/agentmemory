@@ -6,7 +6,8 @@ AgentMemory can only recall a durable fact after some harness actually captures 
 
 ## Enforcement classes
 
-- **mechanized** — AgentMemory itself observes a high-confidence capture opportunity and can deterministically verify whether a successful memory write cleared it.
+- **mechanized** — AgentMemory itself observes the evaluated capture opportunities and can deterministically verify the relevant path.
+- **partially-mechanized** — at least one capture opportunity is deterministically surfaced by AgentMemory, while other important capture paths remain instruction-guided or unproven. Codex is in this class because `UserPromptSubmit` now injects an explicit-memory-request capture check, but completed-work capture is not yet proven against Codex transcripts.
 - **instruction-guided** — the installed skill tells the model to capture explicit memory requests and verified outcomes, but this repository cannot deterministically prove that a model followed the instruction on a real turn.
 - **delegated** — capture behavior is owned by another independently versioned package. Pi is delegated to `pi-memory`, so this repository does not count it in its measured denominator.
 
@@ -14,16 +15,19 @@ AgentMemory can only recall a durable fact after some harness actually captures 
 
 `instructionCoverage` is the fraction of locally measured harnesses whose shipped skill contains the required capture discipline: explicit memory requests are saved in-turn, write success is verified, and duplicate/routine notes are avoided.
 
-`mechanizedImmediateCoverage` is stricter. A harness only counts when AgentMemory can deterministically observe both an explicit memory request and completed work as pending capture signals. A successful AgentMemory write must also clear the signal for the mechanized path to pass.
+`mechanizedExplicitRequestCoverage` measures the narrower question: for how many locally measured harnesses can AgentMemory deterministically surface an explicit user request to remember something? After the Codex `UserPromptSubmit` capture check, this is 50% (`claude` + `codex`).
 
-The initial expected baseline after the reliable Claude Stop capture check is:
+`mechanizedImmediateCoverage` remains stricter. A harness only counts when AgentMemory can deterministically observe both an explicit memory request and completed work as pending capture signals. A successful AgentMemory write must also clear the signal for the fully mechanized path to pass.
+
+The expected baseline after the Codex explicit-request change is:
 
 - measured local harnesses: 4 (`claude`, `codex`, `cursor`, `qoder`)
 - instruction coverage: 100%
+- mechanized explicit-request coverage: 50% (`claude`, `codex`)
 - mechanized immediate coverage: 25% (`claude` only)
 - delegated harnesses: 1 (`pi` via `pi-memory`)
 
-The 25% value is not a failure of the evaluator. It is the remaining product gap made measurable. Future host-specific mechanisms should raise this number only when CI can prove the behavior, not when documentation merely claims it.
+The gap between 50% explicit-request coverage and 25% full immediate coverage is intentional and informative: Codex completed-work capture still needs a deterministic mechanism and compatibility proof. Future host-specific mechanisms should raise the stricter number only when CI can prove the behavior, not when documentation merely claims it.
 
 ## What this does not claim
 
