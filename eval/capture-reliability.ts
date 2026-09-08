@@ -73,6 +73,36 @@ function toolExchange(name: string, id: string, input: unknown, content: string)
 	];
 }
 
+const CODEX_SESSION = "11111111-2222-3333-4444-555555555555";
+
+function codexMeta(): unknown {
+	return {
+		timestamp: "2026-09-08T22:00:00Z",
+		type: "session_meta",
+		payload: { session_id: CODEX_SESSION, id: CODEX_SESSION, cwd: "/repo", source: "cli" },
+	};
+}
+
+function codexCall(type: "function_call" | "custom_tool_call", name: string, callId: string, args: unknown): unknown {
+	return {
+		timestamp: "2026-09-08T22:00:01Z",
+		type: "response_item",
+		payload: { type, name, call_id: callId, arguments: typeof args === "string" ? args : JSON.stringify(args) },
+	};
+}
+
+function codexOutput(
+	type: "function_call_output" | "custom_tool_call_output",
+	callId: string,
+	value: unknown,
+): unknown {
+	return {
+		timestamp: "2026-09-08T22:00:02Z",
+		type: "response_item",
+		payload: { type, call_id: callId, output: value },
+	};
+}
+
 function evaluateClaudeMechanism(): Pick<
 	CaptureHarnessResult,
 	"mechanizedExplicitRequest" | "mechanizedCompletedWork" | "mechanizedWriteClearsSignal" | "notes"
@@ -107,26 +137,58 @@ function evaluateClaudeMechanism(): Pick<
 	}
 }
 
-function evaluateCodexPromptMechanism(): Pick<CaptureHarnessResult, "mechanizedExplicitRequest" | "notes"> {
-	const explicit = coreCaptureContextForQuery("Remember this: staging uses PostgreSQL.");
-	const negative = coreCaptureContextForQuery("Do not remember this: staging uses PostgreSQL.");
-	return {
-		mechanizedExplicitRequest:
-			explicit.some(
-				(section) =>
-					section.id === "core.capture.explicit-memory-request" &&
-					section.content.includes("Save the durable fact in this turn"),
-			) && negative.length === 0,
-		notes: [
-			"Codex UserPromptSubmit deterministically injects a Core capture check for explicit memory requests.",
-			"Completed-work capture remains instruction-guided until Codex transcript/Stop compatibility is proven.",
-		],
-	};
+function evaluateCodexMechanism(): Pick<
+	CaptureHarnessResult,
+	"mechanizedExplicitRequest" | "mechanizedCompletedWork" | "mechanizedWriteClearsSignal" | "notes"
+> {
+	const paths: string[] = [];
+	try {
+		const explicit = coreCaptureContextForQuery("Remember this: staging uses PostgreSQL.");
+		const negative = coreCaptureContextForQuery("Do not remember this: staging uses PostgreSQL.");
+		const completed = writeTranscript([
+			codexMeta(),
+			codexCall("custom_tool_call", "apply_patch", "patch-1", "*** Begin Patch\n*** End Patch"),
+			codexOutput("custom_tool_call_output", "patch-1", { content: "Done!", success: true }),
+		]);
+		paths.push(completed);
+		const cleared = writeTranscript([
+			codexMeta(),
+			codexCall("custom_tool_call", "apply_patch", "patch-1", "*** Begin Patch\n*** End Patch"),
+			codexOutput("custom_tool_call_output", "patch-1", { content: "Done!", success: true }),
+			codexCall("function_call", "exec_command", "write-1", {
+				cmd: 'agent-memory write --content "staging uses PostgreSQL"',
+			}),
+			codexOutput("function_call_output", "write-1", {
+				content:
+					"Chunk ID: abc\nProcess exited with code 0\nFinal output:\nAppended to daily log: /memory/daily/2026-09-08.md",
+				success: true,
+			}),
+		]);
+		paths.push(cleared);
+		const completedCheck = checkCaptureTranscript(completed, CODEX_SESSION);
+		const clearedCheck = checkCaptureTranscript(cleared, CODEX_SESSION);
+		return {
+			mechanizedExplicitRequest:
+				explicit.some(
+					(section) =>
+						section.id === "core.capture.explicit-memory-request" &&
+						section.content.includes("Save the durable fact in this turn"),
+				) && negative.length === 0,
+			mechanizedCompletedWork: Boolean(completedCheck?.pendingSignal),
+			mechanizedWriteClearsSignal: clearedCheck !== null && clearedCheck.pendingSignal === undefined,
+			notes: [
+				"Codex UserPromptSubmit deterministically injects a Core capture check for explicit memory requests.",
+				"Codex Stop uses the persisted rollout parser to detect completed apply_patch work and clears the signal after a verified AgentMemory write.",
+			],
+		};
+	} finally {
+		for (const transcript of paths) fs.rmSync(path.dirname(transcript), { recursive: true, force: true });
+	}
 }
 
 export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 	const claudeMechanism = evaluateClaudeMechanism();
-	const codexMechanism = evaluateCodexPromptMechanism();
+	const codexMechanism = evaluateCodexMechanism();
 	const localResults = LOCAL_SKILLS.map<CaptureHarnessResult>(({ harness, path: skillPath }) => {
 		if (harness === "claude") {
 			return {
@@ -143,12 +205,12 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 		if (harness === "codex") {
 			return {
 				harness,
-				enforcement: "partially-mechanized",
+				enforcement: "mechanized",
 				measured: true,
 				instructionContract: skillHasCaptureContract(skillPath),
 				mechanizedExplicitRequest: codexMechanism.mechanizedExplicitRequest,
-				mechanizedCompletedWork: null,
-				mechanizedWriteClearsSignal: null,
+				mechanizedCompletedWork: codexMechanism.mechanizedCompletedWork,
+				mechanizedWriteClearsSignal: codexMechanism.mechanizedWriteClearsSignal,
 				notes: codexMechanism.notes,
 			};
 		}
@@ -188,9 +250,11 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 	const passed =
 		instructionCoverage === 1 &&
 		mechanizedExplicitRequestCoverage === 0.5 &&
-		mechanizedImmediateCoverage === 0.25 &&
+		mechanizedImmediateCoverage === 0.5 &&
 		claudeMechanism.mechanizedWriteClearsSignal === true &&
 		codexMechanism.mechanizedExplicitRequest === true &&
+		codexMechanism.mechanizedCompletedWork === true &&
+		codexMechanism.mechanizedWriteClearsSignal === true &&
 		isExplicitMemoryRequest("Remember this: staging uses PostgreSQL.") &&
 		!isExplicitMemoryRequest("Do not remember this: staging uses PostgreSQL.");
 	return {
