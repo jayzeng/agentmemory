@@ -48,6 +48,31 @@ interface AgentMemoryServiceBackendOptions {
 	activate?: () => Promise<string>;
 }
 
+/**
+ * Posts an email to the Pro beta waitlist. Never throws — a flaky network
+ * must never fail `setup` or any other caller; the boolean tells the caller
+ * whether to report success.
+ */
+export async function submitWaitlistEmail(
+	email: string,
+	options?: { source?: string; apiOrigin?: string; fetchImplementation?: typeof fetch },
+): Promise<boolean> {
+	try {
+		const response = await (options?.fetchImplementation ?? globalThis.fetch)(
+			`${options?.apiOrigin ?? API_ORIGIN}/v1/account/waitlist`,
+			{
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ email, source: options?.source ?? "cli-setup" }),
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+			},
+		);
+		return response.ok;
+	} catch {
+		return false;
+	}
+}
+
 function cloneEntitlement(value: PluginEntitlementStatusV1): PluginEntitlementStatusV1 {
 	return structuredClone(value);
 }

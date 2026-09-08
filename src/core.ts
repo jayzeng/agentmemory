@@ -103,6 +103,49 @@ export function writeHookMode(mode: HookMode): void {
 }
 
 // ---------------------------------------------------------------------------
+// Waitlist state (has the user been asked about the Pro beta waitlist)
+// ---------------------------------------------------------------------------
+
+const WAITLIST_STATE_FILENAME = "waitlist-state.json";
+
+export interface WaitlistState {
+	asked: boolean;
+	joined: boolean;
+	email?: string;
+}
+
+const WAITLIST_STATE_DEFAULT: WaitlistState = { asked: false, joined: false };
+
+function waitlistStatePath(): string {
+	return path.join(MEMORY_DIR, WAITLIST_STATE_FILENAME);
+}
+
+/** Resolve whether/how the user has already responded to the Pro waitlist prompt. */
+export function readWaitlistState(): WaitlistState {
+	try {
+		const raw = fs.readFileSync(waitlistStatePath(), "utf-8");
+		const parsed = JSON.parse(raw) as Partial<WaitlistState>;
+		if (typeof parsed.asked === "boolean" && typeof parsed.joined === "boolean") {
+			return {
+				asked: parsed.asked,
+				joined: parsed.joined,
+				email: typeof parsed.email === "string" ? parsed.email : undefined,
+			};
+		}
+	} catch {}
+	return WAITLIST_STATE_DEFAULT;
+}
+
+/** Atomically persist the waitlist prompt outcome so `setup` never asks twice. */
+export function writeWaitlistState(state: WaitlistState): void {
+	fs.mkdirSync(MEMORY_DIR, { recursive: true });
+	const target = waitlistStatePath();
+	const temporary = `${target}.${process.pid}.tmp`;
+	fs.writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+	fs.renameSync(temporary, target);
+}
+
+// ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
