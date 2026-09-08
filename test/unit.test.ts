@@ -1495,6 +1495,24 @@ describe("parseQmdStatus", () => {
 		expect(result.lastUpdated).toBeNull();
 		expect(result.collectionFiles).toBeNull();
 	});
+
+	test("parses label-first qmd status without mistaking orphaned chunks for vectors", () => {
+		const stdout = [
+			"QMD Status",
+			"",
+			"Documents",
+			"  Total:    4212 files indexed",
+			"  Vectors:  24539 embedded",
+			"  Orphaned: 51 embedding chunks (0%) — run 'qmd cleanup'",
+			"  Pending:  1 need embedding (run 'qmd embed')",
+			"  Updated:  3m ago",
+		].join("\n");
+
+		const result = parseQmdStatus(stdout, "agent-memory");
+		expect(result.totalFiles).toBe(4212);
+		expect(result.vectorsEmbedded).toBe(24539);
+		expect(result.pendingEmbed).toBe(1);
+	});
 });
 
 // ==========================================================================
