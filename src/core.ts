@@ -1198,20 +1198,22 @@ export function parseQmdStatus(stdout: string, collectionName: string): QmdHealt
 
 	if (!stdout.trim()) return result;
 
-	// Total files across all collections
-	const totalFilesMatch = stdout.match(/(\d+)\s+(?:total\s+)?files?/i);
+	// Modern qmd prints label-first ("Vectors:  1375 embedded"); try that before the
+	// older value-first wording. Order matters for vectors: a bare value-first match
+	// would otherwise capture the "Orphaned: N embedding chunks" line instead.
+	const totalFilesMatch = stdout.match(/^\s*Total:\s*(\d+)/im) ?? stdout.match(/(\d+)\s+(?:total\s+)?files?/i);
 	if (totalFilesMatch) {
 		result.totalFiles = Number.parseInt(totalFilesMatch[1], 10);
 	}
 
 	// Vectors / embeddings
-	const vectorsMatch = stdout.match(/(\d+)\s+(?:vectors?|embeddings?)/i);
+	const vectorsMatch = stdout.match(/^\s*Vectors:\s*(\d+)/im) ?? stdout.match(/(\d+)\s+(?:vectors?|embeddings?)\b/i);
 	if (vectorsMatch) {
 		result.vectorsEmbedded = Number.parseInt(vectorsMatch[1], 10);
 	}
 
 	// Pending embed
-	const pendingMatch = stdout.match(/(\d+)\s+pending/i);
+	const pendingMatch = stdout.match(/^\s*Pending:\s*(\d+)/im) ?? stdout.match(/(\d+)\s+pending/i);
 	if (pendingMatch) {
 		result.pendingEmbed = Number.parseInt(pendingMatch[1], 10);
 	}
