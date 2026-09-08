@@ -420,6 +420,10 @@ function installPiMemoryDelegate(homeDir: string): HookInstallResult {
 }
 
 function uninstallPiMemoryDelegate(homeDir: string): HookInstallResult {
+	// agent-memory never owns this install, so it never runs `pi uninstall pi-memory` — but
+	// silently doing nothing would let an `agent-memory uninstall` report read as "fully cleaned
+	// up" while pi-memory keeps running. Phrase the reason distinctly when it's actually still
+	// active so callers (and cmdUninstall's step detail) can surface that honestly.
 	const stillActive = fs.existsSync(path.join(homeDir, ".pi", "agent", "memory"));
 	return {
 		key: "pi",
@@ -431,12 +435,21 @@ function uninstallPiMemoryDelegate(homeDir: string): HookInstallResult {
 	};
 }
 
+/**
+ * Idempotently upsert the agent-memory-managed hook group for `eventKey`
+ * (SessionStart or UserPromptSubmit) with `command`. Returns `{ changed,
+ * hadManaged }` so the caller can decide between "installed" / "updated" /
+ * "already installed" reasons.
+ */
 function upsertClaudeHookGroup(
 	hooks: Record<string, unknown>,
 	eventKey: string,
 	command: string,
 ): { changed: boolean; hadManaged: boolean } {
 	const groups = Array.isArray(hooks[eventKey]) ? [...(hooks[eventKey] as unknown[])] : [];
+
+	// Locate every agent-memory-owned hook entry — matched by marker, or by
+	// exact command string for legacy pre-marker installs — wherever it lives.
 	const owned: Array<{ group: Record<string, unknown>; hook: Record<string, unknown> }> = [];
 	for (const group of groups) {
 		if (!group || typeof group !== "object") continue;
@@ -448,11 +461,20 @@ function upsertClaudeHookGroup(
 			if (h[HOOK_MARKER_JSON] === true || h.command === command) owned.push({ group: g, hook: h });
 		}
 	}
+
 	if (owned.length === 0) {
+		// No existing managed hook anywhere — add a fresh group without a matcher so it fires on all harnesses.
 		groups.push({ hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }] });
 		hooks[eventKey] = groups;
 		return { changed: true, hadManaged: false };
 	}
+
+	// Keep the first owned entry in place — fixed up in place, preserving its
+	// identity so a no-op re-install reports unchanged — and remove every
+	// other owned entry from its own group's hooks array, whether it's a
+	// duplicate in another group or piled up alongside the keeper in the same
+	// group. Never delete a whole group, since it could carry unrelated
+	// hand-added hooks.
 	const keeper = owned[0];
 	let changed = false;
 	if (keeper.hook.command !== command) {
@@ -469,11 +491,18 @@ function upsertClaudeHookGroup(
 		if (idx !== -1) list.splice(idx, 1);
 		changed = true;
 	}
+
+	// Only clear the keeper's group matcher when that group is exclusively
+	// ours (no unrelated hooks left in it after dedup) — never when it also
+	// carries an unrelated hand-added hook.
 	const keeperList = keeper.group.hooks as unknown[];
 	if (keeperList.length === 1 && "matcher" in keeper.group) {
 		delete keeper.group.matcher;
 		changed = true;
 	}
+
+	// Drop any group left with zero hooks; never drop one that still has
+	// unrelated hooks in it.
 	const filtered = groups.filter((group) => {
 		if (!group || typeof group !== "object") return true;
 		const g = group as Record<string, unknown>;
@@ -483,6 +512,15 @@ function upsertClaudeHookGroup(
 	return { changed, hadManaged: true };
 }
 
+/**
+ * Remove all agent-memory-managed hook entries for `eventKey`. Used when
+ * downgrading from per-turn back to stable (drops UserPromptSubmit).
+ * `command`, when given, also matches legacy entries that predate
+ * HOOK_MARKER_JSON — the same broadened detection upsertClaudeHookGroup and
+ * hasClaudeHookGroup use — so a pre-marker install isn't left behind after a
+ * downgrade/uninstall that reports success.
+ * Returns true if anything was removed.
+ */
 function removeClaudeHookGroup(hooks: Record<string, unknown>, eventKey: string, command?: string): boolean {
 	const groups = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
 	if (groups.length === 0) return false;
@@ -517,6 +555,7 @@ function installClaudeCodeHook(homeDir: string, mode: HookMode = "per-turn"): Ho
 	const backup = backupOnce(settingsPath);
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
+
 	const session = upsertClaudeHookGroup(hooks, "SessionStart", sessionStartHookCommand("claude"));
 	let promptChanged = false;
 	let promptHadManaged = false;
@@ -527,8 +566,13 @@ function installClaudeCodeHook(homeDir: string, mode: HookMode = "per-turn"): Ho
 	} else {
 		promptChanged = removeClaudeHookGroup(hooks, "UserPromptSubmit", userPromptSubmitHookCommand("claude"));
 	}
+	// Stop backs the write side of memory with a periodic nudge. It is orthogonal
+	// to stable/per-turn context injection, so it is installed unconditionally.
 	const stop = upsertClaudeHookGroup(hooks, "Stop", stopHookCommand("claude"));
+	// Remove the ineffective PreCompact reminder from pre-release 0.5.0 installs.
+	// Claude Code does not inject plain hook stdout for that event.
 	const legacyPreCompactRemoved = removeClaudeHookGroup(hooks, "PreCompact");
+
 	if (!session.changed && !promptChanged && !stop.changed && !legacyPreCompactRemoved) {
 		return {
 			key: "claude",
@@ -583,6 +627,7 @@ function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookIns
 		HOOK_MARKER_END,
 	);
 	const block = lines.join("\n");
+
 	if (existing.includes(HOOK_MARKER_BEGIN)) {
 		const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const pattern = new RegExp(`${escapeRe(HOOK_MARKER_BEGIN)}[\\s\\S]*?${escapeRe(HOOK_MARKER_END)}`);
@@ -637,6 +682,9 @@ function installCursorRule(homeDir: string): void {
 	fs.writeFileSync(rulePath, CURSOR_RULE_BODY, "utf-8");
 }
 
+// Cursor's `sessionStart` hook (https://cursor.com/docs/agent/hooks) fires automatically when a
+// new conversation is created and can inject `additional_context` without the model choosing to
+// run anything — unlike the static .mdc rule above, this is a real, code-level guarantee.
 const CURSOR_HOOK_SCRIPT_RELATIVE = path.join("hooks", "agent-memory-session-start.js");
 
 const CURSOR_HOOK_SCRIPT_BODY = `#!/usr/bin/env node
@@ -672,17 +720,22 @@ function installCursorHook(homeDir: string): HookInstallResult {
 	const cursorDir = path.join(homeDir, ".cursor");
 	const scriptPath = path.join(cursorDir, CURSOR_HOOK_SCRIPT_RELATIVE);
 	const hooksJsonPath = path.join(cursorDir, "hooks.json");
+
+	// Cheap, harmless fallback for Cursor installs where hooks are disabled or unavailable.
 	installCursorRule(homeDir);
+
 	fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
 	const scriptChanged = !fs.existsSync(scriptPath) || fs.readFileSync(scriptPath, "utf-8") !== CURSOR_HOOK_SCRIPT_BODY;
 	if (scriptChanged) {
 		fs.writeFileSync(scriptPath, CURSOR_HOOK_SCRIPT_BODY, "utf-8");
 		fs.chmodSync(scriptPath, 0o755);
 	}
+
 	const alreadyRegistered = isCursorSessionStartHookRegistered(homeDir);
 	if (alreadyRegistered && !scriptChanged) {
 		return { key: "cursor", label: "Cursor", installed: false, path: hooksJsonPath, reason: "already installed" };
 	}
+
 	const backup = backupOnce(hooksJsonPath);
 	const config = readJsonConfig(hooksJsonPath);
 	if (typeof config.version !== "number") config.version = 1;
@@ -737,6 +790,7 @@ function installQoderHook(homeDir: string): HookInstallResult {
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
 	const sessionStart = Array.isArray(hooks.SessionStart) ? [...(hooks.SessionStart as unknown[])] : [];
+
 	const command = "agent-memory context";
 	let managed = 0;
 	let updated = 0;
@@ -764,6 +818,7 @@ function installQoderHook(homeDir: string): HookInstallResult {
 		writeJson(settingsPath, settings);
 		return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup, reason: "updated" };
 	}
+
 	sessionStart.push({
 		hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }],
 	});
@@ -820,6 +875,7 @@ export function installHooks(agents: Set<HookAgentKey>, mode: HookMode = "per-tu
 			error: "Home directory not found. Set HOME (or USERPROFILE on Windows) and retry.",
 		};
 	}
+
 	const results: HookInstallResult[] = [];
 	let anyInstalled = false;
 	for (const target of targets) {
@@ -862,11 +918,15 @@ export function installHooks(agents: Set<HookAgentKey>, mode: HookMode = "per-tu
 			});
 		}
 	}
+
 	if (anyInstalled) {
 		try {
 			writeHookMode(mode);
-		} catch {}
+		} catch {
+			// Persisting the mode is best-effort — install output is authoritative.
+		}
 	}
+
 	return { ok: true, homeDir, results };
 }
 
@@ -927,13 +987,17 @@ function uninstallCursorHook(homeDir: string): HookInstallResult {
 	const scriptPath = path.join(homeDir, ".cursor", CURSOR_HOOK_SCRIPT_RELATIVE);
 	const hooksJsonPath = path.join(homeDir, ".cursor", "hooks.json");
 	let touched = false;
+
 	if (fs.existsSync(rulePath)) {
 		fs.unlinkSync(rulePath);
 		try {
 			fs.rmdirSync(path.dirname(rulePath));
-		} catch {}
+		} catch {
+			// non-empty; fine
+		}
 		touched = true;
 	}
+
 	if (fs.existsSync(hooksJsonPath)) {
 		try {
 			const config = readJsonConfig(hooksJsonPath);
@@ -955,12 +1019,16 @@ function uninstallCursorHook(homeDir: string): HookInstallResult {
 				writeJson(hooksJsonPath, config);
 				touched = true;
 			}
-		} catch {}
+		} catch {
+			// invalid hooks.json — leave it for the user to fix rather than guessing.
+		}
 	}
+
 	if (fs.existsSync(scriptPath)) {
 		fs.unlinkSync(scriptPath);
 		touched = true;
 	}
+
 	if (!touched) {
 		return { key: "cursor", label: "Cursor", installed: false, reason: "not installed" };
 	}
