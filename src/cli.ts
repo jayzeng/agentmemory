@@ -2415,8 +2415,8 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 			const guaranteedAutomatic = target.key !== "opencode";
 			const promptInstalled = homeDir && supportsPerTurn ? isUserPromptSubmitInstalled(homeDir, target.key) : false;
 			const wantsPerTurn = hookMode === "per-turn" && supportsPerTurn;
-			// Stop backs the write side with a periodic memory-write nudge. Claude
-			// Code only for now, mode-independent — always wanted when supported.
+			// Claude exposes Stop health as a separate row-level check. Codex Stop
+			// is already required by isHookInstalled(codex), so do not double-count it here.
 			const wantsWriteHooks = target.key === "claude";
 			const stopInstalled = homeDir && wantsWriteHooks ? isStopHookInstalled(homeDir, target.key) : false;
 			const writeHooksOk = !wantsWriteHooks || stopInstalled;
