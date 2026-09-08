@@ -15,16 +15,20 @@ The parser reads only a bounded transcript tail and returns `null` for unusable 
 
 ## Stop activation
 
-The Codex installer now registers `[[hooks.Stop]]` in the managed hook block and installs a small adapter under `~/.agent-memory/hooks/codex-stop.cjs`.
+The Codex installer registers a mode-independent `[[hooks.Stop]]` entry in the managed `~/.codex/config.toml` block. It invokes Core directly:
 
-The adapter does not duplicate capture logic. It forwards the original Stop payload to the shared Core `agent-memory hook stop --agent codex` path. Empty Core output means Codex stops normally. A non-empty Core capture signal is translated to Codex's supported Stop control response:
+```text
+agent-memory hook stop --agent codex
+```
+
+There is no adapter process or extra runtime dependency. The shared Core Stop handler owns transcript parsing, pending-signal state, retry cadence, and fail-open behavior. When Codex has uncaptured work, that handler emits Codex's native continuation response directly:
 
 ```json
 {"decision":"block","reason":"<capture guidance>"}
 ```
 
-This preserves one transcript/state machine across Claude and Codex while adapting only the host wire protocol. `stop_hook_active` is still handled by Core, so the continuation cannot immediately re-block itself. Adapter errors, timeouts, and non-zero Core exits fail open with empty stdout.
+Claude continues to use `hookSpecificOutput.additionalContext`; the two hosts share capture semantics without pretending their wire protocols are identical. `stop_hook_active: true` is handled in Core and produces empty stdout, so a continuation cannot immediately re-block itself. Missing, unusable, or session-mismatched transcript evidence also fails open except for the existing bounded periodic fallback.
 
-Installation health requires both the Codex managed hook block and the exact adapter artifact. That makes existing pre-Stop installations unhealthy until `setup` / `install-hooks` repairs them, and lets `doctor` surface the same gap through its normal hook-health path.
+Installation health requires the exact managed Codex SessionStart and Stop commands. Existing pre-Stop installations therefore become incomplete until `setup` / `install-hooks` repairs the managed block. `stable` mode removes only `UserPromptSubmit`; Stop remains installed because write-side capture is mode-independent. Uninstall removes the complete managed Codex hook block.
 
-With the installer, protocol adapter, rollout parser, and write-clearing fixtures all gated in CI, Codex counts as fully mechanized in the cross-harness capture evaluation.
+With direct installer wiring, the native Stop response, rollout parsing, and verified-write clearing all gated in CI, Codex counts as fully mechanized in the cross-harness capture evaluation.
