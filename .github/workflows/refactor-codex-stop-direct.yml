@@ -1,0 +1,45 @@
+name: Refactor Codex Stop direct
+
+on:
+  push:
+    branches:
+      - feat/codex-stop-capture
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - name: Apply direct Core refactor
+        run: python3 scripts/refactor-codex-stop-direct.py
+      - name: Install dependencies
+        run: npm ci
+      - name: Format touched files
+        run: npx biome check --write src/hooks.ts src/cli.ts test/codex-stop-install.test.ts eval/capture-reliability.ts
+      - name: Validate
+        run: |
+          npm run lint
+          npm run build
+          npm run test:unit
+          npm run test:cli
+          npm run test:eval
+          npm run test:token-savings
+          npm run test:harness
+      - name: Commit validated refactor
+        run: |
+          git rm scripts/refactor-codex-stop-direct.py .github/workflows/refactor-codex-stop-direct.yml
+          git add -A
+          git config user.name "agentmemory-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "refactor: make Codex Stop protocol Core-native"
+          git push origin HEAD:feat/codex-stop-capture
