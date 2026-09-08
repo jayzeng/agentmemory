@@ -80,6 +80,15 @@ async function importBundle(
 	directory: string,
 	receipt: Pick<PluginInstallReceiptV1, "entrypoint" | "bundleId" | "version">,
 ): Promise<AgentMemoryPluginBundleV1> {
+	// The Pro bundle imports Bun-native modules (bun:sqlite). Under Node this
+	// dynamic import fails deep inside the ESM loader with an opaque
+	// "Unsupported scheme 'bun:'" error — check for it here so install/load
+	// fails with an actionable message instead.
+	if (!process.versions.bun)
+		throw new PluginBootstrapFailure(
+			"plugin_runtime_unsupported",
+			"AgentMemory Pro requires the Bun-compiled agent-memory CLI. The globally installed bin is running under Node, which cannot load the Pro plugin runtime.",
+		);
 	let component = path.resolve(directory);
 	const rootStat = fs.lstatSync(component);
 	if (!rootStat.isDirectory() || rootStat.isSymbolicLink())

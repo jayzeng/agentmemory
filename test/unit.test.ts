@@ -2700,6 +2700,45 @@ describe("temporary plugin activation and runtime", () => {
 		}
 	});
 
+	test("fails with an actionable error when loading the Pro bundle under Node instead of Bun", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-node-"));
+		const originalBun = process.versions.bun;
+		try {
+			const manifest: AgentMemoryBundleManifestV1 = {
+				...testBundleManifest("1.0.0"),
+				plugins: ["agentmemory.runtime-test"],
+			};
+			const source = Buffer.from(
+				`const manifest=${JSON.stringify(manifest)};export default {apiVersion:1,manifest,plugins:[{manifest:{schemaVersion:1,id:"agentmemory.runtime-test",name:"Runtime Test",version:"1.0.0",description:"Runtime test",engine:">=0.4.0",entitlement:"commercial",commands:[],permissions:[],capabilities:[]},async activate(){},async healthCheck(){return {ok:true}}}]};\n`,
+			);
+			const artifact = encodePluginPackage({
+				schemaVersion: 1,
+				manifest,
+				files: [{ path: manifest.entrypoint, sha256: sha256(source), contentBase64: source.toString("base64") }],
+			});
+			const release: SignedPluginReleaseV1 = {
+				schemaVersion: 1,
+				manifest,
+				platform: "any",
+				architecture: "any",
+				packageSha256: sha256(artifact),
+				size: artifact.byteLength,
+				signature: { algorithm: "ed25519", keyId: "test", value: Buffer.alloc(64).toString("base64") },
+			};
+			const store = new FilePluginInstallStore(root);
+			await store.install(artifact, release);
+			const backend = new FakePluginBackend();
+			const runtime = new InstalledPluginRuntimeV1({ coreVersion: "0.4.13", store, backend });
+			const context = { args: [], flags: {}, signal: new AbortController().signal };
+
+			Object.defineProperty(process.versions, "bun", { value: undefined, configurable: true });
+			await expect(runtime.run("anything", context)).rejects.toMatchObject({ code: "plugin_runtime_unsupported" });
+		} finally {
+			Object.defineProperty(process.versions, "bun", { value: originalBun, configurable: true });
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	test("enforces capability checks on MCP tools too, re-checked on every call", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-mcp-"));
 		try {
