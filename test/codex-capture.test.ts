@@ -40,11 +40,7 @@ function call(type: "function_call" | "custom_tool_call", name: string, callId: 
 	};
 }
 
-function output(
-	type: "function_call_output" | "custom_tool_call_output",
-	callId: string,
-	value: unknown,
-): unknown {
+function output(type: "function_call_output" | "custom_tool_call_output", callId: string, value: unknown): unknown {
 	return {
 		timestamp: "2026-09-08T22:00:03Z",
 		type: "response_item",
