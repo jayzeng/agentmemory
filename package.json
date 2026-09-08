@@ -5,26 +5,109 @@
 	"main": "./dist/core.js",
 	"types": "./dist/core.d.ts",
 	"exports": {
-		".": { "types": "./dist/core.d.ts", "default": "./dist/core.js" },
-		"./plugin-bootstrap": { "types": "./dist/plugin-bootstrap.d.ts", "default": "./dist/plugin-bootstrap.js" },
-		"./plugin-host": { "types": "./dist/plugin-host.d.ts", "default": "./dist/plugin-host.js" },
-		"./completions": { "types": "./dist/completions.d.ts", "default": "./dist/completions.js" },
-		"./hooks": { "types": "./dist/hooks.d.ts", "default": "./dist/hooks.js" }
+		".": {
+			"types": "./dist/core.d.ts",
+			"default": "./dist/core.js"
+		},
+		"./plugin-bootstrap": {
+			"types": "./dist/plugin-bootstrap.d.ts",
+			"default": "./dist/plugin-bootstrap.js"
+		},
+		"./plugin-host": {
+			"types": "./dist/plugin-host.d.ts",
+			"default": "./dist/plugin-host.js"
+		},
+		"./completions": {
+			"types": "./dist/completions.d.ts",
+			"default": "./dist/completions.js"
+		},
+		"./hooks": {
+			"types": "./dist/hooks.d.ts",
+			"default": "./dist/hooks.js"
+		}
 	},
-	"bin": { "agent-memory": "dist/cli.js" },
+	"bin": {
+		"agent-memory": "dist/cli.js"
+	},
 	"type": "module",
-	"engines": { "node": ">=20" },
-	"keywords": ["agentmemory","agent-memory","agent memory","ai-memory","llm-memory","memory","search","qmd","semantic-search","scratchpad","daily-log","claude-code","openai-codex","codex","cursor","agent","coding-agent","developer-tools","knowledge-management"],
+	"engines": {
+		"node": ">=20"
+	},
+	"keywords": [
+		"agentmemory",
+		"agent-memory",
+		"agent memory",
+		"ai-memory",
+		"llm-memory",
+		"memory",
+		"search",
+		"qmd",
+		"semantic-search",
+		"scratchpad",
+		"daily-log",
+		"claude-code",
+		"openai-codex",
+		"codex",
+		"cursor",
+		"agent",
+		"coding-agent",
+		"developer-tools",
+		"knowledge-management"
+	],
 	"author": "jayzeng",
 	"license": "MIT",
-	"repository": { "type": "git", "url": "git+https://github.com/jayzeng/agentmemory.git" },
-	"bugs": { "url": "https://github.com/jayzeng/agentmemory/issues" },
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/jayzeng/agentmemory.git"
+	},
+	"bugs": {
+		"url": "https://github.com/jayzeng/agentmemory/issues"
+	},
 	"homepage": "https://github.com/jayzeng/agentmemory#readme",
 	"files": [
-		"src/core.ts","src/cli-spec.ts","src/completions.ts","src/hooks.ts","src/plugin-host.ts","src/plugin-bootstrap.ts","skills","scripts/install-skills.sh","scripts/install-skills.ps1","scripts/postinstall.cjs",
-		"dist/capture-check.d.ts","dist/capture-check.js","dist/codex-capture-check.d.ts","dist/codex-capture-check.js","dist/cli.d.ts","dist/cli.js","dist/core.d.ts","dist/core.js","dist/cli-spec.d.ts","dist/cli-spec.js","dist/completions.d.ts","dist/completions.js","dist/hooks.d.ts","dist/hooks.js","dist/plugin-bootstrap.d.ts","dist/plugin-bootstrap.js","dist/plugin-host.d.ts","dist/plugin-host.js","dist/plugin-runtime.d.ts","dist/plugin-runtime.js","dist/plugin-service.d.ts","dist/plugin-service.js","dist/mcp-server.d.ts","dist/mcp-server.js","dist/upgrade.d.ts","dist/upgrade.js","docs/official-plugin-bootstrap.md","README.md","LICENSE"
+		"src/core.ts",
+		"src/cli-spec.ts",
+		"src/completions.ts",
+		"src/hooks.ts",
+		"src/plugin-host.ts",
+		"src/plugin-bootstrap.ts",
+		"skills",
+		"scripts/install-skills.sh",
+		"scripts/install-skills.ps1",
+		"scripts/postinstall.cjs",
+		"dist/capture-check.d.ts",
+		"dist/capture-check.js",
+		"dist/codex-capture-check.d.ts",
+		"dist/codex-capture-check.js",
+		"dist/cli.d.ts",
+		"dist/cli.js",
+		"dist/core.d.ts",
+		"dist/core.js",
+		"dist/cli-spec.d.ts",
+		"dist/cli-spec.js",
+		"dist/completions.d.ts",
+		"dist/completions.js",
+		"dist/hooks.d.ts",
+		"dist/hooks.js",
+		"dist/plugin-bootstrap.d.ts",
+		"dist/plugin-bootstrap.js",
+		"dist/plugin-host.d.ts",
+		"dist/plugin-host.js",
+		"dist/plugin-runtime.d.ts",
+		"dist/plugin-runtime.js",
+		"dist/plugin-service.d.ts",
+		"dist/plugin-service.js",
+		"dist/mcp-server.d.ts",
+		"dist/mcp-server.js",
+		"dist/upgrade.d.ts",
+		"dist/upgrade.js",
+		"docs/official-plugin-bootstrap.md",
+		"README.md",
+		"LICENSE"
 	],
-	"publishConfig": { "access": "public" },
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"postinstall": "node scripts/postinstall.cjs",
 		"build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.eval.json --noEmit",
@@ -50,6 +133,16 @@
 		"verify:quick": "bash scripts/verify.sh --quick",
 		"install-skills": "bash scripts/install-skills.sh"
 	},
-	"devDependencies": { "@biomejs/biome": "^2.4.0", "@types/bun": "^1.3.14", "@types/node": "^25.3.0", "tsx": "^4.0.0", "typescript": "^5.9.3" },
-	"overrides": { "esbuild": "^0.28.1", "rimraf": "^6.1.3", "glob": "^13.0.3" }
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.0",
+		"@types/bun": "^1.3.14",
+		"@types/node": "^25.3.0",
+		"tsx": "^4.0.0",
+		"typescript": "^5.9.3"
+	},
+	"overrides": {
+		"esbuild": "^0.28.1",
+		"rimraf": "^6.1.3",
+		"glob": "^13.0.3"
+	}
 }
