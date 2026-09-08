@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { isExplicitMemoryRequest } from "./capture-check.js";
 import { getMemoryDir, memoryWrite, redactSecrets, scheduleQmdUpdate } from "./core.js";
 import {
 	FilePluginInstallStore,
@@ -52,6 +53,18 @@ export interface PluginRuntimeOptionsV1 {
 	coreVersion: string;
 	store?: PluginInstallStoreV1;
 	backend?: PluginBootstrapBackendV1;
+}
+
+export function coreCaptureContextForQuery(query?: string): PluginContextSectionV1[] {
+	if (!query || !isExplicitMemoryRequest(query)) return [];
+	return [
+		{
+			id: "core.capture.explicit-memory-request",
+			label: "AgentMemory capture check",
+			content:
+				"The user explicitly asked you to remember something. Save the durable fact in this turn using AgentMemory, verify the write succeeded, and do not claim it was remembered if the write failed. Avoid duplicate notes and respect explicit privacy or forget instructions.",
+		},
+	];
 }
 
 function assertPermission(manifest: AgentMemoryPluginManifestV1, permission: string): void {
@@ -104,7 +117,7 @@ async function importBundle(
 		throw new PluginBootstrapFailure(
 			"plugin_entrypoint_invalid",
 			"The installed plugin entrypoint is not a regular file",
-		);
+			);
 	const imported = (await import(`${pathToFileURL(entrypoint).href}?v=${encodeURIComponent(receipt.version)}`)) as {
 		default?: unknown;
 	};
@@ -238,9 +251,9 @@ export class InstalledPluginRuntimeV1 {
 		query?: string;
 		signal: AbortSignal;
 	}): Promise<PluginContextSectionV1[]> {
-		if (!(await this.load()) || this.contextProviders.length === 0) return [];
+		const sections = coreCaptureContextForQuery(context.query);
+		if (!(await this.load()) || this.contextProviders.length === 0) return sections;
 		const entitlement = await this.refreshEntitlement();
-		const sections: PluginContextSectionV1[] = [];
 		for (const registered of this.contextProviders) {
 			if (!isPluginCapabilityEnabled(entitlement, registered.provider.requiredCapability)) continue;
 			const provided = await registered.provider.provide(context);
