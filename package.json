@@ -75,6 +75,8 @@
 		"scripts/install-skills.sh",
 		"scripts/install-skills.ps1",
 		"scripts/postinstall.cjs",
+		"dist/capture-check.d.ts",
+		"dist/capture-check.js",
 		"dist/cli.d.ts",
 		"dist/cli.js",
 		"dist/core.d.ts",

@@ -32,6 +32,12 @@ agent-memory search --query "<topic>" --mode keyword
 2. Mark completed scratchpad items as done; add new follow-ups
 3. Only write to long-term memory if you discovered a **durable fact** that doesn't already exist there
 
+## Capture at meaningful checkpoints
+
+When the user explicitly asks you to remember something, save it in that turn. After a decision is settled, a correction is accepted, or a fix is verified, record the useful outcome before reporting completion; do not wait for the session to end. Respect the user's memory and privacy preferences.
+
+Check whether that outcome was already saved. A write attempt is not a completed capture: verify the tool succeeded, and report a failed write rather than claiming you remembered it. Avoid duplicate notes and do not save routine chatter or unverified guesses. A hook reminder asks you to review missing capture; it does not require a write when nothing useful is missing.
+
 ## Where to Write — Decision Guide
 
 **Default to daily. Long-term is rare.**
