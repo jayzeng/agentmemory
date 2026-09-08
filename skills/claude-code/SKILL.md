@@ -30,7 +30,13 @@ This deliberately fetches the full layer (today's log + MEMORY.md + yesterday's 
 2. Mark completed scratchpad items as done; add new follow-ups
 3. Only write to long-term memory if you discovered a **durable fact** that doesn't already exist there
 
-If Claude Code's `Stop` hook is installed, you may occasionally see a reminder to do this check even if you weren't planning to stop — that's the harness backing up this step for long sessions; treat it the same as the guidance above.
+If Claude Code's `Stop` hook is installed, you may occasionally see a reminder to do this check even if you weren't planning to stop — that's the harness checking for uncaptured work, including short sessions; treat it the same as the guidance above.
+
+## Capture at meaningful checkpoints
+
+When the user explicitly asks you to remember something, save it in that turn. After a decision is settled, a correction is accepted, or a fix is verified, record the useful outcome before reporting completion; do not wait for the session to end. Respect the user's memory and privacy preferences.
+
+Check whether that outcome was already saved. A write attempt is not a completed capture: verify the tool succeeded, and report a failed write rather than claiming you remembered it. Avoid duplicate notes and do not save routine chatter or unverified guesses. A hook reminder asks you to review missing capture; it does not require a write when nothing useful is missing.
 
 ## Where to Write — Decision Guide
 

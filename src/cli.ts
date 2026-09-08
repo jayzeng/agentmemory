@@ -27,6 +27,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { type CaptureCheck, checkCaptureTranscript } from "./capture-check.js";
+
 import {
 	COMMAND_DESCRIPTIONS,
 	COMMAND_OPTIONS,
@@ -751,6 +753,7 @@ const STOP_NAG_INTERVAL = 6;
 const STOP_HOOK_MAX_SESSIONS = 50;
 
 interface StopHookSessionState {
+	lastCaptureSignal?: string;
 	count: number;
 	lastNagCount: number;
 	lastSeenAt: number;
@@ -788,13 +791,17 @@ function writeStopHookState(state: StopHookState): void {
  * corrupt or unwritable state file just means the nudge falls back to
  * "never fires" rather than breaking the Stop hook.
  */
-function shouldNagOnStop(sessionId: string, now: number): boolean {
+function shouldNagOnStop(sessionId: string, now: number, capture: CaptureCheck | null): boolean {
 	try {
 		const state = readStopHookState();
 		const existing = state.sessions[sessionId] ?? { count: 0, lastNagCount: 0, lastSeenAt: now };
 		const count = existing.count + 1;
-		const shouldNag = count - existing.lastNagCount >= STOP_NAG_INTERVAL;
+		const shouldNag = capture
+			? !!capture.pendingSignal &&
+				(capture.pendingSignal !== existing.lastCaptureSignal || count - existing.lastNagCount >= STOP_NAG_INTERVAL)
+			: count - existing.lastNagCount >= STOP_NAG_INTERVAL;
 		state.sessions[sessionId] = {
+			lastCaptureSignal: capture?.pendingSignal,
 			count,
 			lastNagCount: shouldNag ? count : existing.lastNagCount,
 			lastSeenAt: now,
@@ -814,9 +821,10 @@ const STOP_NAG_REASON =
 
 /**
  * Stop hook handler — fires at the end of every assistant turn (not once per
- * session). Continues the conversation at most once every STOP_NAG_INTERVAL
- * turns per session_id to nudge a memory-write check without being
- * disruptive. Uses `hookSpecificOutput.additionalContext` rather than
+ * session). Checks explicit remember requests and completed edits immediately
+ * when transcript evidence is available. A completed memory write clears the
+ * pending check; unchanged work is retried only every STOP_NAG_INTERVAL turns.
+ * Hosts without a usable transcript retain the periodic reminder. Uses `hookSpecificOutput.additionalContext` rather than
  * `decision: "block"` — functionally identical (both go through the same
  * `stop_hook_active` re-entry check and Claude Code's loop-protection cap),
  * but additionalContext renders as "Stop hook feedback" in the transcript
@@ -836,10 +844,15 @@ async function cmdStop(_flags: Record<string, string | boolean>): Promise<void> 
 	});
 
 	const work = (async () => {
-		const payload = await readStdinJson<{ session_id?: unknown; stop_hook_active?: unknown }>();
+		const payload = await readStdinJson<{
+			session_id?: unknown;
+			stop_hook_active?: unknown;
+			transcript_path?: unknown;
+		}>();
 		const sessionId = typeof payload?.session_id === "string" ? payload.session_id : "";
 		if (!sessionId || payload?.stop_hook_active === true) return;
-		if (shouldNagOnStop(sessionId, Date.now())) {
+		const capture = checkCaptureTranscript(payload?.transcript_path, sessionId);
+		if (shouldNagOnStop(sessionId, Date.now(), capture)) {
 			process.stdout.write(
 				JSON.stringify({
 					hookSpecificOutput: { hookEventName: "Stop", additionalContext: STOP_NAG_REASON },

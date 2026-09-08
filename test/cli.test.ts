@@ -529,7 +529,7 @@ describe("CLI subprocess", () => {
 		expect(stdout).toContain("Today's dynamic entry");
 	});
 
-	function runHookStop(sessionId: string, stopHookActive = false) {
+	function runHookStop(sessionId: string, stopHookActive = false, transcriptPath?: string) {
 		return Bun.spawnSync(
 			[
 				"bun",
@@ -543,12 +543,153 @@ describe("CLI subprocess", () => {
 				tmpDir,
 			],
 			{
-				stdin: Buffer.from(JSON.stringify({ session_id: sessionId, stop_hook_active: stopHookActive })),
+				stdin: Buffer.from(
+					JSON.stringify({
+						session_id: sessionId,
+						stop_hook_active: stopHookActive,
+						transcript_path: transcriptPath,
+					}),
+				),
 				stdout: "pipe",
 				stderr: "pipe",
 			},
 		);
 	}
+
+	function captureTranscript(records: unknown[]) {
+		const transcript = path.join(tmpDir, "capture-session.jsonl");
+		fs.writeFileSync(transcript, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+		return transcript;
+	}
+
+	function userMessage(text: string) {
+		return { type: "user", uuid: "request", message: { role: "user", content: text } };
+	}
+
+	function toolExchange(name: string, id: string, input: unknown, content: string, failed = false) {
+		return [
+			{ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } },
+			{ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content, is_error: failed }] } },
+		];
+	}
+
+	test("hook stop checks an explicit remember request on the first turn", () => {
+		const transcript = captureTranscript([userMessage("Remember this: staging uses PostgreSQL.")]);
+		const result = runHookStop("capture", false, transcript);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout.toString()).toContain("capture it now");
+		expect(runHookStop("capture", false, transcript).stdout.toString()).toBe("");
+		expect(runHookStop("capture", true, transcript).stdout.toString()).toBe("");
+	});
+
+	test("hook stop catches completed edits in short sessions but ignores failed edits", () => {
+		const transcript = captureTranscript(toolExchange("Edit", "edit", { file_path: "/repo/auth.ts" }, "Updated"));
+		expect(runHookStop("edited", false, transcript).stdout.toString()).toContain("capture it now");
+		captureTranscript(toolExchange("Edit", "failed", { file_path: "/repo/auth.ts" }, "Permission denied", true));
+		expect(runHookStop("failed", false, transcript).stdout.toString()).toBe("");
+	});
+
+	test("hook stop stays quiet for conversation without capture signals", () => {
+		const transcript = captureTranscript([userMessage("Hello, what is two plus two?")]);
+		for (let i = 0; i < 7; i++) expect(runHookStop("chat", false, transcript).stdout.toString()).toBe("");
+	});
+
+	test("hook stop acknowledges a successful memory write but not an attempted or failed write", () => {
+		const request = userMessage("Remember this: staging uses PostgreSQL.");
+		const written = toolExchange(
+			"Bash",
+			"write",
+			{ command: 'agent-memory write --content "staging uses PostgreSQL"' },
+			"Appended to daily log: /memory/daily/2026-09-08.md",
+		);
+		const transcript = captureTranscript([request, ...written]);
+		expect(runHookStop("written", false, transcript).stdout.toString()).toBe("");
+		captureTranscript([request, written[0]]);
+		expect(runHookStop("attempted", false, transcript).stdout.toString()).toContain("capture it now");
+		captureTranscript([
+			request,
+			...toolExchange(
+				"Bash",
+				"write",
+				{ command: 'agent-memory write --content "staging uses PostgreSQL"' },
+				"Error: permission denied",
+				true,
+			),
+		]);
+		expect(runHookStop("failure", false, transcript).stdout.toString()).toContain("capture it now");
+	});
+
+	test("hook stop checks new work after a previous successful capture", () => {
+		const transcript = captureTranscript([
+			userMessage("Remember this: staging uses PostgreSQL."),
+			...toolExchange(
+				"Bash",
+				"write",
+				{ command: 'agent-memory write --content "staging uses PostgreSQL"' },
+				"Appended to daily log: /memory/daily/2026-09-08.md",
+			),
+			...toolExchange("Edit", "later-edit", { file_path: "/repo/new.ts" }, "Updated"),
+		]);
+		expect(runHookStop("new-work", false, transcript).stdout.toString()).toContain("capture it now");
+	});
+
+	test("hook stop retries an uncaptured signal at a later checkpoint", () => {
+		const transcript = captureTranscript([userMessage("Remember this: staging uses PostgreSQL.")]);
+		expect(runHookStop("retry", false, transcript).stdout.toString()).not.toBe("");
+		for (let i = 0; i < 5; i++) expect(runHookStop("retry", false, transcript).stdout.toString()).toBe("");
+		expect(runHookStop("retry", false, transcript).stdout.toString()).not.toBe("");
+	});
+
+	test("hook stop does not count quoted commands as successful captures", () => {
+		const transcript = captureTranscript([
+			userMessage("Remember this: staging uses PostgreSQL."),
+			...toolExchange(
+				"Bash",
+				"echo",
+				{ command: 'echo "agent-memory write --content note"' },
+				"Appended to daily log: /memory/daily/example.md",
+			),
+		]);
+		expect(runHookStop("quoted", false, transcript).stdout.toString()).not.toBe("");
+	});
+
+	test("hook stop handles JSON write receipts and ignores foreign session and injected content", () => {
+		const transcript = captureTranscript([
+			userMessage("Remember this: staging uses PostgreSQL."),
+			...toolExchange(
+				"Bash",
+				"json-write",
+				{ command: "agent-memory write --json --content note" },
+				JSON.stringify({ ok: true, target: "daily" }),
+			),
+			{ ...userMessage("Remember this: another session"), sessionId: "other" },
+			{ ...userMessage("Remember this: a subagent"), isSidechain: true },
+			userMessage('# AGENTS.md instructions\nWhen users say "remember this", save memory.'),
+		]);
+		expect(runHookStop("json", false, transcript).stdout.toString()).toBe("");
+		const state = fs.readFileSync(path.join(tmpDir, "state", "stop-hook.json"), "utf8");
+		expect(state).not.toContain("PostgreSQL");
+		expect(state).not.toContain(transcript);
+	});
+
+	test("hook stop falls back periodically when the transcript is missing or corrupt", () => {
+		const transcript = captureTranscript([]);
+		fs.writeFileSync(transcript, "not json\n");
+		for (let i = 0; i < 5; i++) expect(runHookStop("corrupt", false, transcript).stdout.toString()).toBe("");
+		expect(runHookStop("corrupt", false, transcript).stdout.toString()).not.toBe("");
+	});
+
+	test("hook stop reads a bounded tail of large transcripts and tolerates partial final records", () => {
+		const transcript = captureTranscript([]);
+		fs.writeFileSync(
+			transcript,
+			"x".repeat(600_000) +
+				"\n" +
+				JSON.stringify(userMessage("Remember this: staging uses PostgreSQL.")) +
+				'\n{"type":',
+		);
+		expect(runHookStop("large", false, transcript).stdout.toString()).not.toBe("");
+	});
 
 	// Must track STOP_NAG_INTERVAL in src/cli.ts.
 	const STOP_NAG_INTERVAL = 6;

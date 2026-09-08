@@ -94,6 +94,12 @@ The npm package installs a platform-neutral Node.js executable. The optional Hom
 
 Pi doesn't use SKILL.md or a JSON hook config — its extensibility model is a registered native extension. So instead of writing a skill file, `agent-memory setup`/`install-hooks` detects `pi` on your `PATH` and installs [`pi-memory`](https://github.com/jayzeng/pi-memory) for you, via `pi install npm:pi-memory` — same author, same memory-file conventions, native pi tools (`memory_write`, `memory_read`, `scratchpad`, `memory_search`). It's prompted for like any other detected agent and auto-applied under `--yes`; run `agent-memory install-hooks --only pi` to target just pi, or check `agent-memory doctor` for its status.
 
+### Capture checks
+
+The Claude Code Stop hook checks a bounded local transcript tail for explicit English “remember this/that/to” requests and successful `Edit`, `Write`, or `MultiEdit` calls. It can remind the agent on the first turn when no subsequent successful AgentMemory write is visible. Unchanged uncaptured work is retried every six eligible Stop events; successful recognized writes clear the check. Ordinary conversation stays quiet. Without a usable transcript, the hook falls back to a reminder every six eligible Stop events.
+
+This is a capture check, not automatic extraction or proof that a note contains every important fact. It recognizes direct `agent-memory write`/`save` shell calls and `memory_write` tools with successful write receipts; shell wrappers and other editing tools rely on the agent's own checkpoint discipline. Only signal hashes and counters are saved in hook state. Codex, Cursor, and Agent receive checkpoint guidance through their skills; they do not gain a Claude Stop hook.
+
 ### Optional: Enable search with qmd
 
 When qmd is installed, the collection is automatically set up via `agent-memory setup` (or `init`).
