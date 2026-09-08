@@ -245,8 +245,12 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 	const mechanizedExplicitRequestCoverage =
 		measured.filter((result) => result.mechanizedExplicitRequest === true).length / measured.length;
 	const mechanizedImmediateCoverage =
-		measured.filter((result) => result.mechanizedExplicitRequest === true && result.mechanizedCompletedWork === true)
-			.length / measured.length;
+		measured.filter(
+			(result) =>
+				result.mechanizedExplicitRequest === true &&
+				result.mechanizedCompletedWork === true &&
+				result.mechanizedWriteClearsSignal === true,
+		).length / measured.length;
 	const passed =
 		instructionCoverage === 1 &&
 		mechanizedExplicitRequestCoverage === 0.5 &&
