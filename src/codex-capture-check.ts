@@ -137,7 +137,8 @@ export function checkCodexCaptureTranscript(transcriptPath: unknown, sessionId: 
 			if (entry.type === "event_msg" && payload.type === "user_message") {
 				usable = true;
 				const message = typeof payload.message === "string" ? payload.message : "";
-				if (isExplicitMemoryRequest(message)) pendingSignal = signal(String(entry.ordinal ?? entry.timestamp ?? line));
+				if (isExplicitMemoryRequest(message))
+					pendingSignal = signal(String(entry.ordinal ?? entry.timestamp ?? line));
 				continue;
 			}
 
