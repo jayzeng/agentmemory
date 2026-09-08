@@ -80,7 +80,8 @@ export function checkCaptureTranscript(transcriptPath: unknown, sessionId: strin
 			} catch {
 				continue;
 			}
-			if (!entry || entry.isSidechain === true || (entry.sessionId !== undefined && entry.sessionId !== sessionId)) continue;
+			if (!entry || entry.isSidechain === true || (entry.sessionId !== undefined && entry.sessionId !== sessionId))
+				continue;
 			if (entry.type !== "user" && entry.type !== "assistant") continue;
 			const message = record(entry.message);
 			if (!message) continue;
