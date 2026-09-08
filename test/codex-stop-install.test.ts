@@ -92,30 +92,17 @@ function verifiedWriteExchange(): unknown[] {
 }
 
 function runCodexStop(home: string, transcriptPath: string, stopHookActive = false) {
-	return Bun.spawnSync(
-		[
-			"bun",
-			"run",
-			CLI,
-			"hook",
-			"stop",
-			"--agent",
-			"codex",
-			"--dir",
-			path.join(home, "memory"),
-		],
-		{
-			stdin: Buffer.from(
-				JSON.stringify({
-					session_id: SESSION,
-					transcript_path: transcriptPath,
-					stop_hook_active: stopHookActive,
-				}),
-			),
-			stdout: "pipe",
-			stderr: "pipe",
-		},
-	);
+	return Bun.spawnSync(["bun", "run", CLI, "hook", "stop", "--agent", "codex", "--dir", path.join(home, "memory")], {
+		stdin: Buffer.from(
+			JSON.stringify({
+				session_id: SESSION,
+				transcript_path: transcriptPath,
+				stop_hook_active: stopHookActive,
+			}),
+		),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
 }
 
 afterEach(() => {

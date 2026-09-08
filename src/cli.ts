@@ -824,17 +824,16 @@ const STOP_NAG_REASON =
  * session). Checks explicit remember requests and completed edits immediately
  * when transcript evidence is available. A completed memory write clears the
  * pending check; unchanged work is retried only every STOP_NAG_INTERVAL turns.
- * Hosts without a usable transcript retain the periodic reminder. Uses `hookSpecificOutput.additionalContext` rather than
- * `decision: "block"` — functionally identical (both go through the same
- * `stop_hook_active` re-entry check and Claude Code's loop-protection cap),
- * but additionalContext renders as "Stop hook feedback" in the transcript
- * instead of the alarming-looking "Stop hook error". Always allows the stop
- * (empty stdout) on missing session_id, `stop_hook_active` (Claude Code's own
- * re-entrancy signal — never nag twice in a row), or any internal error.
+ * Hosts without a usable transcript retain the periodic reminder. Claude emits
+ * `hookSpecificOutput.additionalContext`; Codex emits its native `decision: "block"`
+ * plus a non-empty `reason`. Both honor `stop_hook_active` re-entry protection.
+ * Always allows the stop (empty stdout) on missing session_id, re-entry, or any
+ * internal error.
  */
-async function cmdStop(_flags: Record<string, string | boolean>): Promise<void> {
+async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
 	const TIMEOUT_MS = 3_000;
 	const controller = new AbortController();
+	const agent = getFlag(flags, "agent");
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<void>((resolve) => {
 		timer = setTimeout(() => {
@@ -853,11 +852,11 @@ async function cmdStop(_flags: Record<string, string | boolean>): Promise<void> 
 		if (!sessionId || payload?.stop_hook_active === true) return;
 		const capture = checkCaptureTranscript(payload?.transcript_path, sessionId);
 		if (shouldNagOnStop(sessionId, Date.now(), capture)) {
-			process.stdout.write(
-				JSON.stringify({
-					hookSpecificOutput: { hookEventName: "Stop", additionalContext: STOP_NAG_REASON },
-				}),
-			);
+			const response =
+				agent === "codex"
+					? { decision: "block", reason: STOP_NAG_REASON }
+					: { hookSpecificOutput: { hookEventName: "Stop", additionalContext: STOP_NAG_REASON } };
+			process.stdout.write(JSON.stringify(response));
 		}
 	})().catch(() => {
 		// Any failure in the Stop hook must be swallowed — never trap the user

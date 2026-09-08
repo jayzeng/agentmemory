@@ -81,56 +81,8 @@ function userPromptSubmitHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook user-prompt-submit --agent ${agent}`;
 }
 
-function stopHookCommand(agent: "claude"): string {
+function stopHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook stop --agent ${agent}`;
-}
-
-const CODEX_STOP_ADAPTER_REASON =
-	"Before stopping: if this session produced a durable fact, bug fix, or decision worth remembering, " +
-	'capture it now — `agent-memory write --content "..."` for a daily note, or `--target long_term` for a ' +
-	"durable fact — and update the scratchpad with any open follow-ups. If there's nothing worth recording, " +
-	"ignore this and stop normally.";
-
-const CODEX_STOP_ADAPTER_BODY = `#!/usr/bin/env node
-const fs = require("node:fs");
-const { spawnSync } = require("node:child_process");
-
-try {
-	const input = fs.readFileSync(0);
-	const result = spawnSync("agent-memory", ["hook", "stop", "--agent", "codex"], {
-		input,
-		encoding: "utf8",
-		stdio: ["pipe", "pipe", "ignore"],
-		timeout: 4500,
-	});
-	if (result.status === 0 && typeof result.stdout === "string" && result.stdout.trim()) {
-		process.stdout.write(JSON.stringify({ decision: "block", reason: ${JSON.stringify(CODEX_STOP_ADAPTER_REASON)} }));
-	}
-} catch {
-	// Fail open: memory capture must never trap a Codex turn.
-}
-`;
-
-function codexStopAdapterPath(homeDir: string): string {
-	return path.join(homeDir, ".agent-memory", "hooks", "codex-stop.cjs");
-}
-
-function codexStopAdapterCommand(homeDir: string): string {
-	return `node ${JSON.stringify(codexStopAdapterPath(homeDir))}`;
-}
-
-function ensureCodexStopAdapter(homeDir: string): boolean {
-	const scriptPath = codexStopAdapterPath(homeDir);
-	const changed = !fs.existsSync(scriptPath) || fs.readFileSync(scriptPath, "utf-8") !== CODEX_STOP_ADAPTER_BODY;
-	if (!changed) return false;
-	fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
-	fs.writeFileSync(scriptPath, CODEX_STOP_ADAPTER_BODY, "utf-8");
-	try {
-		fs.chmodSync(scriptPath, 0o755);
-	} catch {
-		// Windows/non-POSIX filesystems may not support chmod; node still executes the file explicitly.
-	}
-	return true;
 }
 
 function hookTargets(homeDir: string): HookTargetInfo[] {
@@ -217,9 +169,9 @@ function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string):
 }
 
 /**
- * Read-only check whether the managed automatic hook set for `key` is already
- * present. For Codex, Stop is part of the required set so upgrades repair
- * pre-Stop installations instead of treating them as fully configured.
+ * Read-only check whether the SessionStart hook for `key` is already present in
+ * the user's config. Mirrors each installer's "already installed" detection so
+ * the CLI can avoid prompting for hooks that don't need to be installed.
  */
 export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
@@ -284,12 +236,10 @@ export function isStopHookInstalled(homeDir: string, key: HookAgentKey): boolean
 		if (key === "claude") return hasClaudeHookGroup(homeDir, "Stop", stopHookCommand("claude"));
 		if (key === "codex") {
 			const configPath = path.join(homeDir, ".codex", "config.toml");
-			const scriptPath = codexStopAdapterPath(homeDir);
-			if (!fs.existsSync(configPath) || !fs.existsSync(scriptPath)) return false;
-			if (fs.readFileSync(scriptPath, "utf-8") !== CODEX_STOP_ADAPTER_BODY) return false;
+			if (!fs.existsSync(configPath)) return false;
 			const existing = fs.readFileSync(configPath, "utf-8");
 			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
-			return existing.includes(`command = ${JSON.stringify(codexStopAdapterCommand(homeDir))}`);
+			return existing.includes(`command = "${stopHookCommand("codex")}"`);
 		}
 	} catch {}
 	return false;
@@ -594,10 +544,9 @@ function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookIns
 	const configPath = path.join(homeDir, ".codex", "config.toml");
 	const backup = backupOnce(configPath);
 	const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf-8") : "";
-	const adapterChanged = ensureCodexStopAdapter(homeDir);
 	const sessionCommand = sessionStartHookCommand("codex");
 	const promptCommand = userPromptSubmitHookCommand("codex");
-	const stopCommand = codexStopAdapterCommand(homeDir);
+	const stopCommand = stopHookCommand("codex");
 	const lines = [
 		HOOK_MARKER_BEGIN,
 		"[[hooks.SessionStart]]",
@@ -623,7 +572,7 @@ function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookIns
 		"",
 		"[[hooks.Stop.hooks]]",
 		'type = "command"',
-		`command = ${JSON.stringify(stopCommand)}`,
+		`command = "${stopCommand}"`,
 		HOOK_MARKER_END,
 	);
 	const block = lines.join("\n");
@@ -636,9 +585,9 @@ function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookIns
 			return {
 				key: "codex",
 				label: "Codex",
-				installed: adapterChanged,
+				installed: false,
 				path: configPath,
-				reason: adapterChanged ? "updated" : "already installed",
+				reason: "already installed",
 				mode,
 			};
 		}
@@ -959,27 +908,18 @@ function uninstallClaudeCodeHook(homeDir: string): HookInstallResult {
 
 function uninstallCodexHook(homeDir: string): HookInstallResult {
 	const configPath = path.join(homeDir, ".codex", "config.toml");
-	const scriptPath = codexStopAdapterPath(homeDir);
-	let removed = false;
-	if (fs.existsSync(configPath)) {
-		const existing = fs.readFileSync(configPath, "utf-8");
-		if (existing.includes(HOOK_MARKER_BEGIN)) {
-			const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-			const pattern = new RegExp(
-				`\\n?${escapeRe(HOOK_MARKER_BEGIN)}[\\s\\S]*?${escapeRe(HOOK_MARKER_END)}\\n?`,
-				"g",
-			);
-			fs.writeFileSync(configPath, existing.replace(pattern, ""), "utf-8");
-			removed = true;
-		}
+	if (!fs.existsSync(configPath)) {
+		return { key: "codex", label: "Codex", installed: false, reason: "not installed" };
 	}
-	if (fs.existsSync(scriptPath)) {
-		fs.unlinkSync(scriptPath);
-		removed = true;
+	const existing = fs.readFileSync(configPath, "utf-8");
+	if (!existing.includes(HOOK_MARKER_BEGIN)) {
+		return { key: "codex", label: "Codex", installed: false, reason: "not installed" };
 	}
-	return removed
-		? { key: "codex", label: "Codex", installed: true, path: configPath }
-		: { key: "codex", label: "Codex", installed: false, reason: "not installed" };
+	const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const pattern = new RegExp(`\\n?${escapeRe(HOOK_MARKER_BEGIN)}[\\s\\S]*?${escapeRe(HOOK_MARKER_END)}\\n?`, "g");
+	const next = existing.replace(pattern, "");
+	fs.writeFileSync(configPath, next, "utf-8");
+	return { key: "codex", label: "Codex", installed: true, path: configPath };
 }
 
 function uninstallCursorHook(homeDir: string): HookInstallResult {
