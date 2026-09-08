@@ -116,6 +116,7 @@
 		"eval:regression": "bun eval/run.ts --dataset eval/datasets/agent-memory-regression-v1.json",
 		"eval:longmemeval": "bun eval/longmemeval.ts",
 		"eval:token-savings": "bun eval/token-savings.ts",
+		"eval:capture": "bun eval/capture-reliability.ts",
 		"prepare": "npm run build:lib",
 		"prepack": "npm run build:lib",
 		"lint": "biome check .",
