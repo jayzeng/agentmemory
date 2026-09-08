@@ -11,25 +11,36 @@ const datasetUrl = new URL("../eval/datasets/external-feedback-v1.json", import.
 const expandedDatasetUrl = new URL("../eval/datasets/agent-memory-regression-v1.json", import.meta.url);
 
 describe("cross-harness capture reliability", () => {
-	test("measures local harness contracts without overstating delegated Pi coverage", () => {
+	test("measures partial Codex mechanization without overstating completed-work coverage", () => {
 		const report = runCaptureReliabilityEvaluation();
 		expect(report.passed).toBe(true);
 		expect(report.schemaVersion).toBe("capture-reliability-v1");
 		expect(report.metrics.measuredHarnesses).toBe(4);
 		expect(report.metrics.instructionCoverage).toBe(1);
+		expect(report.metrics.mechanizedExplicitRequestCoverage).toBe(0.5);
 		expect(report.metrics.mechanizedImmediateCoverage).toBe(0.25);
 		expect(report.metrics.delegatedHarnesses).toBe(1);
+
 		const claude = report.harnesses.find((result) => result.harness === "claude");
 		expect(claude?.enforcement).toBe("mechanized");
 		expect(claude?.mechanizedExplicitRequest).toBe(true);
 		expect(claude?.mechanizedCompletedWork).toBe(true);
 		expect(claude?.mechanizedWriteClearsSignal).toBe(true);
-		for (const harness of ["codex", "cursor", "qoder"]) {
+
+		const codex = report.harnesses.find((result) => result.harness === "codex");
+		expect(codex?.instructionContract).toBe(true);
+		expect(codex?.enforcement).toBe("partially-mechanized");
+		expect(codex?.mechanizedExplicitRequest).toBe(true);
+		expect(codex?.mechanizedCompletedWork).toBeNull();
+		expect(codex?.mechanizedWriteClearsSignal).toBeNull();
+
+		for (const harness of ["cursor", "qoder"]) {
 			const result = report.harnesses.find((entry) => entry.harness === harness);
 			expect(result?.instructionContract).toBe(true);
 			expect(result?.enforcement).toBe("instruction-guided");
 			expect(result?.mechanizedExplicitRequest).toBeNull();
 		}
+
 		const pi = report.harnesses.find((result) => result.harness === "pi");
 		expect(pi?.enforcement).toBe("delegated");
 		expect(pi?.measured).toBe(false);

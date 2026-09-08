@@ -2686,15 +2686,42 @@ describe("temporary plugin activation and runtime", () => {
 				await runtime.provideContext({
 					host: "codex",
 					cwd: "/tmp/project",
-					query: "remember this",
+					query: "project status",
 					signal: context.signal,
 				}),
-			).toEqual([{ id: "runtime-section", label: "## Runtime context", content: "remember this" }]);
+			).toEqual([{ id: "runtime-section", label: "## Runtime context", content: "project status" }]);
 			backend.entitlement.capabilities.learning.enabled = false;
 			expect((await runtime.run("runtime-ping", context))?.error?.code).toBe("plugin_capability_denied");
 			expect(await runtime.provideContext({ host: "codex", cwd: "/tmp/project", signal: context.signal })).toEqual(
 				[],
 			);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("provideContext surfaces the core capture check even without an installed Pro bundle", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-runtime-no-bundle-"));
+		try {
+			const runtime = new InstalledPluginRuntimeV1({
+				coreVersion: "0.4.13",
+				store: new FilePluginInstallStore(root),
+				backend: new FakePluginBackend(),
+			});
+			const signal = new AbortController().signal;
+			expect(
+				await runtime.provideContext({ host: "codex", cwd: "/tmp/project", query: "remember this", signal }),
+			).toEqual([
+				{
+					id: "core.capture.explicit-memory-request",
+					label: "AgentMemory capture check",
+					content:
+						"The user explicitly asked you to remember something. Save the durable fact in this turn using AgentMemory, verify the write succeeded, and do not claim it was remembered if the write failed. Avoid duplicate notes and respect explicit privacy or forget instructions.",
+				},
+			]);
+			expect(
+				await runtime.provideContext({ host: "codex", cwd: "/tmp/project", query: "what time is it", signal }),
+			).toEqual([]);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}

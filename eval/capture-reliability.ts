@@ -3,9 +3,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { checkCaptureTranscript, isExplicitMemoryRequest } from "../src/capture-check.js";
+import { coreCaptureContextForQuery } from "../src/plugin-runtime.js";
 
 export type CaptureHarness = "claude" | "codex" | "cursor" | "qoder" | "pi";
-export type CaptureEnforcement = "mechanized" | "instruction-guided" | "delegated";
+export type CaptureEnforcement = "mechanized" | "partially-mechanized" | "instruction-guided" | "delegated";
 
 export interface CaptureHarnessResult {
 	harness: CaptureHarness;
@@ -24,6 +25,7 @@ export interface CaptureReliabilityReport {
 	metrics: {
 		measuredHarnesses: number;
 		instructionCoverage: number;
+		mechanizedExplicitRequestCoverage: number;
 		mechanizedImmediateCoverage: number;
 		delegatedHarnesses: number;
 	};
@@ -98,30 +100,71 @@ function evaluateClaudeMechanism(): Pick<
 			mechanizedExplicitRequest: Boolean(explicitCheck?.pendingSignal),
 			mechanizedCompletedWork: Boolean(completedCheck?.pendingSignal),
 			mechanizedWriteClearsSignal: clearedCheck !== null && clearedCheck.pendingSignal === undefined,
-			notes: ["Claude is the only local harness with a transcript-aware Stop capture check."],
+			notes: ["Claude has a transcript-aware Stop capture check for explicit requests and completed work."],
 		};
 	} finally {
 		for (const transcript of paths) fs.rmSync(path.dirname(transcript), { recursive: true, force: true });
 	}
 }
 
+function evaluateCodexPromptMechanism(): Pick<CaptureHarnessResult, "mechanizedExplicitRequest" | "notes"> {
+	const explicit = coreCaptureContextForQuery("Remember this: staging uses PostgreSQL.");
+	const negative = coreCaptureContextForQuery("Do not remember this: staging uses PostgreSQL.");
+	return {
+		mechanizedExplicitRequest:
+			explicit.some(
+				(section) =>
+					section.id === "core.capture.explicit-memory-request" &&
+					section.content.includes("Save the durable fact in this turn"),
+			) && negative.length === 0,
+		notes: [
+			"Codex UserPromptSubmit deterministically injects a Core capture check for explicit memory requests.",
+			"Completed-work capture remains instruction-guided until Codex transcript/Stop compatibility is proven.",
+		],
+	};
+}
+
 export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 	const claudeMechanism = evaluateClaudeMechanism();
-	const localResults = LOCAL_SKILLS.map<CaptureHarnessResult>(({ harness, path: skillPath }) => ({
-		harness,
-		enforcement: harness === "claude" ? "mechanized" : "instruction-guided",
-		measured: true,
-		instructionContract: skillHasCaptureContract(skillPath),
-		mechanizedExplicitRequest: harness === "claude" ? claudeMechanism.mechanizedExplicitRequest : null,
-		mechanizedCompletedWork: harness === "claude" ? claudeMechanism.mechanizedCompletedWork : null,
-		mechanizedWriteClearsSignal: harness === "claude" ? claudeMechanism.mechanizedWriteClearsSignal : null,
-		notes:
-			harness === "claude"
-				? claudeMechanism.notes
-				: [
-						"Capture relies on the installed skill/checkpoint discipline; model compliance is not deterministically measured here.",
-					],
-	}));
+	const codexMechanism = evaluateCodexPromptMechanism();
+	const localResults = LOCAL_SKILLS.map<CaptureHarnessResult>(({ harness, path: skillPath }) => {
+		if (harness === "claude") {
+			return {
+				harness,
+				enforcement: "mechanized",
+				measured: true,
+				instructionContract: skillHasCaptureContract(skillPath),
+				mechanizedExplicitRequest: claudeMechanism.mechanizedExplicitRequest,
+				mechanizedCompletedWork: claudeMechanism.mechanizedCompletedWork,
+				mechanizedWriteClearsSignal: claudeMechanism.mechanizedWriteClearsSignal,
+				notes: claudeMechanism.notes,
+			};
+		}
+		if (harness === "codex") {
+			return {
+				harness,
+				enforcement: "partially-mechanized",
+				measured: true,
+				instructionContract: skillHasCaptureContract(skillPath),
+				mechanizedExplicitRequest: codexMechanism.mechanizedExplicitRequest,
+				mechanizedCompletedWork: null,
+				mechanizedWriteClearsSignal: null,
+				notes: codexMechanism.notes,
+			};
+		}
+		return {
+			harness,
+			enforcement: "instruction-guided",
+			measured: true,
+			instructionContract: skillHasCaptureContract(skillPath),
+			mechanizedExplicitRequest: null,
+			mechanizedCompletedWork: null,
+			mechanizedWriteClearsSignal: null,
+			notes: [
+				"Capture relies on the installed skill/checkpoint discipline; model compliance is not deterministically measured here.",
+			],
+		};
+	});
 	const pi: CaptureHarnessResult = {
 		harness: "pi",
 		enforcement: "delegated",
@@ -137,14 +180,17 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 	const harnesses = [...localResults, pi];
 	const measured = harnesses.filter((result) => result.measured);
 	const instructionCoverage = measured.filter((result) => result.instructionContract).length / measured.length;
+	const mechanizedExplicitRequestCoverage =
+		measured.filter((result) => result.mechanizedExplicitRequest === true).length / measured.length;
 	const mechanizedImmediateCoverage =
 		measured.filter((result) => result.mechanizedExplicitRequest === true && result.mechanizedCompletedWork === true)
 			.length / measured.length;
 	const passed =
 		instructionCoverage === 1 &&
-		claudeMechanism.mechanizedExplicitRequest === true &&
-		claudeMechanism.mechanizedCompletedWork === true &&
+		mechanizedExplicitRequestCoverage === 0.5 &&
+		mechanizedImmediateCoverage === 0.25 &&
 		claudeMechanism.mechanizedWriteClearsSignal === true &&
+		codexMechanism.mechanizedExplicitRequest === true &&
 		isExplicitMemoryRequest("Remember this: staging uses PostgreSQL.") &&
 		!isExplicitMemoryRequest("Do not remember this: staging uses PostgreSQL.");
 	return {
@@ -153,6 +199,7 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 		metrics: {
 			measuredHarnesses: measured.length,
 			instructionCoverage,
+			mechanizedExplicitRequestCoverage,
 			mechanizedImmediateCoverage,
 			delegatedHarnesses: harnesses.filter((result) => result.enforcement === "delegated").length,
 		},
