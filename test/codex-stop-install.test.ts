@@ -25,10 +25,6 @@ function makeHome(): string {
 	return home;
 }
 
-function adapterPath(home: string): string {
-	return path.join(home, ".agent-memory", "hooks", "codex-stop.cjs");
-}
-
 function writeRollout(home: string, items: unknown[]): string {
 	const file = path.join(home, "rollout.jsonl");
 	fs.writeFileSync(file, `${items.map((item) => JSON.stringify(item)).join("\n")}\n`, "utf8");
@@ -95,46 +91,31 @@ function verifiedWriteExchange(): unknown[] {
 	];
 }
 
-function installCoreShim(home: string): string {
-	const binDir = path.join(home, "bin");
-	fs.mkdirSync(binDir, { recursive: true });
-	const executable = path.join(binDir, "agent-memory");
-	const memoryDir = path.join(home, "memory");
-	fs.writeFileSync(
-		executable,
-		`#!/usr/bin/env node
-const fs = require("node:fs");
-const { spawnSync } = require("node:child_process");
-const input = fs.readFileSync(0);
-const result = spawnSync("bun", ["run", ${JSON.stringify(CLI)}, ...process.argv.slice(2), "--dir", ${JSON.stringify(memoryDir)}], {
-	input,
-	encoding: "utf8",
-	stdio: ["pipe", "pipe", "pipe"],
-});
-if (result.stdout) process.stdout.write(result.stdout);
-if (result.stderr) process.stderr.write(result.stderr);
-process.exit(result.status ?? 1);
-`,
-		"utf8",
+function runCodexStop(home: string, transcriptPath: string, stopHookActive = false) {
+	return Bun.spawnSync(
+		[
+			"bun",
+			"run",
+			CLI,
+			"hook",
+			"stop",
+			"--agent",
+			"codex",
+			"--dir",
+			path.join(home, "memory"),
+		],
+		{
+			stdin: Buffer.from(
+				JSON.stringify({
+					session_id: SESSION,
+					transcript_path: transcriptPath,
+					stop_hook_active: stopHookActive,
+				}),
+			),
+			stdout: "pipe",
+			stderr: "pipe",
+		},
 	);
-	fs.chmodSync(executable, 0o755);
-	return binDir;
-}
-
-function runInstalledCodexStop(home: string, transcriptPath: string, stopHookActive = false, binDir?: string) {
-	const pathPrefix = binDir ?? installCoreShim(home);
-	return Bun.spawnSync([process.execPath, adapterPath(home)], {
-		stdin: Buffer.from(
-			JSON.stringify({
-				session_id: SESSION,
-				transcript_path: transcriptPath,
-				stop_hook_active: stopHookActive,
-			}),
-		),
-		stdout: "pipe",
-		stderr: "pipe",
-		env: { ...process.env, PATH: `${pathPrefix}${path.delimiter}${process.env.PATH ?? ""}` },
-	});
 }
 
 afterEach(() => {
@@ -177,10 +158,9 @@ describe("Codex Stop capture installation", () => {
 		expect(isHookInstalled(home, "codex")).toBe(true);
 		expect(isUserPromptSubmitInstalled(home, "codex")).toBe(true);
 		expect(isStopHookInstalled(home, "codex")).toBe(true);
-		expect(fs.existsSync(adapterPath(home))).toBe(true);
 		const upgradedConfig = fs.readFileSync(configPath, "utf8");
 		expect(upgradedConfig).toContain("[[hooks.Stop]]");
-		expect(upgradedConfig).toContain("codex-stop.cjs");
+		expect(upgradedConfig).toContain('command = "agent-memory hook stop --agent codex"');
 
 		const stable = installHooks(new Set(["codex"]), "stable");
 		expect(stable.results[0]?.installed).toBe(true);
@@ -193,74 +173,34 @@ describe("Codex Stop capture installation", () => {
 		expect(idempotent.results[0]?.reason).toBe("already installed");
 	});
 
-	test("repairs a tampered adapter", () => {
+	test("uninstall removes the complete managed Codex hook block", () => {
 		const home = makeHome();
 		installHooks(new Set(["codex"]), "per-turn");
-		fs.writeFileSync(adapterPath(home), "// stale adapter\n", "utf8");
-		expect(isStopHookInstalled(home, "codex")).toBe(false);
-		expect(isHookInstalled(home, "codex")).toBe(false);
-
-		const repaired = installHooks(new Set(["codex"]), "per-turn");
-		expect(repaired.results[0]?.installed).toBe(true);
-		expect(repaired.results[0]?.reason).toBe("updated");
-		expect(isStopHookInstalled(home, "codex")).toBe(true);
-	});
-
-	test("uninstall removes the complete managed Codex hook block and adapter", () => {
-		const home = makeHome();
-		installHooks(new Set(["codex"]), "per-turn");
-		const scriptPath = adapterPath(home);
-		expect(fs.existsSync(scriptPath)).toBe(true);
-
 		const removed = uninstallHooks(new Set(["codex"]));
 		expect(removed.results[0]?.installed).toBe(true);
 		expect(isStopHookInstalled(home, "codex")).toBe(false);
-		expect(fs.existsSync(scriptPath)).toBe(false);
 		expect(fs.readFileSync(path.join(home, ".codex", "config.toml"), "utf8")).not.toContain(
 			"# BEGIN agent-memory hook",
 		);
 	});
 
-	test("installed adapter translates the real Core Stop decision and prevents immediate re-entry", () => {
+	test("real Core Stop path emits Codex block/reason for completed work and prevents immediate re-entry", () => {
 		const home = makeHome();
-		installHooks(new Set(["codex"]), "per-turn");
-		const binDir = installCoreShim(home);
 		const transcript = writeRollout(home, [codexMeta(), ...patchExchange()]);
-
-		const first = runInstalledCodexStop(home, transcript, false, binDir);
+		const first = runCodexStop(home, transcript);
 		expect(first.exitCode).toBe(0);
 		expect(JSON.parse(first.stdout.toString())).toEqual({
 			decision: "block",
 			reason: expect.stringContaining("capture it now"),
 		});
-		expect(runInstalledCodexStop(home, transcript, false, binDir).stdout.toString()).toBe("");
-		expect(runInstalledCodexStop(home, transcript, true, binDir).stdout.toString()).toBe("");
+		expect(runCodexStop(home, transcript).stdout.toString()).toBe("");
+		expect(runCodexStop(home, transcript, true).stdout.toString()).toBe("");
 	});
 
-	test("verified AgentMemory write clears the installed Codex Stop pending signal", () => {
+	test("verified AgentMemory write clears the real Codex Stop pending signal", () => {
 		const home = makeHome();
-		installHooks(new Set(["codex"]), "per-turn");
-		const binDir = installCoreShim(home);
 		const transcript = writeRollout(home, [codexMeta(), ...patchExchange(), ...verifiedWriteExchange()]);
-		const result = runInstalledCodexStop(home, transcript, false, binDir);
-		expect(result.exitCode).toBe(0);
-		expect(result.stdout.toString()).toBe("");
-	});
-
-	test("adapter fails open when the Core executable is unavailable", () => {
-		const home = makeHome();
-		installHooks(new Set(["codex"]), "per-turn");
-		const emptyBin = path.join(home, "empty-bin");
-		fs.mkdirSync(emptyBin, { recursive: true });
-		const transcript = writeRollout(home, [codexMeta(), ...patchExchange()]);
-		const result = Bun.spawnSync([process.execPath, adapterPath(home)], {
-			stdin: Buffer.from(
-				JSON.stringify({ session_id: SESSION, transcript_path: transcript, stop_hook_active: false }),
-			),
-			stdout: "pipe",
-			stderr: "pipe",
-			env: { ...process.env, PATH: emptyBin },
-		});
+		const result = runCodexStop(home, transcript);
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.toString()).toBe("");
 	});
