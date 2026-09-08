@@ -114,7 +114,8 @@ function evaluateCodexPromptMechanism(): Pick<CaptureHarnessResult, "mechanizedE
 		mechanizedExplicitRequest:
 			explicit.some(
 				(section) =>
-					section.id === "core.capture.explicit-memory-request" && section.content.includes("Save the durable fact in this turn"),
+					section.id === "core.capture.explicit-memory-request" &&
+					section.content.includes("Save the durable fact in this turn"),
 			) && negative.length === 0,
 		notes: [
 			"Codex UserPromptSubmit deterministically injects a Core capture check for explicit memory requests.",

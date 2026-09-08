@@ -117,7 +117,7 @@ async function importBundle(
 		throw new PluginBootstrapFailure(
 			"plugin_entrypoint_invalid",
 			"The installed plugin entrypoint is not a regular file",
-			);
+		);
 	const imported = (await import(`${pathToFileURL(entrypoint).href}?v=${encodeURIComponent(receipt.version)}`)) as {
 		default?: unknown;
 	};
