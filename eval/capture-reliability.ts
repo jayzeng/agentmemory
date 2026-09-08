@@ -91,10 +91,13 @@ function evaluateClaudeMechanism(): Pick<
 			),
 		]);
 		paths.push(cleared);
+		const explicitCheck = checkCaptureTranscript(explicit, "capture-eval");
+		const completedCheck = checkCaptureTranscript(completed, "capture-eval");
+		const clearedCheck = checkCaptureTranscript(cleared, "capture-eval");
 		return {
-			mechanizedExplicitRequest: Boolean(checkCaptureTranscript(explicit, "capture-eval")?.pendingSignal),
-			mechanizedCompletedWork: Boolean(checkCaptureTranscript(completed, "capture-eval")?.pendingSignal),
-			mechanizedWriteClearsSignal: checkCaptureTranscript(cleared, "capture-eval")?.pendingSignal === undefined,
+			mechanizedExplicitRequest: Boolean(explicitCheck?.pendingSignal),
+			mechanizedCompletedWork: Boolean(completedCheck?.pendingSignal),
+			mechanizedWriteClearsSignal: clearedCheck !== null && clearedCheck.pendingSignal === undefined,
 			notes: ["Claude is the only local harness with a transcript-aware Stop capture check."],
 		};
 	} finally {
