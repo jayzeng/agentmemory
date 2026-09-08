@@ -75,6 +75,7 @@ import {
 	probeEmbeddings,
 	readFileSafe,
 	readHookMode,
+	readWaitlistState,
 	redactSecrets,
 	runQmdEmbedDetached,
 	runQmdSearch,
@@ -89,6 +90,7 @@ import {
 	todayStr,
 	topicPath,
 	uninstallSkills,
+	writeWaitlistState,
 } from "./core.js";
 import {
 	detectHookAgents,
@@ -110,6 +112,7 @@ import {
 } from "./plugin-bootstrap.js";
 import type { PluginContextSectionV1 } from "./plugin-host.js";
 import { InstalledPluginRuntimeV1 } from "./plugin-runtime.js";
+import { submitWaitlistEmail } from "./plugin-service.js";
 import {
 	type AutoUpgradeOutcome,
 	checkForUpgrades,
@@ -1238,6 +1241,18 @@ async function promptYesNo(question: string, defaultYes: boolean): Promise<boole
 	}
 }
 
+async function promptText(question: string): Promise<string> {
+	const readline = await import("node:readline/promises");
+	const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+	try {
+		return (await rl.question(`${question} `)).trim();
+	} finally {
+		rl.close();
+	}
+}
+
+const WAITLIST_EMAIL_RE = /^[^\s@]{1,254}@[^\s@]{1,254}\.[^\s@]{1,63}$/;
+
 async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise<InstallHooksReport | undefined> {
 	const json = hasFlag(flags, "json");
 	const requested = getFlag(flags, "only");
@@ -1931,6 +1946,57 @@ async function cmdSetup(flags: Record<string, string | boolean>) {
 		);
 	}
 	console.log("");
+
+	// Last step, and only ever asked once: an interactive human (not a scripted/agent-driven
+	// setup, and not someone who explicitly asked for --yes) can opt into the Pro beta waitlist
+	// without leaving the CLI. Network failures never fail setup — see submitWaitlistEmail.
+	const askWaitlist = interactive && !hasFlag(flags, "yes");
+	if (askWaitlist && !readWaitlistState().asked) {
+		const wantsWaitlist = await promptYesNo("Want early access to AgentMemory Pro? Join the beta waitlist", false);
+		if (wantsWaitlist) {
+			const email = await promptText("What email should we send beta access to?");
+			if (WAITLIST_EMAIL_RE.test(email)) {
+				const joined = await submitWaitlistEmail(email, { source: "cli-setup" });
+				writeWaitlistState({ asked: true, joined, email: joined ? email : undefined });
+				console.log(
+					colorize(
+						joined
+							? "You're on the list — we'll only email you about Pro access."
+							: "Couldn't reach the waitlist service — run `agent-memory waitlist --email <you@example.com>` later.",
+						"dim",
+					),
+				);
+			} else {
+				writeWaitlistState({ asked: true, joined: false });
+				console.log(colorize("That didn't look like a valid email — skipping.", "dim"));
+			}
+		} else {
+			writeWaitlistState({ asked: true, joined: false });
+		}
+	}
+}
+
+/**
+ * Standalone entry point onto the Pro beta waitlist for anyone who skipped the
+ * prompt during `setup` (or ran it non-interactively). `--email` works from a
+ * script or CI; without it, an interactive TTY is prompted instead.
+ */
+async function cmdWaitlist(flags: Record<string, string | boolean>): Promise<void> {
+	const json = hasFlag(flags, "json");
+	let email = getFlag(flags, "email");
+	if (!email) {
+		if (!process.stdin.isTTY || !process.stdout.isTTY) {
+			exitError("waitlist requires --email <address> when not running in an interactive terminal", json);
+		}
+		email = await promptText("What email should we send Pro beta access to?");
+	}
+	if (!WAITLIST_EMAIL_RE.test(email)) {
+		exitError(`Not a valid email address: ${email}`, json);
+	}
+	const joined = await submitWaitlistEmail(email, { source: "cli-waitlist-cmd" });
+	writeWaitlistState({ asked: true, joined, email: joined ? email : undefined });
+	if (!joined) exitError("Couldn't reach the waitlist service — try again later", json);
+	output(json ? { ok: true, email } : `You're on the list, ${email} — we'll only email you about Pro access.`, json);
 }
 
 /**
@@ -3690,6 +3756,9 @@ async function main() {
 			break;
 		case "setup":
 			await cmdSetup(flags);
+			break;
+		case "waitlist":
+			await cmdWaitlist(flags);
 			break;
 		case "status":
 			await cmdStatus(flags);
