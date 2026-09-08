@@ -81,7 +81,7 @@ function userPromptSubmitHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook user-prompt-submit --agent ${agent}`;
 }
 
-function stopHookCommand(agent: "claude"): string {
+function stopHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook stop --agent ${agent}`;
 }
 
@@ -230,14 +230,17 @@ export function isUserPromptSubmitInstalled(homeDir: string, key: HookAgentKey):
 	return false;
 }
 
-/**
- * Read-only check whether the periodic Stop-hook memory-write nudge is present.
- * Claude Code only — Codex/Cursor/opencode don't have a confirmed equivalent
- * block/reason protocol for this event yet.
- */
+/** Read-only check whether the Stop-hook memory-write capture check is present. */
 export function isStopHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
 		if (key === "claude") return hasClaudeHookGroup(homeDir, "Stop", stopHookCommand("claude"));
+		if (key === "codex") {
+			const configPath = path.join(homeDir, ".codex", "config.toml");
+			if (!fs.existsSync(configPath)) return false;
+			const existing = fs.readFileSync(configPath, "utf-8");
+			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
+			return existing.includes(`command = "${stopHookCommand("codex")}"`);
+		}
 	} catch {}
 	return false;
 }
@@ -543,6 +546,7 @@ function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookIns
 	const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf-8") : "";
 	const sessionCommand = sessionStartHookCommand("codex");
 	const promptCommand = userPromptSubmitHookCommand("codex");
+	const stopCommand = stopHookCommand("codex");
 	const lines = [
 		HOOK_MARKER_BEGIN,
 		"[[hooks.SessionStart]]",
@@ -562,7 +566,15 @@ function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookIns
 			`command = "${promptCommand}"`,
 		);
 	}
-	lines.push(HOOK_MARKER_END);
+	lines.push(
+		"",
+		"[[hooks.Stop]]",
+		"",
+		"[[hooks.Stop.hooks]]",
+		'type = "command"',
+		`command = "${stopCommand}"`,
+		HOOK_MARKER_END,
+	);
 	const block = lines.join("\n");
 
 	if (existing.includes(HOOK_MARKER_BEGIN)) {
