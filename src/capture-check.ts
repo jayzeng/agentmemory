@@ -16,6 +16,15 @@ function text(value: unknown): string {
 	return value.map((part) => (record(part)?.type === "text" ? String(record(part)?.text ?? "") : "")).join("\n");
 }
 
+export function isExplicitMemoryRequest(value: unknown): boolean {
+	if (typeof value !== "string") return false;
+	const request = value.trim();
+	if (!request) return false;
+	if (/^(?:<system-reminder>|# (?:AGENTS|CLAUDE)\.md)/.test(request)) return false;
+	if (/\b(?:don['’]t|do not|never)\s+remember\b/i.test(request)) return false;
+	return /\b(?:remember\s+(?:this|that|to)|don['’]t forget\s+(?:this|that|to))\b/i.test(request);
+}
+
 function isMemoryWrite(tool: RecordValue): boolean {
 	const name = String(tool.name ?? "");
 	if (name === "memory_write" || name.endsWith("__memory_write")) return true;
@@ -77,14 +86,7 @@ export function checkCaptureTranscript(transcriptPath: unknown, sessionId: strin
 			const signal = (id: string) => createHash("sha256").update(`${sessionId}\n${id}`).digest("hex");
 			if (entry.type === "user" && entry.isMeta !== true) {
 				const request = text(message.content);
-				const injected = /^(?:<system-reminder>|# (?:AGENTS|CLAUDE)\.md)/.test(request.trimStart());
-				if (
-					!injected &&
-					/\b(?:remember\s+(?:this|that|to)|don['’]t forget\s+(?:this|that|to))\b/i.test(request) &&
-					!/\b(?:don['’]t|do not|never)\s+remember\b/i.test(request)
-				) {
-					pendingSignal = signal(String(entry.uuid ?? line));
-				}
+				if (isExplicitMemoryRequest(request)) pendingSignal = signal(String(entry.uuid ?? line));
 			}
 			if (!Array.isArray(message.content)) continue;
 			for (const part of message.content) {
