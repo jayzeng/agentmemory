@@ -514,7 +514,14 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 	}
 
 	async getManagementAction(): Promise<PluginNextActionV1 | null> {
-		return null;
+		const { DevicePairingClient } = await import("./device-pairing.js");
+		return new DevicePairingClient({
+			root: this.root,
+			coreVersion: this.coreVersion,
+			apiOrigin: this.apiOrigin,
+			accountWebOrigin: "https://agentmemory.paperpilot.me",
+			fetchImplementation: this.fetchImplementation,
+		}).getManagementAction();
 	}
 
 	private activationPath(): string {
