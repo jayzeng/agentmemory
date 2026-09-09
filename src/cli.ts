@@ -835,11 +835,35 @@ const STOP_NAG_REASON =
 
 /** Cursor's documented event hooks provide enough structured evidence to avoid transcript parsing. */
 async function cmdCursorEvent(): Promise<void> {
-	const payload = await readStdinJson<Record<string, unknown>>();
-	const result = handleCursorCaptureEvent(payload);
-	if (payload?.hook_event_name === "stop" && result.shouldFollowup) {
-		process.stdout.write(JSON.stringify({ followup_message: STOP_NAG_REASON }));
-	}
+	const TIMEOUT_MS = 3_000;
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<void>((resolve) => {
+		timer = setTimeout(() => {
+			controller.abort();
+			resolve();
+		}, TIMEOUT_MS);
+	});
+
+	const work = (async () => {
+		const payload = await readStdinJson<Record<string, unknown>>();
+		const result = handleCursorCaptureEvent(payload);
+		if (payload?.hook_event_name === "stop" && result.shouldFollowup) {
+			// This write can land after the caller has already timed out on us (see
+			// the Promise.race below) and stopped reading — swallow a resulting
+			// EPIPE instead of letting it surface as an uncaught stream error, same
+			// as cmdStop's stdout write.
+			process.stdout.once("error", () => {});
+			process.stdout.write(JSON.stringify({ followup_message: STOP_NAG_REASON }));
+		}
+	})().catch(() => {
+		// Any failure in the Cursor event hook must be swallowed — never trap the
+		// user in a stuck session or emit a message that would corrupt the
+		// harness's stdout contract.
+	});
+
+	await Promise.race([work, timeout]);
+	if (timer) clearTimeout(timer);
 }
 
 /**
@@ -2451,7 +2475,15 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 			// Stop requirement: isHookInstalled(codex|qoder) going false must not
 			// read as "no automatic context" when SessionStart is actually live —
 			// Stop status is reported separately below via wantsWriteHooks/stopInstalled.
-			const sessionStartInstalled = homeDir ? isSessionStartInstalled(homeDir, target.key) : false;
+			// Cursor is the one exception: its "SessionStart + event-driven capture
+			// hooks active" detail line (below) reports on both pieces together, so
+			// it needs isHookInstalled's bundled check rather than the narrower
+			// SessionStart-only signal isSessionStartInstalled gives every other agent.
+			const sessionStartInstalled = homeDir
+				? target.key === "cursor"
+					? isHookInstalled(homeDir, target.key)
+					: isSessionStartInstalled(homeDir, target.key)
+				: false;
 			const supportsPerTurn = target.key === "claude" || target.key === "codex";
 			// opencode only gets a static instructions file (no command-execution hook API in its
 			// plugin surface we could verify) — never report it as a guaranteed-automatic hook.
@@ -3507,8 +3539,12 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<void> 
 				const result = await scratchpadAction({ action: "add", text: content, sessionId: "mcp-serve" });
 				return result.text;
 			}
-			await memoryWrite({ target: target as "daily" | "long_term", content, sessionId: "mcp-serve" });
-			return `Written to ${target} memory.`;
+			// Return the tool's real result text (not a fixed placeholder) — Cursor's
+			// afterMCPExecution capture check (mcpWriteSucceeded in cursor-capture.ts)
+			// pattern-matches this exact text to recognize a verified write, the same
+			// way it recognizes the CLI's `agent-memory write` stdout.
+			const result = await memoryWrite({ target: target as "daily" | "long_term", content, sessionId: "mcp-serve" });
+			return result.text;
 		},
 	);
 

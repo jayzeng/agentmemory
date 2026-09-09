@@ -10,10 +10,20 @@ type RecordValue = Record<string, unknown>;
 const STATE_VERSION = 1;
 const MAX_SESSION_FILES = 256;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// How many "stop" events (per conversation) must elapse before an unresolved
+// pending signal is re-nudged. Mirrors STOP_NAG_INTERVAL's cadence for
+// Claude/Codex/Qoder (cli.ts) — without this, a user who ignores the first
+// nudge would never be reminded again for that same uncaptured item, unlike
+// every other supported agent.
+const CURSOR_NAG_INTERVAL = 6;
+// Throttle for pruneStateDir's directory scan — see pruneStateDir below.
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 export interface CursorCaptureSessionState {
 	pendingSignal?: string;
 	lastNudgedSignal?: string;
+	lastNudgedAtStopCount?: number;
+	stopCount?: number;
 	lastSeenAt: number;
 }
 
@@ -49,6 +59,22 @@ function renderedText(value: unknown): string {
 		.map((key) => renderedText(obj[key]))
 		.filter(Boolean)
 		.join("\n");
+}
+
+/**
+ * Deterministic stringify: object keys are sorted before serialization. Used
+ * for signal identity so a payload's key order (which callers must not rely
+ * on) can't change the resulting hash for semantically identical edits.
+ */
+function stableStringify(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+	if (value && typeof value === "object") {
+		const entries = Object.keys(value as Record<string, unknown>)
+			.sort()
+			.map((key) => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`);
+		return `{${entries.join(",")}}`;
+	}
+	return JSON.stringify(value);
 }
 
 function hasVerifiedReceipt(value: unknown): boolean {
@@ -114,7 +140,7 @@ export function reduceCursorCaptureEvent(
 	} else if (event === "afterFileEdit") {
 		const filePath = typeof payload.file_path === "string" ? payload.file_path : "";
 		if (filePath) {
-			const identity = `${String(payload.generation_id ?? "")}\n${filePath}\n${JSON.stringify(payload.edits ?? [])}`;
+			const identity = `${String(payload.generation_id ?? "")}\n${filePath}\n${stableStringify(payload.edits ?? [])}`;
 			const pendingSignal = signal(conversationId, "file-edit", identity);
 			if (next.pendingSignal !== pendingSignal) {
 				next.pendingSignal = pendingSignal;
@@ -132,10 +158,19 @@ export function reduceCursorCaptureEvent(
 			changed = true;
 		}
 	} else if (event === "stop") {
-		if (payload.status === "completed" && next.pendingSignal && next.lastNudgedSignal !== next.pendingSignal) {
-			next.lastNudgedSignal = next.pendingSignal;
+		if (payload.status === "completed") {
+			const stopCount = (next.stopCount ?? 0) + 1;
+			next.stopCount = stopCount;
 			changed = true;
-			shouldFollowup = true;
+			if (next.pendingSignal) {
+				const signalChanged = next.lastNudgedSignal !== next.pendingSignal;
+				const dueForRenag = stopCount - (next.lastNudgedAtStopCount ?? 0) >= CURSOR_NAG_INTERVAL;
+				if (signalChanged || dueForRenag) {
+					next.lastNudgedSignal = next.pendingSignal;
+					next.lastNudgedAtStopCount = stopCount;
+					shouldFollowup = true;
+				}
+			}
 		}
 	}
 
@@ -165,6 +200,15 @@ function pruneStateDir(now: number): void {
 	try {
 		const dir = stateDir();
 		if (!fs.existsSync(dir)) return;
+		// This runs on every hook event (one short-lived CLI invocation apiece);
+		// a full readdir+stat pass is unnecessary overhead on the vast majority of
+		// those calls, so only actually scan once per PRUNE_INTERVAL_MS.
+		const marker = path.join(dir, ".pruned");
+		try {
+			if (now - fs.statSync(marker).mtimeMs < PRUNE_INTERVAL_MS) return;
+		} catch {
+			// No marker yet (first run) — fall through and scan.
+		}
 		const files = fs
 			.readdirSync(dir)
 			.filter((name) => name.endsWith(".json"))
@@ -177,6 +221,7 @@ function pruneStateDir(now: number): void {
 		for (const [index, entry] of files.entries()) {
 			if (index >= MAX_SESSION_FILES || now - entry.mtimeMs > SESSION_TTL_MS) fs.rmSync(entry.file, { force: true });
 		}
+		fs.writeFileSync(marker, "");
 	} catch {
 		// Cleanup is best-effort and must never affect capture.
 	}
