@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A persistent memory system for coding agents — Claude Code, OpenAI Codex, Cursor, opencode. Provides persistent memory across sessions via plain markdown files, with optional semantic search powered by [qmd](https://github.com/tobi/qmd). Published as `myagentmemory` on npm; binary is `agent-memory`.
+A persistent memory system for coding agents — Claude Code, OpenAI Codex, Cursor, Qoder, opencode. Provides persistent memory across sessions via plain markdown files, with optional semantic search powered by [qmd](https://github.com/tobi/qmd). Published as `myagentmemory` on npm; binary is `agent-memory`.
 
 ## Architecture
 
@@ -27,7 +27,7 @@ A persistent memory system for coding agents — Claude Code, OpenAI Codex, Curs
 - **`src/cli.ts`**: CLI entry point — `agent-memory` binary with all subcommands; imports from core.ts and hooks.ts
 - **`src/cli-spec.ts`**: Declarative command/flag spec (`CliOptionSpec`) used by the completions generator
 - **`src/completions.ts`**: Shell completion script generation (bash/zsh/fish), driven by cli-spec
-- **`src/hooks.ts`**: Install/uninstall managed hooks into Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/config.toml`), Cursor (`.mdc` rule), and opencode. Claude Code and Codex both get mode-independent `Stop` capture checks backed by the shared Core transcript/state machine; Claude emits `hookSpecificOutput.additionalContext`, while Codex emits its native `decision: "block"` + `reason` response. Codex invokes Core directly with no adapter/runtime dependency.
+- **`src/hooks.ts`**: Install/uninstall managed hooks into Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/config.toml`), Cursor, Qoder (`~/.qoder/settings.json`), and opencode. Claude Code, Codex, and Qoder get mode-independent `Stop` capture checks backed by the shared Core transcript/state machine; Claude emits `hookSpecificOutput.additionalContext`, Codex emits `decision: "block"` + `reason`, and Qoder uses its native exit-2/stderr continuation contract.
 - **`src/plugin-service.ts`**, **`plugin-bootstrap.ts`**, **`plugin-host.ts`**, **`plugin-runtime.ts`**: Plugin protocol for optional Pro tier — `InstalledPluginRuntimeV1` loads the Pro bundle from `~/.agent-memory/plugins/`
 - **`skills/`**: SKILL.md files for Claude Code and Codex that invoke the CLI
 - **`eval/`**: Token-savings modeling (`token-savings.ts`), LLM feedback eval (`run.ts`), regression dataset

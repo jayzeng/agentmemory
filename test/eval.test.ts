@@ -11,14 +11,14 @@ const datasetUrl = new URL("../eval/datasets/external-feedback-v1.json", import.
 const expandedDatasetUrl = new URL("../eval/datasets/agent-memory-regression-v1.json", import.meta.url);
 
 describe("cross-harness capture reliability", () => {
-	test("measures Claude and Codex as fully mechanized without overstating delegated Pi coverage", () => {
+	test("measures Claude, Codex, and Qoder as fully mechanized without overstating delegated Pi coverage", () => {
 		const report = runCaptureReliabilityEvaluation();
 		expect(report.passed).toBe(true);
 		expect(report.schemaVersion).toBe("capture-reliability-v1");
 		expect(report.metrics.measuredHarnesses).toBe(4);
 		expect(report.metrics.instructionCoverage).toBe(1);
-		expect(report.metrics.mechanizedExplicitRequestCoverage).toBe(0.5);
-		expect(report.metrics.mechanizedImmediateCoverage).toBe(0.5);
+		expect(report.metrics.mechanizedExplicitRequestCoverage).toBe(0.75);
+		expect(report.metrics.mechanizedImmediateCoverage).toBe(0.75);
 		expect(report.metrics.delegatedHarnesses).toBe(1);
 
 		const claude = report.harnesses.find((result) => result.harness === "claude");
@@ -34,12 +34,17 @@ describe("cross-harness capture reliability", () => {
 		expect(codex?.mechanizedCompletedWork).toBe(true);
 		expect(codex?.mechanizedWriteClearsSignal).toBe(true);
 
-		for (const harness of ["cursor", "qoder"]) {
-			const result = report.harnesses.find((entry) => entry.harness === harness);
-			expect(result?.instructionContract).toBe(true);
-			expect(result?.enforcement).toBe("instruction-guided");
-			expect(result?.mechanizedExplicitRequest).toBeNull();
-		}
+		const qoder = report.harnesses.find((result) => result.harness === "qoder");
+		expect(qoder?.instructionContract).toBe(true);
+		expect(qoder?.enforcement).toBe("mechanized");
+		expect(qoder?.mechanizedExplicitRequest).toBe(true);
+		expect(qoder?.mechanizedCompletedWork).toBe(true);
+		expect(qoder?.mechanizedWriteClearsSignal).toBe(true);
+
+		const cursor = report.harnesses.find((entry) => entry.harness === "cursor");
+		expect(cursor?.instructionContract).toBe(true);
+		expect(cursor?.enforcement).toBe("instruction-guided");
+		expect(cursor?.mechanizedExplicitRequest).toBeNull();
 
 		const pi = report.harnesses.find((result) => result.harness === "pi");
 		expect(pi?.enforcement).toBe("delegated");
