@@ -99,6 +99,7 @@ import {
 	type InstallHooksReport,
 	installHooks,
 	isHookInstalled,
+	isSessionStartInstalled,
 	isStopHookInstalled,
 	isUserPromptSubmitInstalled,
 	uninstallHooks,
@@ -747,8 +748,14 @@ async function cmdUserPromptSubmit(_flags: Record<string, string | boolean>): Pr
 // repeatedly" against "don't block every single turn". Deliberately short —
 // most real sessions are well under a dozen turns, so a wider interval meant
 // the nudge rarely fired in practice (see stop-hook.json in the wild: sessions
-// topping out around 7 turns, zero nags ever recorded).
-const STOP_NAG_INTERVAL = 6;
+// topping out around 7 turns, zero nags ever recorded). Tuned from Claude-only
+// field data; Codex's own Stop cadence hasn't been measured yet, so it
+// provisionally shares Claude's value below rather than guessing a different
+// number — override codex independently once real Codex session data exists.
+const STOP_NAG_INTERVAL: Record<"claude" | "codex", number> = { claude: 6, codex: 6 };
+function nagInterval(agent: string): number {
+	return agent === "codex" ? STOP_NAG_INTERVAL.codex : STOP_NAG_INTERVAL.claude;
+}
 // Bound state/stop-hook.json so it can't grow unboundedly across many sessions.
 const STOP_HOOK_MAX_SESSIONS = 50;
 
@@ -791,16 +798,21 @@ function writeStopHookState(state: StopHookState): void {
  * corrupt or unwritable state file just means the nudge falls back to
  * "never fires" rather than breaking the Stop hook.
  */
-function shouldNagOnStop(sessionId: string, now: number, capture: CaptureCheck | null): boolean {
+function shouldNagOnStop(agent: string, sessionId: string, now: number, capture: CaptureCheck | null): boolean {
 	try {
 		const state = readStopHookState();
-		const existing = state.sessions[sessionId] ?? { count: 0, lastNagCount: 0, lastSeenAt: now };
+		// Namespaced by agent: session_id is a per-host random UUID, but sharing one
+		// bounded LRU across both hosts unnamespaced would let one host's writes
+		// evict or collide with the other's nag/capture state.
+		const key = `${agent === "codex" ? "codex" : "claude"}:${sessionId}`;
+		const interval = nagInterval(agent);
+		const existing = state.sessions[key] ?? { count: 0, lastNagCount: 0, lastSeenAt: now };
 		const count = existing.count + 1;
 		const shouldNag = capture
 			? !!capture.pendingSignal &&
-				(capture.pendingSignal !== existing.lastCaptureSignal || count - existing.lastNagCount >= STOP_NAG_INTERVAL)
-			: count - existing.lastNagCount >= STOP_NAG_INTERVAL;
-		state.sessions[sessionId] = {
+				(capture.pendingSignal !== existing.lastCaptureSignal || count - existing.lastNagCount >= interval)
+			: count - existing.lastNagCount >= interval;
+		state.sessions[key] = {
 			lastCaptureSignal: capture?.pendingSignal,
 			count,
 			lastNagCount: shouldNag ? count : existing.lastNagCount,
@@ -851,11 +863,15 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
 		const sessionId = typeof payload?.session_id === "string" ? payload.session_id : "";
 		if (!sessionId || payload?.stop_hook_active === true) return;
 		const capture = checkCaptureTranscript(payload?.transcript_path, sessionId);
-		if (shouldNagOnStop(sessionId, Date.now(), capture)) {
+		if (shouldNagOnStop(agent ?? "claude", sessionId, Date.now(), capture)) {
 			const response =
 				agent === "codex"
 					? { decision: "block", reason: STOP_NAG_REASON }
 					: { hookSpecificOutput: { hookEventName: "Stop", additionalContext: STOP_NAG_REASON } };
+			// This write can land after the caller has already timed out on us (see
+			// the Promise.race below) and stopped reading — swallow a resulting
+			// EPIPE instead of letting it surface as an uncaught stream error.
+			process.stdout.once("error", () => {});
 			process.stdout.write(JSON.stringify(response));
 		}
 	})().catch(() => {
@@ -1287,7 +1303,10 @@ async function cmdInstallHooks(flags: Record<string, string | boolean>): Promise
 		if (target.key !== "claude" && target.key !== "codex") return true; // cursor/opencode: static only
 		const prompt = isUserPromptSubmitInstalled(homeDir, target.key);
 		if (mode === "per-turn" ? !prompt : prompt) return false;
-		// Stop (write-side nudge) is Claude Code only and mode-independent.
+		// Stop (write-side nudge) is mode-independent. Claude checks it explicitly
+		// here because isHookInstalled(claude) never covers it; Codex's Stop
+		// requirement is already folded into isHookInstalled(codex) above (see
+		// hooks.ts), so it doesn't need a separate check in this branch.
 		if (target.key === "claude") {
 			if (!isStopHookInstalled(homeDir, target.key)) return false;
 		}
@@ -2408,21 +2427,26 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 				detail: skillInstalled ? "SKILL.md installed" : "SKILL.md missing — agent cannot call memory",
 				fix: skillInstalled ? undefined : "agent-memory install-skills",
 			});
-			const sessionInstalled = homeDir ? isHookInstalled(homeDir, target.key) : false;
+			// SessionStart-only, deliberately independent of Codex's extra Stop
+			// requirement: isHookInstalled(codex) going false must not read as "no
+			// automatic context" when SessionStart is actually live — Stop status
+			// is reported separately below via wantsWriteHooks/stopInstalled.
+			const sessionStartInstalled = homeDir ? isSessionStartInstalled(homeDir, target.key) : false;
 			const supportsPerTurn = target.key === "claude" || target.key === "codex";
 			// opencode only gets a static instructions file (no command-execution hook API in its
 			// plugin surface we could verify) — never report it as a guaranteed-automatic hook.
 			const guaranteedAutomatic = target.key !== "opencode";
 			const promptInstalled = homeDir && supportsPerTurn ? isUserPromptSubmitInstalled(homeDir, target.key) : false;
 			const wantsPerTurn = hookMode === "per-turn" && supportsPerTurn;
-			// Claude exposes Stop health as a separate row-level check. Codex Stop
-			// is already required by isHookInstalled(codex), so do not double-count it here.
-			const wantsWriteHooks = target.key === "claude";
+			// Both Claude and Codex gate a Stop-hook memory-write nudge; report it
+			// identically for both as a suffix on the detail text.
+			const wantsWriteHooks = target.key === "claude" || target.key === "codex";
 			const stopInstalled = homeDir && wantsWriteHooks ? isStopHookInstalled(homeDir, target.key) : false;
 			const writeHooksOk = !wantsWriteHooks || stopInstalled;
-			const ok = sessionInstalled && guaranteedAutomatic && (wantsPerTurn ? promptInstalled : true) && writeHooksOk;
+			const ok =
+				sessionStartInstalled && guaranteedAutomatic && (wantsPerTurn ? promptInstalled : true) && writeHooksOk;
 			let detail: string;
-			if (!sessionInstalled) {
+			if (!sessionStartInstalled) {
 				detail = "not installed — no automatic context";
 			} else if (!guaranteedAutomatic) {
 				detail = "static instructions installed — model must run context manually, not guaranteed";

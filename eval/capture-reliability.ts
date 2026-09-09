@@ -4,6 +4,12 @@ import * as path from "node:path";
 
 import { checkCaptureTranscript, isExplicitMemoryRequest } from "../src/capture-check.js";
 import { coreCaptureContextForQuery } from "../src/plugin-runtime.js";
+import {
+	CODEX_ROLLOUT_SESSION as CODEX_SESSION,
+	codexCall,
+	codexMeta,
+	codexOutput,
+} from "../test/fixtures/codex-rollout.js";
 
 export type CaptureHarness = "claude" | "codex" | "cursor" | "qoder" | "pi";
 export type CaptureEnforcement = "mechanized" | "partially-mechanized" | "instruction-guided" | "delegated";
@@ -71,36 +77,6 @@ function toolExchange(name: string, id: string, input: unknown, content: string)
 		{ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } },
 		{ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content }] } },
 	];
-}
-
-const CODEX_SESSION = "11111111-2222-3333-4444-555555555555";
-
-function codexMeta(): unknown {
-	return {
-		timestamp: "2026-09-08T22:00:00Z",
-		type: "session_meta",
-		payload: { session_id: CODEX_SESSION, id: CODEX_SESSION, cwd: "/repo", source: "cli" },
-	};
-}
-
-function codexCall(type: "function_call" | "custom_tool_call", name: string, callId: string, args: unknown): unknown {
-	return {
-		timestamp: "2026-09-08T22:00:01Z",
-		type: "response_item",
-		payload: { type, name, call_id: callId, arguments: typeof args === "string" ? args : JSON.stringify(args) },
-	};
-}
-
-function codexOutput(
-	type: "function_call_output" | "custom_tool_call_output",
-	callId: string,
-	value: unknown,
-): unknown {
-	return {
-		timestamp: "2026-09-08T22:00:02Z",
-		type: "response_item",
-		payload: { type, call_id: callId, output: value },
-	};
 }
 
 function evaluateClaudeMechanism(): Pick<

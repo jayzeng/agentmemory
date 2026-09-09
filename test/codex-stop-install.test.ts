@@ -11,9 +11,9 @@ import {
 	isUserPromptSubmitInstalled,
 	uninstallHooks,
 } from "../src/hooks.js";
+import { codexCall, codexMeta, codexOutput, CODEX_ROLLOUT_SESSION as SESSION } from "./fixtures/codex-rollout.js";
 
 const createdHomes: string[] = [];
-const SESSION = "11111111-2222-3333-4444-555555555555";
 const CLI = path.join(import.meta.dir, "..", "src", "cli.ts");
 
 function makeHome(): string {
@@ -31,63 +31,23 @@ function writeRollout(home: string, items: unknown[]): string {
 	return file;
 }
 
-function codexMeta(): unknown {
-	return {
-		timestamp: "2026-09-08T22:00:00Z",
-		type: "session_meta",
-		payload: { session_id: SESSION, id: SESSION, cwd: "/repo", source: "cli" },
-	};
-}
-
 function patchExchange(): unknown[] {
 	return [
-		{
-			timestamp: "2026-09-08T22:00:01Z",
-			type: "response_item",
-			payload: {
-				type: "custom_tool_call",
-				name: "apply_patch",
-				call_id: "patch-1",
-				arguments: "*** Begin Patch\n*** End Patch",
-			},
-		},
-		{
-			timestamp: "2026-09-08T22:00:02Z",
-			type: "response_item",
-			payload: {
-				type: "custom_tool_call_output",
-				call_id: "patch-1",
-				output: { content: "Done!", success: true },
-			},
-		},
+		codexCall("custom_tool_call", "apply_patch", "patch-1", "*** Begin Patch\n*** End Patch"),
+		codexOutput("custom_tool_call_output", "patch-1", { content: "Done!", success: true }),
 	];
 }
 
 function verifiedWriteExchange(): unknown[] {
 	return [
-		{
-			timestamp: "2026-09-08T22:00:03Z",
-			type: "response_item",
-			payload: {
-				type: "function_call",
-				name: "exec_command",
-				call_id: "write-1",
-				arguments: JSON.stringify({ cmd: 'agent-memory write --content "staging uses PostgreSQL"' }),
-			},
-		},
-		{
-			timestamp: "2026-09-08T22:00:04Z",
-			type: "response_item",
-			payload: {
-				type: "function_call_output",
-				call_id: "write-1",
-				output: {
-					content:
-						"Chunk ID: abc\nProcess exited with code 0\nFinal output:\nAppended to daily log: /memory/daily/2026-09-08.md",
-					success: true,
-				},
-			},
-		},
+		codexCall("function_call", "exec_command", "write-1", {
+			cmd: 'agent-memory write --content "staging uses PostgreSQL"',
+		}),
+		codexOutput("function_call_output", "write-1", {
+			content:
+				"Chunk ID: abc\nProcess exited with code 0\nFinal output:\nAppended to daily log: /memory/daily/2026-09-08.md",
+			success: true,
+		}),
 	];
 }
 

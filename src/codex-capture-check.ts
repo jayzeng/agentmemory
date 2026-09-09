@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 
 const MAX_TRANSCRIPT_BYTES = 512 * 1024;
+const HEAD_PROBE_BYTES = 8 * 1024;
 const EDIT_TOOLS = new Set(["apply_patch"]);
 
 type RecordValue = Record<string, unknown>;
@@ -97,6 +98,24 @@ function responseOutput(payload: RecordValue): { id: string; output: RecordValue
 	return { id, output: payload };
 }
 
+/**
+ * Read just the first record of the rollout file. session_meta — the only
+ * record carrying a session id — is always written first, so this lets
+ * ownership be verified even when the file has grown past MAX_TRANSCRIPT_BYTES
+ * and the tail-only scan below no longer sees it.
+ */
+function readHeadRecord(fd: number): RecordValue | undefined {
+	try {
+		const bytes = Buffer.alloc(HEAD_PROBE_BYTES);
+		const length = fs.readSync(fd, bytes, 0, bytes.length, 0);
+		const content = bytes.subarray(0, length).toString("utf8");
+		const end = content.indexOf("\n");
+		return record(JSON.parse(end === -1 ? content : content.slice(0, end)));
+	} catch {
+		return undefined;
+	}
+}
+
 /** Parse a Codex rollout JSONL tail using the persisted rollout schema. */
 export function checkCodexCaptureTranscript(transcriptPath: unknown, sessionId: string): CodexCaptureCheck | null {
 	if (typeof transcriptPath !== "string" || !transcriptPath) return null;
@@ -106,6 +125,17 @@ export function checkCodexCaptureTranscript(transcriptPath: unknown, sessionId: 
 		const stat = fs.fstatSync(fd);
 		if (!stat.isFile()) return null;
 		const start = Math.max(0, stat.size - MAX_TRANSCRIPT_BYTES);
+		// The tail-only read below skips session_meta once the rollout outgrows the
+		// window, silently dropping the one ownership check this parser has. Probe
+		// the head separately in that case so a mismatched session still fails closed.
+		if (start > 0) {
+			const head = readHeadRecord(fd);
+			if (head?.type === "session_meta") {
+				const payload = record(head.payload);
+				const persistedSessionId = payload?.session_id ?? payload?.id;
+				if (typeof persistedSessionId === "string" && persistedSessionId !== sessionId) return null;
+			}
+		}
 		const bytes = Buffer.alloc(Math.min(stat.size, MAX_TRANSCRIPT_BYTES));
 		const length = fs.readSync(fd, bytes, 0, bytes.length, start);
 		let content = bytes.subarray(0, length).toString("utf8");

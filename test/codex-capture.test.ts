@@ -5,8 +5,12 @@ import * as path from "node:path";
 
 import { checkCaptureTranscript } from "../src/capture-check.js";
 import { checkCodexCaptureTranscript } from "../src/codex-capture-check.js";
-
-const SESSION = "11111111-2222-3333-4444-555555555555";
+import {
+	codexCall as call,
+	codexMeta as meta,
+	codexOutput as output,
+	CODEX_ROLLOUT_SESSION as SESSION,
+} from "./fixtures/codex-rollout.js";
 
 function writeRollout(items: unknown[]): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-codex-rollout-"));
@@ -15,36 +19,12 @@ function writeRollout(items: unknown[]): string {
 	return file;
 }
 
-function meta(sessionId = SESSION): unknown {
-	return {
-		timestamp: "2026-09-08T22:00:00Z",
-		type: "session_meta",
-		payload: { session_id: sessionId, id: sessionId, cwd: "/repo", source: "cli" },
-	};
-}
-
 function user(message: string): unknown {
 	return {
 		timestamp: "2026-09-08T22:00:01Z",
 		ordinal: 1,
 		type: "event_msg",
 		payload: { type: "user_message", message, kind: "plain" },
-	};
-}
-
-function call(type: "function_call" | "custom_tool_call", name: string, callId: string, args: unknown): unknown {
-	return {
-		timestamp: "2026-09-08T22:00:02Z",
-		type: "response_item",
-		payload: { type, name, call_id: callId, arguments: typeof args === "string" ? args : JSON.stringify(args) },
-	};
-}
-
-function output(type: "function_call_output" | "custom_tool_call_output", callId: string, value: unknown): unknown {
-	return {
-		timestamp: "2026-09-08T22:00:03Z",
-		type: "response_item",
-		payload: { type, call_id: callId, output: value },
 	};
 }
 
@@ -109,6 +89,23 @@ describe("Codex rollout capture parser", () => {
 	test("fails closed when rollout session metadata belongs to another session", () => {
 		const file = writeRollout([meta("different-session"), user("Remember this: staging uses PostgreSQL.")]);
 		try {
+			expect(checkCodexCaptureTranscript(file, SESSION)).toBeNull();
+		} finally {
+			fs.rmSync(path.dirname(file), { recursive: true, force: true });
+		}
+	});
+
+	test("still fails closed on a foreign session once the rollout outgrows the tail-scan window", () => {
+		const file = writeRollout([meta("different-session")]);
+		// Push the file past MAX_TRANSCRIPT_BYTES so the tail-only scan alone would
+		// never see session_meta (it sits at the very start) and would otherwise fall
+		// through to trusting the trailing explicit-memory-request line unchecked.
+		fs.appendFileSync(
+			file,
+			`${"x".repeat(600_000)}\n${JSON.stringify(user("Remember this: staging uses PostgreSQL."))}\n`,
+		);
+		try {
+			expect(fs.statSync(file).size).toBeGreaterThan(512 * 1024);
 			expect(checkCodexCaptureTranscript(file, SESSION)).toBeNull();
 		} finally {
 			fs.rmSync(path.dirname(file), { recursive: true, force: true });
