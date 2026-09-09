@@ -11,14 +11,14 @@ const datasetUrl = new URL("../eval/datasets/external-feedback-v1.json", import.
 const expandedDatasetUrl = new URL("../eval/datasets/agent-memory-regression-v1.json", import.meta.url);
 
 describe("cross-harness capture reliability", () => {
-	test("measures Claude, Codex, and Qoder as fully mechanized without overstating delegated Pi coverage", () => {
+	test("measures every local harness as fully mechanized without overstating delegated Pi coverage", () => {
 		const report = runCaptureReliabilityEvaluation();
 		expect(report.passed).toBe(true);
 		expect(report.schemaVersion).toBe("capture-reliability-v1");
 		expect(report.metrics.measuredHarnesses).toBe(4);
 		expect(report.metrics.instructionCoverage).toBe(1);
-		expect(report.metrics.mechanizedExplicitRequestCoverage).toBe(0.75);
-		expect(report.metrics.mechanizedImmediateCoverage).toBe(0.75);
+		expect(report.metrics.mechanizedExplicitRequestCoverage).toBe(1);
+		expect(report.metrics.mechanizedImmediateCoverage).toBe(1);
 		expect(report.metrics.delegatedHarnesses).toBe(1);
 
 		const claude = report.harnesses.find((result) => result.harness === "claude");
@@ -41,10 +41,12 @@ describe("cross-harness capture reliability", () => {
 		expect(qoder?.mechanizedCompletedWork).toBe(true);
 		expect(qoder?.mechanizedWriteClearsSignal).toBe(true);
 
-		const cursor = report.harnesses.find((entry) => entry.harness === "cursor");
+		const cursor = report.harnesses.find((result) => result.harness === "cursor");
 		expect(cursor?.instructionContract).toBe(true);
-		expect(cursor?.enforcement).toBe("instruction-guided");
-		expect(cursor?.mechanizedExplicitRequest).toBeNull();
+		expect(cursor?.enforcement).toBe("mechanized");
+		expect(cursor?.mechanizedExplicitRequest).toBe(true);
+		expect(cursor?.mechanizedCompletedWork).toBe(true);
+		expect(cursor?.mechanizedWriteClearsSignal).toBe(true);
 
 		const pi = report.harnesses.find((result) => result.harness === "pi");
 		expect(pi?.enforcement).toBe("delegated");

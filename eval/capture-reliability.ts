@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { checkCaptureTranscript, isExplicitMemoryRequest } from "../src/capture-check.js";
+import { reduceCursorCaptureEvent } from "../src/cursor-capture.js";
 import { coreCaptureContextForQuery } from "../src/plugin-runtime.js";
 import {
 	CODEX_ROLLOUT_SESSION as CODEX_SESSION,
@@ -226,10 +227,84 @@ function evaluateQoderMechanism(): Pick<
 	}
 }
 
+function evaluateCursorMechanism(): Pick<
+	CaptureHarnessResult,
+	"mechanizedExplicitRequest" | "mechanizedCompletedWork" | "mechanizedWriteClearsSignal" | "notes"
+> {
+	const initial = { lastSeenAt: 0 };
+	const explicit = reduceCursorCaptureEvent(
+		initial,
+		{
+			conversation_id: "cursor-eval-explicit",
+			generation_id: "generation-1",
+			hook_event_name: "beforeSubmitPrompt",
+			prompt: "Remember this: staging uses PostgreSQL.",
+		},
+		1,
+	);
+	const negative = reduceCursorCaptureEvent(
+		initial,
+		{
+			conversation_id: "cursor-eval-negative",
+			generation_id: "generation-1",
+			hook_event_name: "beforeSubmitPrompt",
+			prompt: "Do not remember this: staging uses PostgreSQL.",
+		},
+		1,
+	);
+	const completed = reduceCursorCaptureEvent(
+		initial,
+		{
+			conversation_id: "cursor-eval-work",
+			generation_id: "generation-1",
+			hook_event_name: "afterFileEdit",
+			file_path: "/repo/auth.ts",
+			edits: [{ old_string: "old", new_string: "new" }],
+		},
+		1,
+	);
+	const shellCleared = reduceCursorCaptureEvent(
+		completed.state,
+		{
+			conversation_id: "cursor-eval-work",
+			generation_id: "generation-1",
+			hook_event_name: "afterShellExecution",
+			command: 'agent-memory write --content "staging uses PostgreSQL"',
+			output: "Appended to daily log: /memory/daily/2026-09-08.md",
+		},
+		2,
+	);
+	const mcpCleared = reduceCursorCaptureEvent(
+		completed.state,
+		{
+			conversation_id: "cursor-eval-work",
+			generation_id: "generation-1",
+			hook_event_name: "afterMCPExecution",
+			tool_name: "memory_write",
+			mcp_server_name: "agent-memory",
+			result_json: JSON.stringify({
+				content: [{ type: "text", text: "Appended to daily log: /memory/daily/2026-09-08.md" }],
+			}),
+		},
+		2,
+	);
+	return {
+		mechanizedExplicitRequest: Boolean(explicit.state.pendingSignal) && !negative.state.pendingSignal,
+		mechanizedCompletedWork: Boolean(completed.state.pendingSignal),
+		mechanizedWriteClearsSignal:
+			shellCleared.state.pendingSignal === undefined && mcpCleared.state.pendingSignal === undefined,
+		notes: [
+			"Cursor local user hooks record explicit requests through beforeSubmitPrompt and completed work through afterFileEdit without relying on an undocumented transcript format.",
+			"Verified AgentMemory writes clear pending state through both afterShellExecution and afterMCPExecution; Stop emits Cursor-native followup_message once per signal.",
+		],
+	};
+}
+
 export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 	const claudeMechanism = evaluateClaudeMechanism();
 	const codexMechanism = evaluateCodexMechanism();
 	const qoderMechanism = evaluateQoderMechanism();
+	const cursorMechanism = evaluateCursorMechanism();
 	const localResults = LOCAL_SKILLS.map<CaptureHarnessResult>(({ harness, path: skillPath }) => {
 		if (harness === "claude") {
 			return {
@@ -265,6 +340,18 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 				mechanizedCompletedWork: qoderMechanism.mechanizedCompletedWork,
 				mechanizedWriteClearsSignal: qoderMechanism.mechanizedWriteClearsSignal,
 				notes: qoderMechanism.notes,
+			};
+		}
+		if (harness === "cursor") {
+			return {
+				harness,
+				enforcement: "mechanized",
+				measured: true,
+				instructionContract: skillHasCaptureContract(skillPath),
+				mechanizedExplicitRequest: cursorMechanism.mechanizedExplicitRequest,
+				mechanizedCompletedWork: cursorMechanism.mechanizedCompletedWork,
+				mechanizedWriteClearsSignal: cursorMechanism.mechanizedWriteClearsSignal,
+				notes: cursorMechanism.notes,
 			};
 		}
 		return {
@@ -306,8 +393,8 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 		).length / measured.length;
 	const passed =
 		instructionCoverage === 1 &&
-		mechanizedExplicitRequestCoverage === 0.75 &&
-		mechanizedImmediateCoverage === 0.75 &&
+		mechanizedExplicitRequestCoverage === 1 &&
+		mechanizedImmediateCoverage === 1 &&
 		claudeMechanism.mechanizedWriteClearsSignal === true &&
 		codexMechanism.mechanizedExplicitRequest === true &&
 		codexMechanism.mechanizedCompletedWork === true &&
@@ -315,6 +402,9 @@ export function runCaptureReliabilityEvaluation(): CaptureReliabilityReport {
 		qoderMechanism.mechanizedExplicitRequest === true &&
 		qoderMechanism.mechanizedCompletedWork === true &&
 		qoderMechanism.mechanizedWriteClearsSignal === true &&
+		cursorMechanism.mechanizedExplicitRequest === true &&
+		cursorMechanism.mechanizedCompletedWork === true &&
+		cursorMechanism.mechanizedWriteClearsSignal === true &&
 		isExplicitMemoryRequest("Remember this: staging uses PostgreSQL.") &&
 		!isExplicitMemoryRequest("Do not remember this: staging uses PostgreSQL.");
 	return {

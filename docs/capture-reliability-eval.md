@@ -6,7 +6,7 @@ AgentMemory can only recall a durable fact after some harness actually captures 
 
 ## Enforcement classes
 
-- **mechanized** — AgentMemory itself observes the evaluated capture opportunities and can deterministically verify the relevant path. Claude Code, Codex, and Qoder are in this class.
+- **mechanized** — AgentMemory itself observes the evaluated capture opportunities and can deterministically verify the relevant path. All four locally measured harnesses (Claude Code, Codex, Cursor, and Qoder) are in this class.
 - **partially-mechanized** — at least one capture opportunity is deterministically surfaced by AgentMemory, while other important capture paths remain instruction-guided or unproven. The class remains in the schema for future integrations, but none of the currently measured harnesses use it.
 - **instruction-guided** — the installed skill tells the model to capture explicit memory requests and verified outcomes, but this repository cannot deterministically prove that a model followed the instruction on a real turn.
 - **delegated** — capture behavior is owned by another independently versioned package. Pi is delegated to `pi-memory`, so this repository does not count it in its measured denominator.
@@ -15,7 +15,7 @@ AgentMemory can only recall a durable fact after some harness actually captures 
 
 `instructionCoverage` is the fraction of locally measured harnesses whose shipped skill contains the required capture discipline: explicit memory requests are saved in-turn, write success is verified, and duplicate/routine notes are avoided.
 
-`mechanizedExplicitRequestCoverage` measures the narrower question: for how many locally measured harnesses can AgentMemory deterministically surface an explicit user request to remember something? This is 75% (`claude` + `codex` + `qoder`).
+`mechanizedExplicitRequestCoverage` measures the narrower question: for how many locally measured harnesses can AgentMemory deterministically surface an explicit user request to remember something? This is 100% across the four locally measured harnesses.
 
 `mechanizedImmediateCoverage` is stricter. A harness counts only when all three conditions are deterministically verified: an explicit memory request is surfaced, completed work creates a pending capture signal, and a verified AgentMemory write clears that signal.
 
@@ -25,11 +25,11 @@ The expected baseline is now:
 
 - measured local harnesses: 4 (`claude`, `codex`, `cursor`, `qoder`)
 - instruction coverage: 100%
-- mechanized explicit-request coverage: 75% (`claude`, `codex`, `qoder`)
-- mechanized immediate coverage: 75% (`claude`, `codex`, `qoder`)
+- mechanized explicit-request coverage: 100% (`claude`, `codex`, `cursor`, `qoder`)
+- mechanized immediate coverage: 100% (`claude`, `codex`, `cursor`, `qoder`)
 - delegated harnesses: 1 (`pi` via `pi-memory`)
 
-The stricter number moves only when CI proves completed-work detection, verified-write clearing, and the installed host Stop control path. Qoder now meets that bar through its documented transcript schema and native exit-2/stderr continuation contract. Future host-specific mechanisms should raise the metric only with the same kind of executable evidence.
+The stricter number moves only when CI proves explicit-request detection, completed-work detection, verified-write clearing, and the installed host Stop control path. Cursor now meets that bar without relying on its undocumented transcript format: local user hooks record `beforeSubmitPrompt`, `afterFileEdit`, `afterShellExecution`, and `afterMCPExecution`, while `stop` emits native `followup_message` once per pending signal. This 100% figure is explicitly a local measured-harness baseline; Cursor cloud agents do not load user-level `~/.cursor/hooks.json` hooks.
 
 ## What this does not claim
 
