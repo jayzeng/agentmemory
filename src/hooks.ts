@@ -81,7 +81,7 @@ function userPromptSubmitHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook user-prompt-submit --agent ${agent}`;
 }
 
-function stopHookCommand(agent: "claude" | "codex"): string {
+function stopHookCommand(agent: "claude" | "codex" | "qoder"): string {
 	return `agent-memory hook stop --agent ${agent}`;
 }
 
@@ -143,8 +143,10 @@ function hookTargets(homeDir: string): HookTargetInfo[] {
 	];
 }
 
-function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string): boolean {
-	const settingsPath = path.join(homeDir, ".claude", "settings.json");
+// Shared by Claude Code and Qoder, which both store hooks as
+// { hooks: { [eventKey]: [{ hooks: [{ command, ... }] }] } } in a per-host
+// settings.json — only the settings file location differs between them.
+function hasSettingsHookGroup(settingsPath: string, eventKey: string, command: string): boolean {
 	if (!fs.existsSync(settingsPath)) return false;
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
@@ -166,6 +168,14 @@ function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string):
 		}
 	}
 	return false;
+}
+
+function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string): boolean {
+	return hasSettingsHookGroup(path.join(homeDir, ".claude", "settings.json"), eventKey, command);
+}
+
+function hasQoderHookGroup(homeDir: string, eventKey: string, command: string): boolean {
+	return hasSettingsHookGroup(path.join(homeDir, ".qoder", "settings.json"), eventKey, command);
 }
 
 /**
@@ -215,6 +225,9 @@ export function isSessionStartInstalled(homeDir: string, key: HookAgentKey): boo
 			// separately in `doctor`'s detail text), not a substitute for this check.
 			return fs.existsSync(path.join(homeDir, ".pi", "agent", "memory"));
 		}
+		if (key === "qoder") {
+			return hasQoderHookGroup(homeDir, "SessionStart", "agent-memory context");
+		}
 	} catch {
 		return false;
 	}
@@ -223,13 +236,14 @@ export function isSessionStartInstalled(homeDir: string, key: HookAgentKey): boo
 
 /**
  * Read-only check whether `key`'s automatic-context hook is *fully* installed.
- * For Codex this additionally requires the Stop hook — installCodexHook always
- * installs SessionStart and Stop together, so a pre-Stop Codex install (only
- * SessionStart/UserPromptSubmit) is correctly treated as incomplete here and
- * re-installed. That means isHookInstalled(codex) can be false even while
- * SessionStart is live and delivering real context; callers that need to
- * distinguish that case (cmdDoctor's detail text) should use
- * isSessionStartInstalled instead of reading "false" as "no context at all".
+ * For Codex and Qoder this additionally requires the Stop hook — both
+ * installers always install SessionStart and Stop together, so a pre-Stop
+ * install (only SessionStart, or SessionStart/UserPromptSubmit for Codex) is
+ * correctly treated as incomplete here and re-installed. That means
+ * isHookInstalled(codex|qoder) can be false even while SessionStart is live
+ * and delivering real context; callers that need to distinguish that case
+ * (cmdDoctor's detail text) should use isSessionStartInstalled instead of
+ * reading "false" as "no context at all".
  */
 export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
@@ -240,6 +254,9 @@ export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 				existing.includes(`command = "${sessionStartHookCommand("codex")}"`) &&
 				existing.includes(`command = "${stopHookCommand("codex")}"`)
 			);
+		}
+		if (key === "qoder") {
+			return isSessionStartInstalled(homeDir, key) && isStopHookInstalled(homeDir, key);
 		}
 		return isSessionStartInstalled(homeDir, key);
 	} catch {
@@ -272,6 +289,7 @@ export function isStopHookInstalled(homeDir: string, key: HookAgentKey): boolean
 			const existing = readCodexConfig(homeDir);
 			return existing !== null && existing.includes(`command = "${stopHookCommand("codex")}"`);
 		}
+		if (key === "qoder") return hasQoderHookGroup(homeDir, "Stop", stopHookCommand("qoder"));
 	} catch {}
 	return false;
 }
@@ -751,43 +769,16 @@ function installQoderHook(homeDir: string): HookInstallResult {
 	const backup = backupOnce(settingsPath);
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.SessionStart) ? [...(hooks.SessionStart as unknown[])] : [];
+	const session = upsertClaudeHookGroup(hooks, "SessionStart", "agent-memory context");
+	const stop = upsertClaudeHookGroup(hooks, "Stop", stopHookCommand("qoder"));
 
-	const command = "agent-memory context";
-	let managed = 0;
-	let updated = 0;
-	for (const group of sessionStart) {
-		if (!group || typeof group !== "object") continue;
-		const g = group as Record<string, unknown>;
-		const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
-		for (const hook of list) {
-			if (!hook || typeof hook !== "object") continue;
-			const managedHook = hook as Record<string, unknown>;
-			if (managedHook[HOOK_MARKER_JSON] !== true) continue;
-			managed++;
-			if (managedHook.command !== command) {
-				managedHook.command = command;
-				updated++;
-			}
-		}
-	}
-	if (managed && !updated) {
+	if (!session.changed && !stop.changed) {
 		return { key: "qoder", label: "Qoder", installed: false, path: settingsPath, reason: "already installed" };
 	}
-	if (updated) {
-		hooks.SessionStart = sessionStart;
-		settings.hooks = hooks;
-		writeJson(settingsPath, settings);
-		return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup, reason: "updated" };
-	}
-
-	sessionStart.push({
-		hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }],
-	});
-	hooks.SessionStart = sessionStart;
 	settings.hooks = hooks;
 	writeJson(settingsPath, settings);
-	return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup };
+	const reason = session.hadManaged || stop.hadManaged ? "updated" : undefined;
+	return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup, reason };
 }
 
 function uninstallQoderHook(homeDir: string): HookInstallResult {
@@ -797,31 +788,11 @@ function uninstallQoderHook(homeDir: string): HookInstallResult {
 	}
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.SessionStart) ? (hooks.SessionStart as unknown[]) : [];
-	let removed = 0;
-	const filtered = sessionStart
-		.map((group) => {
-			if (!group || typeof group !== "object") return group;
-			const g = { ...(group as Record<string, unknown>) };
-			const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
-			const kept = list.filter((h) => {
-				const isOurs = h && typeof h === "object" && (h as Record<string, unknown>)[HOOK_MARKER_JSON] === true;
-				if (isOurs) removed++;
-				return !isOurs;
-			});
-			g.hooks = kept;
-			return g;
-		})
-		.filter((group) => {
-			if (!group || typeof group !== "object") return true;
-			const g = group as Record<string, unknown>;
-			return Array.isArray(g.hooks) && (g.hooks as unknown[]).length > 0;
-		});
-	if (removed === 0) {
+	const sessionRemoved = removeClaudeHookGroup(hooks, "SessionStart", "agent-memory context");
+	const stopRemoved = removeClaudeHookGroup(hooks, "Stop", stopHookCommand("qoder"));
+	if (!sessionRemoved && !stopRemoved) {
 		return { key: "qoder", label: "Qoder", installed: false, reason: "not installed" };
 	}
-	hooks.SessionStart = filtered;
-	if (filtered.length === 0) delete (hooks as Record<string, unknown>).SessionStart;
 	if (Object.keys(hooks).length === 0) delete (settings as Record<string, unknown>).hooks;
 	else settings.hooks = hooks;
 	writeJson(settingsPath, settings);

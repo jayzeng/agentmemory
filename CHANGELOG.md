@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Codex now gets a mode-independent managed `Stop` capture hook that invokes Core directly, parses native rollout JSONL for completed work, emits Codex's `decision: "block"` + `reason` continuation when capture is pending, and clears the signal after a verified AgentMemory write. Cross-harness fully mechanized immediate capture coverage rises from 25% to 50% (Claude + Codex) under the CI-gated evaluator.
+- Qoder now gets a managed mode-independent `Stop` capture hook using its documented JSONL transcript and native exit-2/stderr continuation contract. Native file edits and verified terminal memory writes are CI-gated, raising fully mechanized immediate capture coverage from 50% to 75% (Claude + Codex + Qoder).
 
 ## [0.5.5] - 2026-09-04
 

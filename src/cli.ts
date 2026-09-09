@@ -752,9 +752,12 @@ async function cmdUserPromptSubmit(_flags: Record<string, string | boolean>): Pr
 // field data; Codex's own Stop cadence hasn't been measured yet, so it
 // provisionally shares Claude's value below rather than guessing a different
 // number — override codex independently once real Codex session data exists.
-const STOP_NAG_INTERVAL: Record<"claude" | "codex", number> = { claude: 6, codex: 6 };
+const STOP_NAG_INTERVAL: Record<"claude" | "codex" | "qoder", number> = { claude: 6, codex: 6, qoder: 6 };
+function nagKey(agent: string): "claude" | "codex" | "qoder" {
+	return agent === "codex" || agent === "qoder" ? agent : "claude";
+}
 function nagInterval(agent: string): number {
-	return agent === "codex" ? STOP_NAG_INTERVAL.codex : STOP_NAG_INTERVAL.claude;
+	return STOP_NAG_INTERVAL[nagKey(agent)];
 }
 // Bound state/stop-hook.json so it can't grow unboundedly across many sessions.
 const STOP_HOOK_MAX_SESSIONS = 50;
@@ -804,7 +807,7 @@ function shouldNagOnStop(agent: string, sessionId: string, now: number, capture:
 		// Namespaced by agent: session_id is a per-host random UUID, but sharing one
 		// bounded LRU across both hosts unnamespaced would let one host's writes
 		// evict or collide with the other's nag/capture state.
-		const key = `${agent === "codex" ? "codex" : "claude"}:${sessionId}`;
+		const key = `${nagKey(agent)}:${sessionId}`;
 		const interval = nagInterval(agent);
 		const existing = state.sessions[key] ?? { count: 0, lastNagCount: 0, lastSeenAt: now };
 		const count = existing.count + 1;
@@ -838,9 +841,8 @@ const STOP_NAG_REASON =
  * pending check; unchanged work is retried only every STOP_NAG_INTERVAL turns.
  * Hosts without a usable transcript retain the periodic reminder. Claude emits
  * `hookSpecificOutput.additionalContext`; Codex emits its native `decision: "block"`
- * plus a non-empty `reason`. Both honor `stop_hook_active` re-entry protection.
- * Always allows the stop (empty stdout) on missing session_id, re-entry, or any
- * internal error.
+ * plus a non-empty `reason`; Qoder blocks with exit code 2 and writes the reason to
+ * stderr. All honor `stop_hook_active` re-entry protection and fail open on errors.
  */
 async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
 	const TIMEOUT_MS = 3_000;
@@ -864,6 +866,16 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
 		if (!sessionId || payload?.stop_hook_active === true) return;
 		const capture = checkCaptureTranscript(payload?.transcript_path, sessionId);
 		if (shouldNagOnStop(agent ?? "claude", sessionId, Date.now(), capture)) {
+			if (agent === "qoder") {
+				// This write can land after the caller has already timed out on us (see
+				// the Promise.race below) and stopped reading — swallow a resulting
+				// EPIPE instead of letting it surface as an uncaught stream error, same
+				// as the stdout write below for Claude/Codex.
+				process.stderr.once("error", () => {});
+				process.stderr.write(`${STOP_NAG_REASON}\n`);
+				process.exitCode = 2;
+				return;
+			}
 			const response =
 				agent === "codex"
 					? { decision: "block", reason: STOP_NAG_REASON }
@@ -2380,7 +2392,7 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 		rows.push({
 			status: "warn",
 			label: "Agent hosts",
-			detail: "no supported agents detected (Claude Code, Codex, Cursor, opencode, pi)",
+			detail: "no supported agents detected (Claude Code, Codex, Cursor, Qoder, opencode, pi)",
 			fix: "install one of the agents first, then: agent-memory install-skills",
 		});
 	} else {
@@ -2427,10 +2439,10 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 				detail: skillInstalled ? "SKILL.md installed" : "SKILL.md missing — agent cannot call memory",
 				fix: skillInstalled ? undefined : "agent-memory install-skills",
 			});
-			// SessionStart-only, deliberately independent of Codex's extra Stop
-			// requirement: isHookInstalled(codex) going false must not read as "no
-			// automatic context" when SessionStart is actually live — Stop status
-			// is reported separately below via wantsWriteHooks/stopInstalled.
+			// SessionStart-only, deliberately independent of Codex/Qoder's extra
+			// Stop requirement: isHookInstalled(codex|qoder) going false must not
+			// read as "no automatic context" when SessionStart is actually live —
+			// Stop status is reported separately below via wantsWriteHooks/stopInstalled.
 			const sessionStartInstalled = homeDir ? isSessionStartInstalled(homeDir, target.key) : false;
 			const supportsPerTurn = target.key === "claude" || target.key === "codex";
 			// opencode only gets a static instructions file (no command-execution hook API in its
@@ -2438,9 +2450,10 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 			const guaranteedAutomatic = target.key !== "opencode";
 			const promptInstalled = homeDir && supportsPerTurn ? isUserPromptSubmitInstalled(homeDir, target.key) : false;
 			const wantsPerTurn = hookMode === "per-turn" && supportsPerTurn;
-			// Both Claude and Codex gate a Stop-hook memory-write nudge; report it
-			// identically for both as a suffix on the detail text.
-			const wantsWriteHooks = target.key === "claude" || target.key === "codex";
+			// Claude, Codex, and Qoder all gate a Stop-hook memory-write/capture
+			// nudge; report it identically for all three as a suffix on the detail
+			// text.
+			const wantsWriteHooks = target.key === "claude" || target.key === "codex" || target.key === "qoder";
 			const stopInstalled = homeDir && wantsWriteHooks ? isStopHookInstalled(homeDir, target.key) : false;
 			const writeHooksOk = !wantsWriteHooks || stopInstalled;
 			const ok =
