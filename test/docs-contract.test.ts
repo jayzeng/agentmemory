@@ -9,9 +9,7 @@ describe("public support contract", () => {
 			expect(readme).toContain(`| ${host} |`);
 		}
 		expect(readme).toContain("Pi | Delegated to the separately versioned `pi-memory` extension");
-		expect(readme).toContain(
-			"The cross-harness capture evaluator measures Claude, Codex, Cursor, and Qoder",
-		);
+		expect(readme).toContain("The cross-harness capture evaluator measures Claude, Codex, Cursor, and Qoder");
 		expect(readme).toContain("mechanism-coverage contract");
 	});
 
