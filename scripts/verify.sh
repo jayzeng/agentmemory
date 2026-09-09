@@ -54,6 +54,7 @@ metrics_unit_pass=""
 metrics_cli_pass=""
 metrics_savings_pass=""
 metrics_eval_pass=""
+metrics_longitudinal_pass=""
 metrics_test_fail_total=0
 metrics_det_probes_passed=0
 metrics_det_probes_intentional_fail=0
@@ -194,6 +195,7 @@ phase_unit() {
   run_test_suite "cli.test.ts --timeout 15000" "test/cli.test.ts --timeout 15000" "/tmp/am-cli.log" "metrics_cli_pass" || phase_rc=1
   run_test_suite "token-savings.test.ts" "test/token-savings.test.ts" "/tmp/am-savings.log" "metrics_savings_pass" || phase_rc=1
   run_test_suite "eval.test.ts" "test/eval.test.ts" "/tmp/am-eval-test.log" "metrics_eval_pass" || phase_rc=1
+  run_test_suite "longitudinal-behavior.test.ts" "test/longitudinal-behavior.test.ts" "/tmp/am-longitudinal.log" "metrics_longitudinal_pass" || phase_rc=1
   return "$phase_rc"
 }
 
@@ -453,7 +455,7 @@ emit_json() {
       schemaVersion:'verify-v1',
       generatedAt:new Date().toISOString(),
       build:{ build_time_ms:$metrics_build_time_ms, binary_size_bytes:$metrics_binary_size_bytes, lint_errors:$metrics_lint_errors },
-      tests:{ unit:'$metrics_unit_pass', cli:'$metrics_cli_pass', savings:'$metrics_savings_pass', eval:'$metrics_eval_pass' },
+      tests:{ unit:'$metrics_unit_pass', cli:'$metrics_cli_pass', savings:'$metrics_savings_pass', eval:'$metrics_eval_pass', longitudinal:'$metrics_longitudinal_pass' },
       detEval:{ passed:$metrics_det_probes_passed, intentional_fail:$metrics_det_probes_intentional_fail },
       liveQmd:{ recall_at_1:'$metrics_recall_at_1', recall_at_5:'$metrics_recall_at_5', mrr_at_5:'$metrics_mrr_at_5', ndcg_at_5:'$metrics_ndcg_at_5', lat_p50:'$metrics_lqmd_lat_p50', lat_p95:'$metrics_lqmd_lat_p95' },
       harness: harness,
