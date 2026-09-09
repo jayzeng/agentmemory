@@ -81,7 +81,7 @@ function userPromptSubmitHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook user-prompt-submit --agent ${agent}`;
 }
 
-function stopHookCommand(agent: "claude"): string {
+function stopHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook stop --agent ${agent}`;
 }
 
@@ -169,20 +169,31 @@ function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string):
 }
 
 /**
+ * Read Codex's config.toml once, returning its content only when the managed
+ * agent-memory hook block is present. Shared by every isXInstalled check below
+ * so Codex's "read file, confirm marker" boilerplate lives in exactly one place.
+ */
+function readCodexConfig(homeDir: string): string | null {
+	const configPath = path.join(homeDir, ".codex", "config.toml");
+	if (!fs.existsSync(configPath)) return null;
+	const existing = fs.readFileSync(configPath, "utf-8");
+	return existing.includes(HOOK_MARKER_BEGIN) ? existing : null;
+}
+
+/**
  * Read-only check whether the SessionStart hook for `key` is already present in
  * the user's config. Mirrors each installer's "already installed" detection so
- * the CLI can avoid prompting for hooks that don't need to be installed.
+ * the CLI can avoid prompting for hooks that don't need to be installed. Unlike
+ * isHookInstalled, this never folds in any other hook (e.g. Codex's Stop) — use
+ * it when you need to know whether automatic context is flowing at all,
+ * independent of a companion hook's status (see cmdDoctor).
  */
-export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
+export function isSessionStartInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
 		if (key === "claude") return hasClaudeHookGroup(homeDir, "SessionStart", sessionStartHookCommand("claude"));
 		if (key === "codex") {
-			const configPath = path.join(homeDir, ".codex", "config.toml");
-			if (!fs.existsSync(configPath)) return false;
-			const existing = fs.readFileSync(configPath, "utf-8");
-			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
-			const command = sessionStartHookCommand("codex");
-			return existing.includes(`command = "${command}"`);
+			const existing = readCodexConfig(homeDir);
+			return existing !== null && existing.includes(`command = "${sessionStartHookCommand("codex")}"`);
 		}
 		if (key === "cursor") {
 			return isCursorSessionStartHookRegistered(homeDir);
@@ -211,6 +222,32 @@ export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 }
 
 /**
+ * Read-only check whether `key`'s automatic-context hook is *fully* installed.
+ * For Codex this additionally requires the Stop hook — installCodexHook always
+ * installs SessionStart and Stop together, so a pre-Stop Codex install (only
+ * SessionStart/UserPromptSubmit) is correctly treated as incomplete here and
+ * re-installed. That means isHookInstalled(codex) can be false even while
+ * SessionStart is live and delivering real context; callers that need to
+ * distinguish that case (cmdDoctor's detail text) should use
+ * isSessionStartInstalled instead of reading "false" as "no context at all".
+ */
+export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
+	try {
+		if (key === "codex") {
+			const existing = readCodexConfig(homeDir);
+			if (existing === null) return false;
+			return (
+				existing.includes(`command = "${sessionStartHookCommand("codex")}"`) &&
+				existing.includes(`command = "${stopHookCommand("codex")}"`)
+			);
+		}
+		return isSessionStartInstalled(homeDir, key);
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Read-only check whether the per-turn UserPromptSubmit hook is present.
  * Only Claude Code and Codex support a per-prompt hook; cursor/opencode
  * always return false (static rules only).
@@ -220,24 +257,21 @@ export function isUserPromptSubmitInstalled(homeDir: string, key: HookAgentKey):
 		if (key === "claude")
 			return hasClaudeHookGroup(homeDir, "UserPromptSubmit", userPromptSubmitHookCommand("claude"));
 		if (key === "codex") {
-			const configPath = path.join(homeDir, ".codex", "config.toml");
-			if (!fs.existsSync(configPath)) return false;
-			const existing = fs.readFileSync(configPath, "utf-8");
-			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
-			return existing.includes(`command = "${userPromptSubmitHookCommand("codex")}"`);
+			const existing = readCodexConfig(homeDir);
+			return existing !== null && existing.includes(`command = "${userPromptSubmitHookCommand("codex")}"`);
 		}
 	} catch {}
 	return false;
 }
 
-/**
- * Read-only check whether the periodic Stop-hook memory-write nudge is present.
- * Claude Code only — Codex/Cursor/opencode don't have a confirmed equivalent
- * block/reason protocol for this event yet.
- */
+/** Read-only check whether the Stop-hook memory-write capture check is present. */
 export function isStopHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
 		if (key === "claude") return hasClaudeHookGroup(homeDir, "Stop", stopHookCommand("claude"));
+		if (key === "codex") {
+			const existing = readCodexConfig(homeDir);
+			return existing !== null && existing.includes(`command = "${stopHookCommand("codex")}"`);
+		}
 	} catch {}
 	return false;
 }
@@ -537,32 +571,23 @@ function installClaudeCodeHook(homeDir: string, mode: HookMode = "per-turn"): Ho
 	return { key: "claude", label: "Claude Code", installed: true, path: settingsPath, backup, mode, reason };
 }
 
+/** Build one `[[hooks.<Event>]]` TOML block. `matcher` only applies to SessionStart. */
+function hookBlock(event: "SessionStart" | "UserPromptSubmit" | "Stop", command: string, matcher?: string): string[] {
+	const lines = [`[[hooks.${event}]]`];
+	if (matcher !== undefined) lines.push(`matcher = "${matcher}"`);
+	lines.push("", `[[hooks.${event}.hooks]]`, 'type = "command"', `command = "${command}"`);
+	return lines;
+}
+
 function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookInstallResult {
 	const configPath = path.join(homeDir, ".codex", "config.toml");
 	const backup = backupOnce(configPath);
 	const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf-8") : "";
-	const sessionCommand = sessionStartHookCommand("codex");
-	const promptCommand = userPromptSubmitHookCommand("codex");
-	const lines = [
-		HOOK_MARKER_BEGIN,
-		"[[hooks.SessionStart]]",
-		'matcher = "startup|resume"',
-		"",
-		"[[hooks.SessionStart.hooks]]",
-		'type = "command"',
-		`command = "${sessionCommand}"`,
-	];
+	const lines = [HOOK_MARKER_BEGIN, ...hookBlock("SessionStart", sessionStartHookCommand("codex"), "startup|resume")];
 	if (mode === "per-turn") {
-		lines.push(
-			"",
-			"[[hooks.UserPromptSubmit]]",
-			"",
-			"[[hooks.UserPromptSubmit.hooks]]",
-			'type = "command"',
-			`command = "${promptCommand}"`,
-		);
+		lines.push("", ...hookBlock("UserPromptSubmit", userPromptSubmitHookCommand("codex")));
 	}
-	lines.push(HOOK_MARKER_END);
+	lines.push("", ...hookBlock("Stop", stopHookCommand("codex")), HOOK_MARKER_END);
 	const block = lines.join("\n");
 
 	if (existing.includes(HOOK_MARKER_BEGIN)) {
