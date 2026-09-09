@@ -5,12 +5,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
+	_clearUpdateTimer,
 	_getQmdAvailable,
 	_resetBaseDir,
 	_setBaseDir,
 	_setQmdAvailable,
 	buildMemoryContext,
 	ensureDirs,
+	escapeEntryMarkers,
 	getMemoryFile,
 } from "../src/core.js";
 
@@ -108,6 +110,14 @@ function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(`invalid longitudinal behavior dataset: ${message}`);
 }
 
+const LONGITUDINAL_CATEGORIES: ReadonlySet<LongitudinalCategory> = new Set([
+	"correction-reuse",
+	"decision-reuse",
+	"preference-reuse",
+	"stale-resistance",
+	"irrelevant-resistance",
+]);
+
 export function validateLongitudinalBehaviorDataset(dataset: LongitudinalBehaviorDataset): void {
 	assert(dataset?.version === "longitudinal-behavior-v1", "unsupported version");
 	assert(Array.isArray(dataset.scenarios) && dataset.scenarios.length >= 6, "expected at least six scenarios");
@@ -116,10 +126,12 @@ export function validateLongitudinalBehaviorDataset(dataset: LongitudinalBehavio
 	let helpful = 0;
 	let silent = 0;
 	let inactiveEntries = 0;
+	let staleActionScenarios = 0;
 	for (const scenario of dataset.scenarios) {
 		assert(typeof scenario.id === "string" && scenario.id.length > 0, "scenario id is required");
 		assert(!ids.has(scenario.id), `duplicate scenario id: ${scenario.id}`);
 		ids.add(scenario.id);
+		assert(LONGITUDINAL_CATEGORIES.has(scenario.category), `${scenario.id}: unknown category: ${scenario.category}`);
 		assert(
 			Number.isInteger(scenario.probeSessions) && scenario.probeSessions >= 2,
 			`${scenario.id}: probeSessions must be >= 2`,
@@ -129,13 +141,24 @@ export function validateLongitudinalBehaviorDataset(dataset: LongitudinalBehavio
 			Array.isArray(scenario.task.candidates) && scenario.task.candidates.length >= 2,
 			`${scenario.id}: candidates are required`,
 		);
+		for (const candidate of scenario.task.candidates) {
+			assert(
+				candidate.cues.every((cue) => cue.trim().length > 0),
+				`${scenario.id}: candidate ${candidate.id} has a blank cue`,
+			);
+		}
 
 		const candidateIds = new Set(scenario.task.candidates.map((candidate) => candidate.id));
 		assert(candidateIds.size === scenario.task.candidates.length, `${scenario.id}: candidate ids must be unique`);
 		assert(candidateIds.has(scenario.task.expectedAction), `${scenario.id}: expectedAction must name a candidate`);
 		assert(candidateIds.has(scenario.task.defaultAction), `${scenario.id}: defaultAction must name a candidate`);
-		if (scenario.task.staleAction) {
+		if (scenario.task.staleAction !== undefined) {
+			staleActionScenarios++;
 			assert(candidateIds.has(scenario.task.staleAction), `${scenario.id}: staleAction must name a candidate`);
+			assert(
+				scenario.task.staleAction !== scenario.task.expectedAction,
+				`${scenario.id}: staleAction must differ from expectedAction`,
+			);
 		}
 		if (scenario.shouldMemoryHelp) {
 			helpful++;
@@ -165,6 +188,7 @@ export function validateLongitudinalBehaviorDataset(dataset: LongitudinalBehavio
 	assert(helpful >= 3, "expected multiple memory-help scenarios");
 	assert(silent >= 2, "expected stale or irrelevant resistance controls");
 	assert(inactiveEntries >= 3, "expected multiple inactive-memory controls");
+	assert(staleActionScenarios >= 1, "expected at least one scenario with a staleAction for stale-resistance coverage");
 }
 
 export function loadLongitudinalBehaviorDataset(url: URL = DEFAULT_DATASET_URL): LongitudinalBehaviorDataset {
@@ -187,7 +211,7 @@ function renderHistory(history: LongitudinalHistoryEntry[]): string {
 			const day = String(index + 1).padStart(2, "0");
 			const marker = `<!-- 2026-01-${day} 12:00:00 [${entry.session}] -->`;
 			const header = lifecycleHeader(entry.lifecycle);
-			return [marker, header, entry.content].filter(Boolean).join("\n");
+			return [marker, header, escapeEntryMarkers(entry.content)].filter(Boolean).join("\n");
 		})
 		.join("\n\n");
 }
@@ -202,6 +226,7 @@ function buildIsolatedContext(history: LongitudinalHistoryEntry[]): string {
 		if (history.length > 0) fs.writeFileSync(getMemoryFile(), `${renderHistory(history)}\n`, "utf8");
 		return buildMemoryContext("");
 	} finally {
+		_clearUpdateTimer();
 		_resetBaseDir();
 		_setQmdAvailable(previousQmd);
 		fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -218,10 +243,10 @@ export function selectReferenceAction(task: LongitudinalTask, memoryContext: str
 	let bestScore = 0;
 	let winners: string[] = [];
 	for (const candidate of task.candidates) {
-		const score = candidate.cues.reduce(
-			(total, cue) => total + (cue.trim() && context.includes(cue.toLowerCase()) ? 1 : 0),
-			0,
-		);
+		const score = candidate.cues.reduce((total, cue) => {
+			const trimmedCue = cue.trim();
+			return total + (trimmedCue && context.includes(trimmedCue.toLowerCase()) ? 1 : 0);
+		}, 0);
 		if (score > bestScore) {
 			bestScore = score;
 			winners = [candidate.id];

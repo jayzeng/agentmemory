@@ -12,7 +12,7 @@ Each scenario contains an earlier multi-session memory history plus a later task
 2. **no-memory control** — the downstream policy receives no memory context;
 3. **stale-only control** — only inactive history (`superseded`, `retired`, `expired`, or `untrusted`) is present and still passes through AgentMemory's real context filter.
 
-The fixture set currently contains 21 later-session probes spanning correction reuse, durable decision reuse, preference reuse, stale-memory resistance, untrusted-memory resistance, and irrelevant-memory resistance.
+The fixture set currently contains 21 later-session probes spanning correction reuse, durable decision reuse, preference reuse, stale-memory resistance (which also covers untrusted-memory scenarios), and irrelevant-memory resistance.
 
 ## Reference policy
 
@@ -44,7 +44,7 @@ A future live-agent lane can reuse the same dataset and report schema, but must 
 - `staleActionRate` — frequency with which the stale-only arm selects the explicitly stale action.
 - `inappropriateRecallRate` — frequency with which stale/untrusted/irrelevant memory changes an action that should remain at its default.
 
-The initial deterministic gate requires 100% helpful-memory success, 0% helpful-control success, 100% correction reuse, 0% stale-action selection, 0% inappropriate recall, and a full reduction of the repeated-error rate in this synthetic contract corpus.
+The initial deterministic gate requires: at least 20 total probe sessions, 100% helpful-memory success, 0% helpful-control success, memory success strictly better than control success, 100% correction reuse, 0% stale-action selection, 0% inappropriate recall, and a full reduction of the repeated-error rate in this synthetic contract corpus.
 
 ## What this proves
 
