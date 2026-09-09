@@ -29,7 +29,7 @@ The expected baseline is now:
 - mechanized immediate coverage: 50% (`claude`, `codex`)
 - delegated harnesses: 1 (`pi` via `pi-memory`)
 
-The stricter number moves only because CI proves Codex completed-work detection, verified-write clearing, direct Stop installation, host-native continuation output, stable/per-turn behavior, idempotent reinstall, and uninstall. Future host-specific mechanisms should raise the metric only with the same kind of executable evidence.
+The stricter number moves only because CI now proves both Codex completed-work detection and verified-write clearing, and the installer tests prove the Codex Stop protocol is present and idempotent. Future host-specific mechanisms should raise the metric only with the same kind of executable evidence.
 
 ## What this does not claim
 
