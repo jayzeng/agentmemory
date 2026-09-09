@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A persistent memory system for coding agents — Claude Code, OpenAI Codex, Cursor, opencode. Provides persistent memory across sessions via plain markdown files, with optional semantic search powered by [qmd](https://github.com/tobi/qmd). Published as `myagentmemory` on npm; binary is `agent-memory`.
+A persistent memory system for coding agents — Claude Code, OpenAI Codex, Cursor, Qoder, opencode. Provides persistent memory across sessions via plain markdown files, with optional semantic search powered by [qmd](https://github.com/tobi/qmd). Published as `myagentmemory` on npm; binary is `agent-memory`.
 
 ## Architecture
 
@@ -25,9 +25,10 @@ A persistent memory system for coding agents — Claude Code, OpenAI Codex, Curs
 
 - **`src/core.ts`**: All shared logic — paths, truncation, scratchpad, context builder, qmd integration, tool functions (`memoryWrite`, `memoryRead`, `scratchpadAction`, `memorySearch`)
 - **`src/cli.ts`**: CLI entry point — `agent-memory` binary with all subcommands; imports from core.ts and hooks.ts
+- **`src/cursor-capture.ts`**: local Cursor event-driven capture state machine; per-conversation hashed/atomic state, no transcript parsing
 - **`src/cli-spec.ts`**: Declarative command/flag spec (`CliOptionSpec`) used by the completions generator
 - **`src/completions.ts`**: Shell completion script generation (bash/zsh/fish), driven by cli-spec
-- **`src/hooks.ts`**: Install/uninstall session-start hooks into Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/config.toml`), Cursor (`.mdc` rule), and opencode. Claude Code also gets `Stop` (periodic memory-write nudge, every `STOP_NAG_INTERVAL` turns per session), which is write-side, mode-independent, and Claude-Code-only for now
+- **`src/hooks.ts`**: Install/uninstall managed hooks into Claude Code (`~/.claude/settings.json`), Codex (`~/.codex/config.toml`), Cursor (`~/.cursor/hooks.json`), Qoder (`~/.qoder/settings.json`), and opencode. Claude Code, Codex, and Qoder use Stop-backed capture checks; Cursor uses its documented event stream (`beforeSubmitPrompt`, `afterFileEdit`, shell/MCP completion, `stop`) so it does not depend on an undocumented transcript schema. Host-native continuation is preserved: Claude additional context, Codex block/reason, Qoder exit-2/stderr, and Cursor `followup_message`.
 - **`src/plugin-service.ts`**, **`plugin-bootstrap.ts`**, **`plugin-host.ts`**, **`plugin-runtime.ts`**: Plugin protocol for optional Pro tier — `InstalledPluginRuntimeV1` loads the Pro bundle from `~/.agent-memory/plugins/`
 - **`skills/`**: SKILL.md files for Claude Code and Codex that invoke the CLI
 - **`eval/`**: Token-savings modeling (`token-savings.ts`), LLM feedback eval (`run.ts`), regression dataset

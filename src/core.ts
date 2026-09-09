@@ -324,7 +324,7 @@ function sanitizeSourceUri(sourceUri?: string): string | undefined {
 	return redactSecrets(singleLine).content;
 }
 
-function escapeEntryMarkers(content: string): string {
+export function escapeEntryMarkers(content: string): string {
 	return content.replace(
 		/^<!--\s*(?:last updated:\s*)?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[[^\]]+\]\s*-->$/gm,
 		(line) => line.replace("<!--", "&lt;!--"),

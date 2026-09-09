@@ -81,7 +81,7 @@ function userPromptSubmitHookCommand(agent: "claude" | "codex"): string {
 	return `agent-memory hook user-prompt-submit --agent ${agent}`;
 }
 
-function stopHookCommand(agent: "claude"): string {
+function stopHookCommand(agent: "claude" | "codex" | "qoder"): string {
 	return `agent-memory hook stop --agent ${agent}`;
 }
 
@@ -143,8 +143,10 @@ function hookTargets(homeDir: string): HookTargetInfo[] {
 	];
 }
 
-function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string): boolean {
-	const settingsPath = path.join(homeDir, ".claude", "settings.json");
+// Shared by Claude Code and Qoder, which both store hooks as
+// { hooks: { [eventKey]: [{ hooks: [{ command, ... }] }] } } in a per-host
+// settings.json — only the settings file location differs between them.
+function hasSettingsHookGroup(settingsPath: string, eventKey: string, command: string): boolean {
 	if (!fs.existsSync(settingsPath)) return false;
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
@@ -168,21 +170,40 @@ function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string):
 	return false;
 }
 
+function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string): boolean {
+	return hasSettingsHookGroup(path.join(homeDir, ".claude", "settings.json"), eventKey, command);
+}
+
+function hasQoderHookGroup(homeDir: string, eventKey: string, command: string): boolean {
+	return hasSettingsHookGroup(path.join(homeDir, ".qoder", "settings.json"), eventKey, command);
+}
+
+/**
+ * Read Codex's config.toml once, returning its content only when the managed
+ * agent-memory hook block is present. Shared by every isXInstalled check below
+ * so Codex's "read file, confirm marker" boilerplate lives in exactly one place.
+ */
+function readCodexConfig(homeDir: string): string | null {
+	const configPath = path.join(homeDir, ".codex", "config.toml");
+	if (!fs.existsSync(configPath)) return null;
+	const existing = fs.readFileSync(configPath, "utf-8");
+	return existing.includes(HOOK_MARKER_BEGIN) ? existing : null;
+}
+
 /**
  * Read-only check whether the SessionStart hook for `key` is already present in
  * the user's config. Mirrors each installer's "already installed" detection so
- * the CLI can avoid prompting for hooks that don't need to be installed.
+ * the CLI can avoid prompting for hooks that don't need to be installed. Unlike
+ * isHookInstalled, this never folds in any other hook (e.g. Codex's Stop) — use
+ * it when you need to know whether automatic context is flowing at all,
+ * independent of a companion hook's status (see cmdDoctor).
  */
-export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
+export function isSessionStartInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
 		if (key === "claude") return hasClaudeHookGroup(homeDir, "SessionStart", sessionStartHookCommand("claude"));
 		if (key === "codex") {
-			const configPath = path.join(homeDir, ".codex", "config.toml");
-			if (!fs.existsSync(configPath)) return false;
-			const existing = fs.readFileSync(configPath, "utf-8");
-			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
-			const command = sessionStartHookCommand("codex");
-			return existing.includes(`command = "${command}"`);
+			const existing = readCodexConfig(homeDir);
+			return existing !== null && existing.includes(`command = "${sessionStartHookCommand("codex")}"`);
 		}
 		if (key === "cursor") {
 			return isCursorSessionStartHookRegistered(homeDir);
@@ -204,10 +225,46 @@ export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 			// separately in `doctor`'s detail text), not a substitute for this check.
 			return fs.existsSync(path.join(homeDir, ".pi", "agent", "memory"));
 		}
+		if (key === "qoder") {
+			return hasQoderHookGroup(homeDir, "SessionStart", "agent-memory context");
+		}
 	} catch {
 		return false;
 	}
 	return false;
+}
+
+/**
+ * Read-only check whether `key`'s automatic-context hook is *fully* installed.
+ * For Codex and Qoder this additionally requires the Stop hook — both
+ * installers always install SessionStart and Stop together, so a pre-Stop
+ * install (only SessionStart, or SessionStart/UserPromptSubmit for Codex) is
+ * correctly treated as incomplete here and re-installed. That means
+ * isHookInstalled(codex|qoder) can be false even while SessionStart is live
+ * and delivering real context; callers that need to distinguish that case
+ * (cmdDoctor's detail text) should use isSessionStartInstalled instead of
+ * reading "false" as "no context at all".
+ */
+export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
+	try {
+		if (key === "codex") {
+			const existing = readCodexConfig(homeDir);
+			if (existing === null) return false;
+			return (
+				existing.includes(`command = "${sessionStartHookCommand("codex")}"`) &&
+				existing.includes(`command = "${stopHookCommand("codex")}"`)
+			);
+		}
+		if (key === "qoder") {
+			return isSessionStartInstalled(homeDir, key) && isStopHookInstalled(homeDir, key);
+		}
+		if (key === "cursor") {
+			return isSessionStartInstalled(homeDir, key) && areCursorCaptureHooksRegistered(homeDir);
+		}
+		return isSessionStartInstalled(homeDir, key);
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -220,24 +277,23 @@ export function isUserPromptSubmitInstalled(homeDir: string, key: HookAgentKey):
 		if (key === "claude")
 			return hasClaudeHookGroup(homeDir, "UserPromptSubmit", userPromptSubmitHookCommand("claude"));
 		if (key === "codex") {
-			const configPath = path.join(homeDir, ".codex", "config.toml");
-			if (!fs.existsSync(configPath)) return false;
-			const existing = fs.readFileSync(configPath, "utf-8");
-			if (!existing.includes(HOOK_MARKER_BEGIN)) return false;
-			return existing.includes(`command = "${userPromptSubmitHookCommand("codex")}"`);
+			const existing = readCodexConfig(homeDir);
+			return existing !== null && existing.includes(`command = "${userPromptSubmitHookCommand("codex")}"`);
 		}
 	} catch {}
 	return false;
 }
 
-/**
- * Read-only check whether the periodic Stop-hook memory-write nudge is present.
- * Claude Code only — Codex/Cursor/opencode don't have a confirmed equivalent
- * block/reason protocol for this event yet.
- */
+/** Read-only check whether the Stop-hook memory-write capture check is present. */
 export function isStopHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
 		if (key === "claude") return hasClaudeHookGroup(homeDir, "Stop", stopHookCommand("claude"));
+		if (key === "codex") {
+			const existing = readCodexConfig(homeDir);
+			return existing !== null && existing.includes(`command = "${stopHookCommand("codex")}"`);
+		}
+		if (key === "qoder") return hasQoderHookGroup(homeDir, "Stop", stopHookCommand("qoder"));
+		if (key === "cursor") return isCursorHookEntryRegistered(homeDir, "stop", CURSOR_CAPTURE_HOOK_COMMAND);
 	} catch {}
 	return false;
 }
@@ -537,32 +593,23 @@ function installClaudeCodeHook(homeDir: string, mode: HookMode = "per-turn"): Ho
 	return { key: "claude", label: "Claude Code", installed: true, path: settingsPath, backup, mode, reason };
 }
 
+/** Build one `[[hooks.<Event>]]` TOML block. `matcher` only applies to SessionStart. */
+function hookBlock(event: "SessionStart" | "UserPromptSubmit" | "Stop", command: string, matcher?: string): string[] {
+	const lines = [`[[hooks.${event}]]`];
+	if (matcher !== undefined) lines.push(`matcher = "${matcher}"`);
+	lines.push("", `[[hooks.${event}.hooks]]`, 'type = "command"', `command = "${command}"`);
+	return lines;
+}
+
 function installCodexHook(homeDir: string, mode: HookMode = "per-turn"): HookInstallResult {
 	const configPath = path.join(homeDir, ".codex", "config.toml");
 	const backup = backupOnce(configPath);
 	const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf-8") : "";
-	const sessionCommand = sessionStartHookCommand("codex");
-	const promptCommand = userPromptSubmitHookCommand("codex");
-	const lines = [
-		HOOK_MARKER_BEGIN,
-		"[[hooks.SessionStart]]",
-		'matcher = "startup|resume"',
-		"",
-		"[[hooks.SessionStart.hooks]]",
-		'type = "command"',
-		`command = "${sessionCommand}"`,
-	];
+	const lines = [HOOK_MARKER_BEGIN, ...hookBlock("SessionStart", sessionStartHookCommand("codex"), "startup|resume")];
 	if (mode === "per-turn") {
-		lines.push(
-			"",
-			"[[hooks.UserPromptSubmit]]",
-			"",
-			"[[hooks.UserPromptSubmit.hooks]]",
-			'type = "command"',
-			`command = "${promptCommand}"`,
-		);
+		lines.push("", ...hookBlock("UserPromptSubmit", userPromptSubmitHookCommand("codex")));
 	}
-	lines.push(HOOK_MARKER_END);
+	lines.push("", ...hookBlock("Stop", stopHookCommand("codex")), HOOK_MARKER_END);
 	const block = lines.join("\n");
 
 	if (existing.includes(HOOK_MARKER_BEGIN)) {
@@ -635,22 +682,76 @@ try {
 process.stdout.write(JSON.stringify({ additional_context: context }));
 `;
 
-function isCursorSessionStartHookRegistered(homeDir: string): boolean {
+const CURSOR_CAPTURE_HOOK_COMMAND = "agent-memory hook cursor-event --agent cursor";
+const CURSOR_CAPTURE_EVENTS = [
+	"beforeSubmitPrompt",
+	"afterFileEdit",
+	"afterShellExecution",
+	"afterMCPExecution",
+	"stop",
+] as const;
+
+function hooksEntryRegistered(hooks: Record<string, unknown>, eventKey: string, command: string): boolean {
+	const entries = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
+	return entries.some(
+		(entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command,
+	);
+}
+
+function isCursorHookEntryRegistered(homeDir: string, eventKey: string, command: string): boolean {
 	const hooksJsonPath = path.join(homeDir, ".cursor", "hooks.json");
 	if (!fs.existsSync(hooksJsonPath)) return false;
 	try {
 		const config = readJsonConfig(hooksJsonPath);
 		const hooks = (config.hooks as Record<string, unknown>) ?? {};
-		const sessionStart = Array.isArray(hooks.sessionStart) ? (hooks.sessionStart as unknown[]) : [];
-		return sessionStart.some(
-			(entry) =>
-				entry &&
-				typeof entry === "object" &&
-				(entry as Record<string, unknown>).command === CURSOR_HOOK_SCRIPT_RELATIVE,
-		);
+		return hooksEntryRegistered(hooks, eventKey, command);
 	} catch {
 		return false;
 	}
+}
+
+function isCursorSessionStartHookRegistered(homeDir: string): boolean {
+	return isCursorHookEntryRegistered(homeDir, "sessionStart", CURSOR_HOOK_SCRIPT_RELATIVE);
+}
+
+function areCursorCaptureHooksRegistered(homeDir: string): boolean {
+	return CURSOR_CAPTURE_EVENTS.every((event) =>
+		isCursorHookEntryRegistered(homeDir, event, CURSOR_CAPTURE_HOOK_COMMAND),
+	);
+}
+
+function upsertCursorHookEntry(hooks: Record<string, unknown>, eventKey: string, command: string): boolean {
+	const entries = Array.isArray(hooks[eventKey]) ? [...(hooks[eventKey] as unknown[])] : [];
+	const matches = entries
+		.map((entry, index) => ({ entry, index }))
+		.filter(
+			({ entry }) => entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command,
+		);
+	if (matches.length === 0) {
+		entries.push({ command });
+		hooks[eventKey] = entries;
+		return true;
+	}
+	if (matches.length === 1) return false;
+	const keep = matches[0].index;
+	hooks[eventKey] = entries.filter(
+		(entry, index) =>
+			index === keep ||
+			!(entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command),
+	);
+	return true;
+}
+
+function removeCursorHookEntry(hooks: Record<string, unknown>, eventKey: string, command: string): boolean {
+	const entries = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
+	if (entries.length === 0) return false;
+	const filtered = entries.filter(
+		(entry) => !(entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command),
+	);
+	if (filtered.length === entries.length) return false;
+	if (filtered.length === 0) delete hooks[eventKey];
+	else hooks[eventKey] = filtered;
+	return true;
 }
 
 function installCursorHook(homeDir: string): HookInstallResult {
@@ -668,27 +769,38 @@ function installCursorHook(homeDir: string): HookInstallResult {
 		fs.chmodSync(scriptPath, 0o755);
 	}
 
-	const alreadyRegistered = isCursorSessionStartHookRegistered(homeDir);
-	if (alreadyRegistered && !scriptChanged) {
-		return { key: "cursor", label: "Cursor", installed: false, path: hooksJsonPath, reason: "already installed" };
-	}
-
-	const backup = backupOnce(hooksJsonPath);
 	const config = readJsonConfig(hooksJsonPath);
 	if (typeof config.version !== "number") config.version = 1;
 	const hooks = (config.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.sessionStart) ? [...(hooks.sessionStart as unknown[])] : [];
-	if (!alreadyRegistered) sessionStart.push({ command: CURSOR_HOOK_SCRIPT_RELATIVE });
-	hooks.sessionStart = sessionStart;
-	config.hooks = hooks;
-	writeJson(hooksJsonPath, config);
+	// Read off the already-parsed config instead of re-reading/re-parsing
+	// hooks.json six more times (once per isCursorHookEntryRegistered call
+	// that isCursorSessionStartHookRegistered/areCursorCaptureHooksRegistered
+	// would otherwise make) just to pick the "updated" vs. undefined reason text below.
+	const hadManaged =
+		hooksEntryRegistered(hooks, "sessionStart", CURSOR_HOOK_SCRIPT_RELATIVE) ||
+		CURSOR_CAPTURE_EVENTS.every((event) => hooksEntryRegistered(hooks, event, CURSOR_CAPTURE_HOOK_COMMAND));
+	let configChanged = upsertCursorHookEntry(hooks, "sessionStart", CURSOR_HOOK_SCRIPT_RELATIVE);
+	for (const event of CURSOR_CAPTURE_EVENTS) {
+		configChanged = upsertCursorHookEntry(hooks, event, CURSOR_CAPTURE_HOOK_COMMAND) || configChanged;
+	}
+
+	if (!configChanged && !scriptChanged) {
+		return { key: "cursor", label: "Cursor", installed: false, path: hooksJsonPath, reason: "already installed" };
+	}
+
+	let backup: string | undefined;
+	if (configChanged) {
+		backup = backupOnce(hooksJsonPath);
+		config.hooks = hooks;
+		writeJson(hooksJsonPath, config);
+	}
 	return {
 		key: "cursor",
 		label: "Cursor",
 		installed: true,
 		path: hooksJsonPath,
 		backup,
-		reason: alreadyRegistered ? "updated" : undefined,
+		reason: hadManaged ? "updated" : undefined,
 	};
 }
 
@@ -726,43 +838,16 @@ function installQoderHook(homeDir: string): HookInstallResult {
 	const backup = backupOnce(settingsPath);
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.SessionStart) ? [...(hooks.SessionStart as unknown[])] : [];
+	const session = upsertClaudeHookGroup(hooks, "SessionStart", "agent-memory context");
+	const stop = upsertClaudeHookGroup(hooks, "Stop", stopHookCommand("qoder"));
 
-	const command = "agent-memory context";
-	let managed = 0;
-	let updated = 0;
-	for (const group of sessionStart) {
-		if (!group || typeof group !== "object") continue;
-		const g = group as Record<string, unknown>;
-		const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
-		for (const hook of list) {
-			if (!hook || typeof hook !== "object") continue;
-			const managedHook = hook as Record<string, unknown>;
-			if (managedHook[HOOK_MARKER_JSON] !== true) continue;
-			managed++;
-			if (managedHook.command !== command) {
-				managedHook.command = command;
-				updated++;
-			}
-		}
-	}
-	if (managed && !updated) {
+	if (!session.changed && !stop.changed) {
 		return { key: "qoder", label: "Qoder", installed: false, path: settingsPath, reason: "already installed" };
 	}
-	if (updated) {
-		hooks.SessionStart = sessionStart;
-		settings.hooks = hooks;
-		writeJson(settingsPath, settings);
-		return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup, reason: "updated" };
-	}
-
-	sessionStart.push({
-		hooks: [{ type: "command", command, [HOOK_MARKER_JSON]: true }],
-	});
-	hooks.SessionStart = sessionStart;
 	settings.hooks = hooks;
 	writeJson(settingsPath, settings);
-	return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup };
+	const reason = session.hadManaged || stop.hadManaged ? "updated" : undefined;
+	return { key: "qoder", label: "Qoder", installed: true, path: settingsPath, backup, reason };
 }
 
 function uninstallQoderHook(homeDir: string): HookInstallResult {
@@ -772,31 +857,11 @@ function uninstallQoderHook(homeDir: string): HookInstallResult {
 	}
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.SessionStart) ? (hooks.SessionStart as unknown[]) : [];
-	let removed = 0;
-	const filtered = sessionStart
-		.map((group) => {
-			if (!group || typeof group !== "object") return group;
-			const g = { ...(group as Record<string, unknown>) };
-			const list = Array.isArray(g.hooks) ? (g.hooks as unknown[]) : [];
-			const kept = list.filter((h) => {
-				const isOurs = h && typeof h === "object" && (h as Record<string, unknown>)[HOOK_MARKER_JSON] === true;
-				if (isOurs) removed++;
-				return !isOurs;
-			});
-			g.hooks = kept;
-			return g;
-		})
-		.filter((group) => {
-			if (!group || typeof group !== "object") return true;
-			const g = group as Record<string, unknown>;
-			return Array.isArray(g.hooks) && (g.hooks as unknown[]).length > 0;
-		});
-	if (removed === 0) {
+	const sessionRemoved = removeClaudeHookGroup(hooks, "SessionStart", "agent-memory context");
+	const stopRemoved = removeClaudeHookGroup(hooks, "Stop", stopHookCommand("qoder"));
+	if (!sessionRemoved && !stopRemoved) {
 		return { key: "qoder", label: "Qoder", installed: false, reason: "not installed" };
 	}
-	hooks.SessionStart = filtered;
-	if (filtered.length === 0) delete (hooks as Record<string, unknown>).SessionStart;
 	if (Object.keys(hooks).length === 0) delete (settings as Record<string, unknown>).hooks;
 	else settings.hooks = hooks;
 	writeJson(settingsPath, settings);
@@ -930,18 +995,11 @@ function uninstallCursorHook(homeDir: string): HookInstallResult {
 		try {
 			const config = readJsonConfig(hooksJsonPath);
 			const hooks = (config.hooks as Record<string, unknown>) ?? {};
-			const sessionStart = Array.isArray(hooks.sessionStart) ? (hooks.sessionStart as unknown[]) : [];
-			const filtered = sessionStart.filter(
-				(entry) =>
-					!(
-						entry &&
-						typeof entry === "object" &&
-						(entry as Record<string, unknown>).command === CURSOR_HOOK_SCRIPT_RELATIVE
-					),
-			);
-			if (filtered.length !== sessionStart.length) {
-				if (filtered.length === 0) delete hooks.sessionStart;
-				else hooks.sessionStart = filtered;
+			let changed = removeCursorHookEntry(hooks, "sessionStart", CURSOR_HOOK_SCRIPT_RELATIVE);
+			for (const event of CURSOR_CAPTURE_EVENTS) {
+				changed = removeCursorHookEntry(hooks, event, CURSOR_CAPTURE_HOOK_COMMAND) || changed;
+			}
+			if (changed) {
 				if (Object.keys(hooks).length === 0) delete (config as Record<string, unknown>).hooks;
 				else config.hooks = hooks;
 				writeJson(hooksJsonPath, config);

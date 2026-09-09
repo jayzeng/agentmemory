@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 
+import { checkCodexCaptureTranscript } from "./codex-capture-check.js";
+
 const MAX_TRANSCRIPT_BYTES = 512 * 1024;
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "create_file", "search_replace", "edit_file"]);
 
 type RecordValue = Record<string, unknown>;
 
@@ -28,9 +30,8 @@ export function isExplicitMemoryRequest(value: unknown): boolean {
 function isMemoryWrite(tool: RecordValue): boolean {
 	const name = String(tool.name ?? "");
 	if (name === "memory_write" || name.endsWith("__memory_write")) return true;
-	if (name !== "Bash") return false;
+	if (!["Bash", "run_in_terminal"].includes(name)) return false;
 	const command = record(tool.input)?.command;
-	// Recognize an invocation, not a mention in echo/grep/another command's arguments.
 	return typeof command === "string" && /^\s*agent-memory\s+(?:write|save)\s/.test(command);
 }
 
@@ -46,7 +47,6 @@ function successfulMemoryWrite(tool: RecordValue, result: RecordValue): boolean 
 	}
 }
 
-/** Only identifiers are persisted by callers; transcript content never enters hook state. */
 export interface CaptureCheck {
 	pendingSignal?: string;
 }
@@ -54,8 +54,11 @@ export interface CaptureCheck {
 /**
  * Detect high-confidence capture opportunities, not the semantic quality of a write.
  * null means no usable transcript: callers can retain their periodic fallback.
+ * Supports Claude Code / Qoder content-block JSONL and Codex persisted rollout JSONL.
  */
 export function checkCaptureTranscript(transcriptPath: unknown, sessionId: string): CaptureCheck | null {
+	const codex = checkCodexCaptureTranscript(transcriptPath, sessionId);
+	if (codex !== null) return codex;
 	if (typeof transcriptPath !== "string" || !transcriptPath) return null;
 	let fd: number | undefined;
 	try {

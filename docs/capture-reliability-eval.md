@@ -6,8 +6,8 @@ AgentMemory can only recall a durable fact after some harness actually captures 
 
 ## Enforcement classes
 
-- **mechanized** — AgentMemory itself observes the evaluated capture opportunities and can deterministically verify the relevant path.
-- **partially-mechanized** — at least one capture opportunity is deterministically surfaced by AgentMemory, while other important capture paths remain instruction-guided or unproven. Codex is in this class because `UserPromptSubmit` now injects an explicit-memory-request capture check, but completed-work capture is not yet proven against Codex transcripts.
+- **mechanized** — AgentMemory itself observes the evaluated capture opportunities and can deterministically verify the relevant path. All four locally measured harnesses (Claude Code, Codex, Cursor, and Qoder) are in this class.
+- **partially-mechanized** — at least one capture opportunity is deterministically surfaced by AgentMemory, while other important capture paths remain instruction-guided or unproven. The class remains in the schema for future integrations, but none of the currently measured harnesses use it.
 - **instruction-guided** — the installed skill tells the model to capture explicit memory requests and verified outcomes, but this repository cannot deterministically prove that a model followed the instruction on a real turn.
 - **delegated** — capture behavior is owned by another independently versioned package. Pi is delegated to `pi-memory`, so this repository does not count it in its measured denominator.
 
@@ -15,19 +15,21 @@ AgentMemory can only recall a durable fact after some harness actually captures 
 
 `instructionCoverage` is the fraction of locally measured harnesses whose shipped skill contains the required capture discipline: explicit memory requests are saved in-turn, write success is verified, and duplicate/routine notes are avoided.
 
-`mechanizedExplicitRequestCoverage` measures the narrower question: for how many locally measured harnesses can AgentMemory deterministically surface an explicit user request to remember something? After the Codex `UserPromptSubmit` capture check, this is 50% (`claude` + `codex`).
+`mechanizedExplicitRequestCoverage` measures the narrower question: for how many locally measured harnesses can AgentMemory deterministically surface an explicit user request to remember something? This is 100% across the four locally measured harnesses.
 
-`mechanizedImmediateCoverage` remains stricter. A harness only counts when AgentMemory can deterministically observe both an explicit memory request and completed work as pending capture signals. A successful AgentMemory write must also clear the signal for the fully mechanized path to pass.
+`mechanizedImmediateCoverage` is stricter. A harness counts only when all three conditions are deterministically verified: an explicit memory request is surfaced, completed work creates a pending capture signal, and a verified AgentMemory write clears that signal.
 
-The expected baseline after the Codex explicit-request change is:
+Codex reaches that stricter bar through two surfaces that share Core semantics. `UserPromptSubmit` injects the explicit-request capture check. The mode-independent `Stop` hook invokes `agent-memory hook stop --agent codex` directly; Core reads the bounded persisted rollout through the Codex parser and, when uncaptured work remains, emits Codex's native `decision: "block"` plus non-empty `reason`. There is no adapter or additional runtime dependency. Empty/unusable evidence and `stop_hook_active` re-entry fail open.
+
+The expected baseline is now:
 
 - measured local harnesses: 4 (`claude`, `codex`, `cursor`, `qoder`)
 - instruction coverage: 100%
-- mechanized explicit-request coverage: 50% (`claude`, `codex`)
-- mechanized immediate coverage: 25% (`claude` only)
+- mechanized explicit-request coverage: 100% (`claude`, `codex`, `cursor`, `qoder`)
+- mechanized immediate coverage: 100% (`claude`, `codex`, `cursor`, `qoder`)
 - delegated harnesses: 1 (`pi` via `pi-memory`)
 
-The gap between 50% explicit-request coverage and 25% full immediate coverage is intentional and informative: Codex completed-work capture still needs a deterministic mechanism and compatibility proof. Future host-specific mechanisms should raise the stricter number only when CI can prove the behavior, not when documentation merely claims it.
+The stricter number moves only when CI proves explicit-request detection, completed-work detection, verified-write clearing, and the installed host Stop control path. Cursor now meets that bar without relying on its undocumented transcript format: local user hooks record `beforeSubmitPrompt`, `afterFileEdit`, `afterShellExecution`, and `afterMCPExecution`, while `stop` emits native `followup_message` once per pending signal. This 100% figure is explicitly a local measured-harness baseline; Cursor cloud agents do not load user-level `~/.cursor/hooks.json` hooks.
 
 ## What this does not claim
 

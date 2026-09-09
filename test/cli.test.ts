@@ -1607,6 +1607,65 @@ describe("CLI subprocess", () => {
 		}
 	});
 
+	test(
+		"doctor reports Codex Stop nudge status without masking a live SessionStart install",
+		{ timeout: 30_000 },
+		() => {
+			const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-doctor-home-"));
+			try {
+				fs.mkdirSync(path.join(fakeHome, ".codex"), { recursive: true });
+				fs.writeFileSync(
+					path.join(fakeHome, ".codex", "config.toml"),
+					[
+						"# BEGIN agent-memory hook",
+						"[[hooks.SessionStart]]",
+						'matcher = "startup|resume"',
+						"",
+						"[[hooks.SessionStart.hooks]]",
+						'type = "command"',
+						'command = "agent-memory hook session-start --agent codex"',
+						"",
+						"[[hooks.UserPromptSubmit]]",
+						"",
+						"[[hooks.UserPromptSubmit.hooks]]",
+						'type = "command"',
+						'command = "agent-memory hook user-prompt-submit --agent codex"',
+						"# END agent-memory hook",
+						"",
+					].join("\n"),
+					"utf8",
+				);
+
+				const before = Bun.spawnSync(
+					["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "doctor", "--dir", tmpDir, "--json"],
+					{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: fakeHome } },
+				);
+				const beforeRows = JSON.parse(before.stdout.toString()).rows as Array<{ label: string; detail: string }>;
+				const beforeRow = beforeRows.find((row) => row.label === "Hook: Codex");
+				// A pre-Stop Codex install is still delivering real automatic context every
+				// session — must not read as "not installed" just because Stop is missing.
+				expect(beforeRow?.detail).not.toContain("not installed");
+				expect(beforeRow?.detail).toContain("SessionStart + UserPromptSubmit hooks active");
+				expect(beforeRow?.detail).toContain("Stop memory-write nudge missing");
+
+				Bun.spawnSync(
+					["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "install-hooks", "--only", "codex", "--yes"],
+					{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: fakeHome } },
+				);
+
+				const after = Bun.spawnSync(
+					["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "doctor", "--dir", tmpDir, "--json"],
+					{ stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: fakeHome } },
+				);
+				const afterRows = JSON.parse(after.stdout.toString()).rows as Array<{ label: string; detail: string }>;
+				const afterRow = afterRows.find((row) => row.label === "Hook: Codex");
+				expect(afterRow?.detail).toContain("Stop memory-write nudge active");
+			} finally {
+				fs.rmSync(fakeHome, { recursive: true, force: true });
+			}
+		},
+	);
+
 	test("sync command runs without crash", async () => {
 		const result = Bun.spawnSync(
 			["bun", "run", path.join(__dirname, "..", "src", "cli.ts"), "sync", "--dir", tmpDir, "--json"],
