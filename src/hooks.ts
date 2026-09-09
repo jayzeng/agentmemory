@@ -143,8 +143,10 @@ function hookTargets(homeDir: string): HookTargetInfo[] {
 	];
 }
 
-function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string): boolean {
-	const settingsPath = path.join(homeDir, ".claude", "settings.json");
+// Shared by Claude Code and Qoder, which both store hooks as
+// { hooks: { [eventKey]: [{ hooks: [{ command, ... }] }] } } in a per-host
+// settings.json — only the settings file location differs between them.
+function hasSettingsHookGroup(settingsPath: string, eventKey: string, command: string): boolean {
 	if (!fs.existsSync(settingsPath)) return false;
 	const settings = readJsonConfig(settingsPath);
 	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
@@ -168,22 +170,12 @@ function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string):
 	return false;
 }
 
+function hasClaudeHookGroup(homeDir: string, eventKey: string, command: string): boolean {
+	return hasSettingsHookGroup(path.join(homeDir, ".claude", "settings.json"), eventKey, command);
+}
+
 function hasQoderHookGroup(homeDir: string, eventKey: string, command: string): boolean {
-	const settingsPath = path.join(homeDir, ".qoder", "settings.json");
-	if (!fs.existsSync(settingsPath)) return false;
-	const settings = readJsonConfig(settingsPath);
-	const hooks = (settings.hooks as Record<string, unknown>) ?? {};
-	const groups = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
-	for (const group of groups) {
-		if (!group || typeof group !== "object") continue;
-		const list = Array.isArray((group as Record<string, unknown>).hooks)
-			? ((group as Record<string, unknown>).hooks as unknown[])
-			: [];
-		for (const hook of list) {
-			if (hook && typeof hook === "object" && (hook as Record<string, unknown>).command === command) return true;
-		}
-	}
-	return false;
+	return hasSettingsHookGroup(path.join(homeDir, ".qoder", "settings.json"), eventKey, command);
 }
 
 /**
@@ -234,9 +226,7 @@ export function isSessionStartInstalled(homeDir: string, key: HookAgentKey): boo
 			return fs.existsSync(path.join(homeDir, ".pi", "agent", "memory"));
 		}
 		if (key === "qoder") {
-			return (
-				hasQoderHookGroup(homeDir, "SessionStart", "agent-memory context") && isStopHookInstalled(homeDir, "qoder")
-			);
+			return hasQoderHookGroup(homeDir, "SessionStart", "agent-memory context");
 		}
 	} catch {
 		return false;
@@ -246,13 +236,14 @@ export function isSessionStartInstalled(homeDir: string, key: HookAgentKey): boo
 
 /**
  * Read-only check whether `key`'s automatic-context hook is *fully* installed.
- * For Codex this additionally requires the Stop hook — installCodexHook always
- * installs SessionStart and Stop together, so a pre-Stop Codex install (only
- * SessionStart/UserPromptSubmit) is correctly treated as incomplete here and
- * re-installed. That means isHookInstalled(codex) can be false even while
- * SessionStart is live and delivering real context; callers that need to
- * distinguish that case (cmdDoctor's detail text) should use
- * isSessionStartInstalled instead of reading "false" as "no context at all".
+ * For Codex and Qoder this additionally requires the Stop hook — both
+ * installers always install SessionStart and Stop together, so a pre-Stop
+ * install (only SessionStart, or SessionStart/UserPromptSubmit for Codex) is
+ * correctly treated as incomplete here and re-installed. That means
+ * isHookInstalled(codex|qoder) can be false even while SessionStart is live
+ * and delivering real context; callers that need to distinguish that case
+ * (cmdDoctor's detail text) should use isSessionStartInstalled instead of
+ * reading "false" as "no context at all".
  */
 export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 	try {
@@ -263,6 +254,9 @@ export function isHookInstalled(homeDir: string, key: HookAgentKey): boolean {
 				existing.includes(`command = "${sessionStartHookCommand("codex")}"`) &&
 				existing.includes(`command = "${stopHookCommand("codex")}"`)
 			);
+		}
+		if (key === "qoder") {
+			return isSessionStartInstalled(homeDir, key) && isStopHookInstalled(homeDir, key);
 		}
 		return isSessionStartInstalled(homeDir, key);
 	} catch {

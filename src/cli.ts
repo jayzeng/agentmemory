@@ -867,6 +867,11 @@ async function cmdStop(flags: Record<string, string | boolean>): Promise<void> {
 		const capture = checkCaptureTranscript(payload?.transcript_path, sessionId);
 		if (shouldNagOnStop(agent ?? "claude", sessionId, Date.now(), capture)) {
 			if (agent === "qoder") {
+				// This write can land after the caller has already timed out on us (see
+				// the Promise.race below) and stopped reading — swallow a resulting
+				// EPIPE instead of letting it surface as an uncaught stream error, same
+				// as the stdout write below for Claude/Codex.
+				process.stderr.once("error", () => {});
 				process.stderr.write(`${STOP_NAG_REASON}\n`);
 				process.exitCode = 2;
 				return;
@@ -2434,10 +2439,10 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 				detail: skillInstalled ? "SKILL.md installed" : "SKILL.md missing — agent cannot call memory",
 				fix: skillInstalled ? undefined : "agent-memory install-skills",
 			});
-			// SessionStart-only, deliberately independent of Codex's extra Stop
-			// requirement: isHookInstalled(codex) going false must not read as "no
-			// automatic context" when SessionStart is actually live — Stop status
-			// is reported separately below via wantsWriteHooks/stopInstalled.
+			// SessionStart-only, deliberately independent of Codex/Qoder's extra
+			// Stop requirement: isHookInstalled(codex|qoder) going false must not
+			// read as "no automatic context" when SessionStart is actually live —
+			// Stop status is reported separately below via wantsWriteHooks/stopInstalled.
 			const sessionStartInstalled = homeDir ? isSessionStartInstalled(homeDir, target.key) : false;
 			const supportsPerTurn = target.key === "claude" || target.key === "codex";
 			// opencode only gets a static instructions file (no command-execution hook API in its
@@ -2445,9 +2450,10 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 			const guaranteedAutomatic = target.key !== "opencode";
 			const promptInstalled = homeDir && supportsPerTurn ? isUserPromptSubmitInstalled(homeDir, target.key) : false;
 			const wantsPerTurn = hookMode === "per-turn" && supportsPerTurn;
-			// Both Claude and Codex gate a Stop-hook memory-write nudge; report it
-			// identically for both as a suffix on the detail text.
-			const wantsWriteHooks = target.key === "claude" || target.key === "codex";
+			// Claude, Codex, and Qoder all gate a Stop-hook memory-write/capture
+			// nudge; report it identically for all three as a suffix on the detail
+			// text.
+			const wantsWriteHooks = target.key === "claude" || target.key === "codex" || target.key === "qoder";
 			const stopInstalled = homeDir && wantsWriteHooks ? isStopHookInstalled(homeDir, target.key) : false;
 			const writeHooksOk = !wantsWriteHooks || stopInstalled;
 			const ok =
@@ -2457,8 +2463,6 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 				detail = "not installed — no automatic context";
 			} else if (!guaranteedAutomatic) {
 				detail = "static instructions installed — model must run context manually, not guaranteed";
-			} else if (target.key === "qoder") {
-				detail = "SessionStart + Stop capture hooks active";
 			} else if (!supportsPerTurn) {
 				detail = "SessionStart hook active";
 			} else if (wantsPerTurn && !promptInstalled) {
