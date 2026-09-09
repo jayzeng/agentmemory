@@ -206,7 +206,7 @@ export function isSessionStartInstalled(homeDir: string, key: HookAgentKey): boo
 			return existing !== null && existing.includes(`command = "${sessionStartHookCommand("codex")}"`);
 		}
 		if (key === "cursor") {
-			return isCursorSessionStartHookRegistered(homeDir);
+			return isCursorSessionStartHookRegistered(homeDir) && areCursorCaptureHooksRegistered(homeDir);
 		}
 		if (key === "opencode") {
 			const configPath = path.join(homeDir, ".config", "opencode", "opencode.json");
@@ -290,6 +290,7 @@ export function isStopHookInstalled(homeDir: string, key: HookAgentKey): boolean
 			return existing !== null && existing.includes(`command = "${stopHookCommand("codex")}"`);
 		}
 		if (key === "qoder") return hasQoderHookGroup(homeDir, "Stop", stopHookCommand("qoder"));
+		if (key === "cursor") return isCursorHookEntryRegistered(homeDir, "stop", CURSOR_CAPTURE_HOOK_COMMAND);
 	} catch {}
 	return false;
 }
@@ -678,22 +679,74 @@ try {
 process.stdout.write(JSON.stringify({ additional_context: context }));
 `;
 
-function isCursorSessionStartHookRegistered(homeDir: string): boolean {
+const CURSOR_CAPTURE_HOOK_COMMAND = "agent-memory hook cursor-event --agent cursor";
+const CURSOR_CAPTURE_EVENTS = [
+	"beforeSubmitPrompt",
+	"afterFileEdit",
+	"afterShellExecution",
+	"afterMCPExecution",
+	"stop",
+] as const;
+
+type CursorCaptureEventKey = (typeof CURSOR_CAPTURE_EVENTS)[number];
+
+function isCursorHookEntryRegistered(homeDir: string, eventKey: string, command: string): boolean {
 	const hooksJsonPath = path.join(homeDir, ".cursor", "hooks.json");
 	if (!fs.existsSync(hooksJsonPath)) return false;
 	try {
 		const config = readJsonConfig(hooksJsonPath);
 		const hooks = (config.hooks as Record<string, unknown>) ?? {};
-		const sessionStart = Array.isArray(hooks.sessionStart) ? (hooks.sessionStart as unknown[]) : [];
-		return sessionStart.some(
-			(entry) =>
-				entry &&
-				typeof entry === "object" &&
-				(entry as Record<string, unknown>).command === CURSOR_HOOK_SCRIPT_RELATIVE,
+		const entries = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
+		return entries.some(
+			(entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command,
 		);
 	} catch {
 		return false;
 	}
+}
+
+function isCursorSessionStartHookRegistered(homeDir: string): boolean {
+	return isCursorHookEntryRegistered(homeDir, "sessionStart", CURSOR_HOOK_SCRIPT_RELATIVE);
+}
+
+function areCursorCaptureHooksRegistered(homeDir: string): boolean {
+	return CURSOR_CAPTURE_EVENTS.every((event) =>
+		isCursorHookEntryRegistered(homeDir, event, CURSOR_CAPTURE_HOOK_COMMAND),
+	);
+}
+
+function upsertCursorHookEntry(hooks: Record<string, unknown>, eventKey: string, command: string): boolean {
+	const entries = Array.isArray(hooks[eventKey]) ? [...(hooks[eventKey] as unknown[])] : [];
+	const matches = entries
+		.map((entry, index) => ({ entry, index }))
+		.filter(
+			({ entry }) => entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command,
+		);
+	if (matches.length === 0) {
+		entries.push({ command });
+		hooks[eventKey] = entries;
+		return true;
+	}
+	if (matches.length === 1) return false;
+	const keep = matches[0].index;
+	hooks[eventKey] = entries.filter(
+		(entry, index) =>
+			index === keep ||
+			!(entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command),
+	);
+	return true;
+}
+
+function removeCursorHookEntry(hooks: Record<string, unknown>, eventKey: string, command: string): boolean {
+	const entries = Array.isArray(hooks[eventKey]) ? (hooks[eventKey] as unknown[]) : [];
+	if (entries.length === 0) return false;
+	const filtered = entries.filter(
+		(entry) => !(entry && typeof entry === "object" && (entry as Record<string, unknown>).command === command),
+	);
+	if (filtered.length === entries.length) return false;
+	if (filtered.length === 0) delete hooks[eventKey];
+	else hooks[eventKey] = filtered;
+	return true;
 }
 
 function installCursorHook(homeDir: string): HookInstallResult {
@@ -704,6 +757,7 @@ function installCursorHook(homeDir: string): HookInstallResult {
 	// Cheap, harmless fallback for Cursor installs where hooks are disabled or unavailable.
 	installCursorRule(homeDir);
 
+	const hadManaged = isCursorSessionStartHookRegistered(homeDir) || areCursorCaptureHooksRegistered(homeDir);
 	fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
 	const scriptChanged = !fs.existsSync(scriptPath) || fs.readFileSync(scriptPath, "utf-8") !== CURSOR_HOOK_SCRIPT_BODY;
 	if (scriptChanged) {
@@ -711,27 +765,31 @@ function installCursorHook(homeDir: string): HookInstallResult {
 		fs.chmodSync(scriptPath, 0o755);
 	}
 
-	const alreadyRegistered = isCursorSessionStartHookRegistered(homeDir);
-	if (alreadyRegistered && !scriptChanged) {
-		return { key: "cursor", label: "Cursor", installed: false, path: hooksJsonPath, reason: "already installed" };
-	}
-
-	const backup = backupOnce(hooksJsonPath);
 	const config = readJsonConfig(hooksJsonPath);
 	if (typeof config.version !== "number") config.version = 1;
 	const hooks = (config.hooks as Record<string, unknown>) ?? {};
-	const sessionStart = Array.isArray(hooks.sessionStart) ? [...(hooks.sessionStart as unknown[])] : [];
-	if (!alreadyRegistered) sessionStart.push({ command: CURSOR_HOOK_SCRIPT_RELATIVE });
-	hooks.sessionStart = sessionStart;
-	config.hooks = hooks;
-	writeJson(hooksJsonPath, config);
+	let configChanged = upsertCursorHookEntry(hooks, "sessionStart", CURSOR_HOOK_SCRIPT_RELATIVE);
+	for (const event of CURSOR_CAPTURE_EVENTS) {
+		configChanged = upsertCursorHookEntry(hooks, event, CURSOR_CAPTURE_HOOK_COMMAND) || configChanged;
+	}
+
+	if (!configChanged && !scriptChanged) {
+		return { key: "cursor", label: "Cursor", installed: false, path: hooksJsonPath, reason: "already installed" };
+	}
+
+	let backup: string | undefined;
+	if (configChanged) {
+		backup = backupOnce(hooksJsonPath);
+		config.hooks = hooks;
+		writeJson(hooksJsonPath, config);
+	}
 	return {
 		key: "cursor",
 		label: "Cursor",
 		installed: true,
 		path: hooksJsonPath,
 		backup,
-		reason: alreadyRegistered ? "updated" : undefined,
+		reason: hadManaged ? "updated" : undefined,
 	};
 }
 
@@ -926,18 +984,11 @@ function uninstallCursorHook(homeDir: string): HookInstallResult {
 		try {
 			const config = readJsonConfig(hooksJsonPath);
 			const hooks = (config.hooks as Record<string, unknown>) ?? {};
-			const sessionStart = Array.isArray(hooks.sessionStart) ? (hooks.sessionStart as unknown[]) : [];
-			const filtered = sessionStart.filter(
-				(entry) =>
-					!(
-						entry &&
-						typeof entry === "object" &&
-						(entry as Record<string, unknown>).command === CURSOR_HOOK_SCRIPT_RELATIVE
-					),
-			);
-			if (filtered.length !== sessionStart.length) {
-				if (filtered.length === 0) delete hooks.sessionStart;
-				else hooks.sessionStart = filtered;
+			let changed = removeCursorHookEntry(hooks, "sessionStart", CURSOR_HOOK_SCRIPT_RELATIVE);
+			for (const event of CURSOR_CAPTURE_EVENTS) {
+				changed = removeCursorHookEntry(hooks, event, CURSOR_CAPTURE_HOOK_COMMAND) || changed;
+			}
+			if (changed) {
 				if (Object.keys(hooks).length === 0) delete (config as Record<string, unknown>).hooks;
 				else config.hooks = hooks;
 				writeJson(hooksJsonPath, config);

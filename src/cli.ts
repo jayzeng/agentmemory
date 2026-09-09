@@ -28,7 +28,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { type CaptureCheck, checkCaptureTranscript } from "./capture-check.js";
-
 import {
 	COMMAND_DESCRIPTIONS,
 	COMMAND_OPTIONS,
@@ -46,7 +45,6 @@ import {
 	installCompletion,
 	uninstallCompletion,
 } from "./completions.js";
-
 import {
 	_setBaseDir,
 	buildDynamicContext,
@@ -92,6 +90,7 @@ import {
 	topicPath,
 	uninstallSkills,
 } from "./core.js";
+import { handleCursorCaptureEvent } from "./cursor-capture.js";
 import {
 	detectHookAgents,
 	getPiMemoryState,
@@ -833,6 +832,15 @@ const STOP_NAG_REASON =
 	'capture it now — `agent-memory write --content "..."` for a daily note, or `--target long_term` for a ' +
 	"durable fact — and update the scratchpad with any open follow-ups. If there's nothing worth recording, " +
 	"ignore this and stop normally.";
+
+/** Cursor's documented event hooks provide enough structured evidence to avoid transcript parsing. */
+async function cmdCursorEvent(): Promise<void> {
+	const payload = await readStdinJson<Record<string, unknown>>();
+	const result = handleCursorCaptureEvent(payload);
+	if (payload?.hook_event_name === "stop" && result.shouldFollowup) {
+		process.stdout.write(JSON.stringify({ followup_message: STOP_NAG_REASON }));
+	}
+}
 
 /**
  * Stop hook handler — fires at the end of every assistant turn (not once per
@@ -2463,6 +2471,8 @@ async function cmdDoctor(flags: Record<string, string | boolean>): Promise<void>
 				detail = "not installed — no automatic context";
 			} else if (!guaranteedAutomatic) {
 				detail = "static instructions installed — model must run context manually, not guaranteed";
+			} else if (target.key === "cursor") {
+				detail = "SessionStart + event-driven capture hooks active";
 			} else if (!supportsPerTurn) {
 				detail = "SessionStart hook active";
 			} else if (wantsPerTurn && !promptInstalled) {
@@ -3763,11 +3773,16 @@ async function main() {
 			break;
 		case "hook": {
 			const sub = positional[0];
-			if (sub !== "session-start" && sub !== "user-prompt-submit" && sub !== "stop") {
-				exitError("hook requires 'session-start', 'user-prompt-submit', or 'stop'", json);
+			if (sub !== "session-start" && sub !== "user-prompt-submit" && sub !== "stop" && sub !== "cursor-event") {
+				exitError("hook requires 'session-start', 'user-prompt-submit', 'stop', or 'cursor-event'", json);
 			}
 			const agent = getFlag(flags, "agent");
 			if (!agent) exitError(`hook ${sub} requires --agent`, json);
+			if (sub === "cursor-event") {
+				if (agent !== "cursor") exitError("hook cursor-event only supports --agent cursor", json);
+				await cmdCursorEvent();
+				break;
+			}
 			if (sub === "user-prompt-submit") {
 				await cmdUserPromptSubmit(flags);
 				break;
