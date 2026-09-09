@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 
+import { isExplicitMemoryRequest } from "./capture-check.js";
+
 const MAX_TRANSCRIPT_BYTES = 512 * 1024;
 const HEAD_PROBE_BYTES = 8 * 1024;
 const EDIT_TOOLS = new Set(["apply_patch"]);
@@ -13,15 +15,6 @@ export interface CodexCaptureCheck {
 
 function record(value: unknown): RecordValue | undefined {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as RecordValue) : undefined;
-}
-
-function isExplicitMemoryRequest(value: unknown): boolean {
-	if (typeof value !== "string") return false;
-	const request = value.trim();
-	if (!request) return false;
-	if (/^(?:<system-reminder>|# (?:AGENTS|CLAUDE)\.md)/.test(request)) return false;
-	if (/\b(?:don['’]t|do not|never)\s+remember\b/i.test(request)) return false;
-	return /\b(?:remember\s+(?:this|that|to)|don['’]t forget\s+(?:this|that|to))\b/i.test(request);
 }
 
 function parseJsonRecord(value: unknown): RecordValue | undefined {
@@ -133,7 +126,7 @@ export function checkCodexCaptureTranscript(transcriptPath: unknown, sessionId: 
 			if (head?.type === "session_meta") {
 				const payload = record(head.payload);
 				const persistedSessionId = payload?.session_id ?? payload?.id;
-				if (typeof persistedSessionId === "string" && persistedSessionId !== sessionId) return null;
+				if (persistedSessionId !== undefined && persistedSessionId !== sessionId) return null;
 			}
 		}
 		const bytes = Buffer.alloc(Math.min(stat.size, MAX_TRANSCRIPT_BYTES));
@@ -159,7 +152,7 @@ export function checkCodexCaptureTranscript(transcriptPath: unknown, sessionId: 
 
 			if (entry.type === "session_meta") {
 				const persistedSessionId = payload.session_id ?? payload.id;
-				if (typeof persistedSessionId === "string" && persistedSessionId !== sessionId) return null;
+				if (persistedSessionId !== undefined && persistedSessionId !== sessionId) return null;
 				usable = true;
 				continue;
 			}

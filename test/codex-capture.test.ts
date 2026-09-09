@@ -111,4 +111,29 @@ describe("Codex rollout capture parser", () => {
 			fs.rmSync(path.dirname(file), { recursive: true, force: true });
 		}
 	});
+
+	test("fails closed on a non-string session id that differs (small rollout, tail scan)", () => {
+		// A numeric/other-typed session_id must not silently bypass the mismatch
+		// check just because it isn't a string.
+		const file = writeRollout([meta(987654 as unknown as string), user("Remember this: staging uses PostgreSQL.")]);
+		try {
+			expect(checkCodexCaptureTranscript(file, SESSION)).toBeNull();
+		} finally {
+			fs.rmSync(path.dirname(file), { recursive: true, force: true });
+		}
+	});
+
+	test("fails closed on a non-string session id that differs (large rollout, head probe)", () => {
+		const file = writeRollout([meta(987654 as unknown as string)]);
+		fs.appendFileSync(
+			file,
+			`${"x".repeat(600_000)}\n${JSON.stringify(user("Remember this: staging uses PostgreSQL."))}\n`,
+		);
+		try {
+			expect(fs.statSync(file).size).toBeGreaterThan(512 * 1024);
+			expect(checkCodexCaptureTranscript(file, SESSION)).toBeNull();
+		} finally {
+			fs.rmSync(path.dirname(file), { recursive: true, force: true });
+		}
+	});
 });
