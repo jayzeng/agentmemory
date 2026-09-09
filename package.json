@@ -128,7 +128,7 @@
 		"test": "bun test test/unit.test.ts",
 		"test:unit": "bun test test/unit.test.ts",
 		"test:cli": "bun test test/cli.test.ts test/codex-stop-install.test.ts test/qoder-stop-install.test.ts test/cursor-stop-install.test.ts --timeout 15000",
-		"test:eval": "bun test test/eval.test.ts test/codex-capture.test.ts test/longitudinal-behavior.test.ts",
+		"test:eval": "bun test test/eval.test.ts test/codex-capture.test.ts test/longitudinal-behavior.test.ts test/docs-contract.test.ts",
 		"test:harness": "npm run build:cli && bun test test/harness.test.ts --timeout 60000",
 		"test:token-savings": "bun test test/token-savings.test.ts",
 		"eval:harness": "bun eval/harness.ts",

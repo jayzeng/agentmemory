@@ -3,5 +3,11 @@
 	"compilerOptions": {
 		"types": ["node", "bun"]
 	},
-	"include": ["eval/**/*.ts", "test/eval.test.ts", "test/token-savings.test.ts", "test/longitudinal-behavior.test.ts"]
+	"include": [
+		"eval/**/*.ts",
+		"test/eval.test.ts",
+		"test/token-savings.test.ts",
+		"test/longitudinal-behavior.test.ts",
+		"test/docs-contract.test.ts"
+	]
 }

@@ -22,7 +22,7 @@ Prefer to have an agent drive the whole thing — install, configure, verify, th
 
 ## Why AgentMemory
 
-- AgentMemory injects your decisions, scratchpad, and daily log at session start — no copy-paste, no re-explaining.
+- AgentMemory injects your decisions, scratchpad, and daily log automatically where the host supports managed hooks; bundled skills provide the portable fallback.
 - Repeated corrections become durable memory you can inspect and undo (Pro).
 - Every memory is a plain Markdown file you own. AgentMemory's services do not receive memory content, session content, queries, or repository paths. Context you ask AgentMemory to return to a coding agent is then subject to that agent or model provider's data handling.
 
@@ -36,7 +36,7 @@ AgentMemory does not provide a Python SDK, does not provide a vector database, a
 
 **Core remembers what you save. Pro learns from what you do.** Core remains free, MIT-licensed, and useful forever. Pro adds three things:
 
-- **Remember past sessions** — ask *"what did we decide about auth?"* across Claude Code, Codex, and Pi session history. Cursor can use AgentMemory's skills and hooks, but Cursor transcript ingestion is not currently supported.
+- **Remember past sessions** — ask *"what did we decide about auth?"* across Claude Code, Codex, and Pi session history. Cursor and Qoder can use AgentMemory's capture/context hooks, but their raw transcript history is not currently ingested by Pro.
 - **Learn from your patterns** — turn repeated corrections into memory you can inspect and undo.
 - **Private by default** — memory and session content index locally. AgentMemory's services receive only a pseudonymous installation identifier and bounded compatibility metadata, never your memory or session content. Recall results provided locally to a coding agent are subject to that agent or model provider's data handling.
 
@@ -55,17 +55,17 @@ Pre-install preview: up to 50 local sessions per day. Free installed preview: 20
 ## Installation
 
 ```bash
-# Homebrew (macOS)
+# Homebrew (macOS) — native/Bun-compiled CLI, supports Core + current Pro runtime
 brew tap jayzeng/agentmemory https://github.com/jayzeng/agentmemory
 brew install jayzeng/agentmemory/agent-memory
 
-# Install the portable Core CLI globally (Node.js 20+; Pro session recall requires Node.js 22.13+)
+# Portable Core CLI (Node.js 20+)
 npm install -g myagentmemory
 
 # If corporate TLS inspection requires a private CA, use your organization's CA file:
 # npm config set cafile /path/to/corporate-ca.pem
 
-# Or build from source
+# Or build the native/Bun-compiled CLI from source
 bun run build:cli
 # => produces dist/agent-memory
 
@@ -76,7 +76,7 @@ agent-memory setup
 agent-memory uninstall-skills
 ```
 
-The npm package installs a platform-neutral Node.js executable. The optional Homebrew and `build:cli` paths use a native binary built for the current platform.
+The npm package installs a platform-neutral Node.js executable for Core. The current Pro bundle is intentionally Bun-native (including `bun:sqlite`), so loading Pro requires the Bun-compiled `agent-memory` CLI produced by Homebrew or `bun run build:cli`; Node-runtime compatibility is not currently claimed for Pro. The memory files themselves remain portable between these install paths.
 
 `agent-memory setup` is the recommended entry point — it is idempotent, so re-running it after an upgrade or a partial install is always safe. Pass `--skip-skills`, `--skip-hooks`, `--skip-plugin`, or `--skip-mcp` to opt out of individual steps, or `--yes --json` for scripted/CI installs. If you want the older step-by-step interactive wizard instead, `agent-memory init` still works.
 
@@ -96,9 +96,17 @@ Pi doesn't use SKILL.md or a JSON hook config — its extensibility model is a r
 
 ### Capture checks
 
-The Claude Code Stop hook checks a bounded local transcript tail for explicit English “remember this/that/to” requests and successful `Edit`, `Write`, or `MultiEdit` calls. It can remind the agent on the first turn when no subsequent successful AgentMemory write is visible. Unchanged uncaptured work is retried every six eligible Stop events; successful recognized writes clear the check. Ordinary conversation stays quiet. Without a usable transcript, the hook falls back to a reminder every six eligible Stop events.
+Capture checks reduce the chance that an agent completes meaningful work or receives an explicit memory request without persisting the useful outcome. They are host-specific rather than pretending every agent exposes the same lifecycle:
 
-This is a capture check, not automatic extraction or proof that a note contains every important fact. It recognizes direct `agent-memory write`/`save` shell calls and `memory_write` tools with successful write receipts; shell wrappers and other editing tools rely on the agent's own checkpoint discipline. Only signal hashes and counters are saved in hook state. Codex, Cursor, and Agent receive checkpoint guidance through their skills; they do not gain a Claude Stop hook.
+| Host | Mechanized capture path |
+|------|-------------------------|
+| Claude Code | Transcript-aware Stop check detects explicit memory requests and successful `Edit`, `Write`, or `MultiEdit` work, then verifies a later AgentMemory write. |
+| Codex | User-prompt capture handles explicit requests; Stop parses the persisted Codex rollout, recognizes successful `apply_patch` work, and verifies AgentMemory shell writes. |
+| Cursor | Structured hooks use `beforeSubmitPrompt`, `afterFileEdit`, `afterShellExecution`, `afterMCPExecution`, and `stop`; verified shell or MCP `memory_write` receipts clear pending state. |
+| Qoder | Stop reads Qoder's persisted session JSONL, recognizes native file edits, and verifies terminal AgentMemory writes. |
+| Pi | Delegated to the separately versioned `pi-memory` extension rather than reimplementing Pi's native extension model here. |
+
+The cross-harness capture evaluator measures Claude, Codex, Cursor, and Qoder and requires explicit-request detection, completed-work detection, and verified-write clearing for every measured host. That is a mechanism-coverage contract, **not** a claim that AgentMemory can infer every fact worth remembering. Capture checks intentionally stay bounded, persist only hashes/counters rather than transcript content, and periodically re-nag an unchanged pending signal instead of blocking ordinary conversation forever.
 
 ### Optional: Enable search with qmd
 
@@ -201,7 +209,7 @@ Global flags: `--dir <path>` (override directory), `--json` (machine output), `-
 |------|-------|--------|----------|
 | `keyword` | ~30ms | BM25 | Specific terms, dates, names, #tags, [[links]] |
 | `semantic` | ~2s | Vector search | Related concepts, different wording |
-| `deep` | ~10s | Hybrid + reranking | When other modes miss |
+| `deep` | slower | BM25 + vector fusion | When either lexical or semantic search alone misses |
 
 If the first search doesn't find what you need, try rephrasing or switching modes.
 
@@ -244,9 +252,9 @@ The context builder emits the following sections in priority order. Installed sk
 
 Total output, including headings and truncation notices, is hard-capped at 16,000 characters. Explicitly untrusted, expired, superseded, revoked, or retired blocks are excluded; legacy secret-like values are redacted before injection. When qmd is unavailable, the relevant-memory step is skipped and the rest still works.
 
-Supported detected hosts can receive managed automatic context hooks after `agent-memory install-hooks`; Claude Code also receives a periodic memory-write reminder. Bundled skills remain the portable fallback and use explicit search when a task relates to prior work.
+Supported detected hosts can receive managed automatic context hooks after `agent-memory install-hooks`. Claude Code, Codex, Cursor, and Qoder also have host-specific mechanized capture checks; Pi delegates capture to `pi-memory`. OpenCode currently uses static AgentMemory instructions rather than the same mechanized Stop/capture path. Bundled skills remain the portable fallback and use explicit search when a task relates to prior work.
 
-`context --layer` can request a subset instead of the full six-section build: `stable` (scratchpad + topics + MEMORY.md — durable facts unlikely to change with the current prompt), `dynamic` (today's log + qmd search + yesterday's log — turn-scoped, prompt-dependent), or `full` (default, all six sections). This backs the hook system's two install modes (`install-hooks --mode stable|per-turn` / `AGENT_MEMORY_HOOK_MODE`): `per-turn` (the default) installs a SessionStart hook that loads the `stable` layer once plus a UserPromptSubmit hook that reloads the `dynamic` layer every turn; `stable` mode installs SessionStart only, loading the `full` context once per session.
+`context --layer` can request a subset instead of the full six-section build: `stable` (scratchpad + topics + MEMORY.md — durable facts unlikely to change with the current prompt), `dynamic` (today's log + qmd search + yesterday's log — turn-scoped, prompt-dependent), or `full` (default, all six sections). This backs the hook system's two install modes (`install-hooks --mode stable|per-turn` / `AGENT_MEMORY_HOOK_MODE`): `per-turn` (the default) installs a SessionStart hook that loads the `stable` layer once plus a UserPromptSubmit hook that reloads the `dynamic` layer every turn where the host exposes that lifecycle; `stable` mode installs SessionStart-only behavior. Hosts with different hook models use their native integration rather than pretending to expose the Claude/Codex event names.
 
 ### Selective injection
 
@@ -289,7 +297,7 @@ These are content conventions, not enforced metadata. qmd's full-text indexing m
 | `AGENT_MEMORY_QMD_UPDATE` | `background`, `manual`, `off` | `background` | Controls automatic `qmd update` after writes |
 | `AGENT_MEMORY_QMD_EMBED` | `background`, `manual`, `off` | `background` | Controls automatic embedding generation after `init`/`setup` |
 | `AGENT_MEMORY_PLUGIN_DIR` | path | `~/.agent-memory/system/plugins` | Machine-local official plugin installation root; independent of `AGENT_MEMORY_DIR` |
-| `AGENT_MEMORY_HOOK_MODE` | `stable`, `per-turn` | `per-turn` | SessionStart-only vs. SessionStart + UserPromptSubmit hook installation |
+| `AGENT_MEMORY_HOOK_MODE` | `stable`, `per-turn` | `per-turn` | SessionStart-only vs. SessionStart + UserPromptSubmit hook installation where supported |
 | `AGENT_MEMORY_SKILLS_ROOT` | path | auto-detected | Override where `install-skills`/`setup` look for the bundled `skills/` directory |
 
 ## Running tests
@@ -304,6 +312,12 @@ bun run build:eval
 bun run test:eval
 bun run eval:feedback
 
+# Cross-harness capture mechanism contract
+bun run eval:capture
+
+# Paired deterministic cross-session behavior contract
+bun run eval:longitudinal-behavior
+
 # Optional: add isolated live qmd multilingual retrieval probes
 bun run eval:feedback --live-qmd
 ```
@@ -313,7 +327,9 @@ bun run eval:feedback --live-qmd
 | Level | File | Requirements | What it tests |
 |-------|------|-------------|---------------|
 | Unit | `test/unit.test.ts` | None | Utilities, scratchpad parsing, context builder, qmd helpers, tool functions |
-| CLI | `test/cli.test.ts` | None | CLI commands, subprocess integration |
+| CLI/host | `test/cli.test.ts` + host capture tests | None | CLI commands and installed host-specific hook behavior |
+| Capture eval | `eval/capture-reliability.ts` | None | Mechanized explicit-request/completed-work/write-clear coverage across Claude, Codex, Cursor, and Qoder; Pi is reported as delegated |
+| Longitudinal behavior | `eval/longitudinal-behavior.ts` | None | Paired deterministic later-session behavior contract, including correction reuse and stale-memory resistance; not a live-model effect study |
 | Feedback eval | `test/eval.test.ts`, `eval/` | qmd optional | External feedback, capability gaps, multilingual retrieval, and qualitative boundaries |
 
 ## Development
