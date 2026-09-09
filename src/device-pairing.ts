@@ -248,7 +248,11 @@ export class DevicePairingClient {
 		try {
 			return await this.fetchImplementation(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 		} catch {
-			throw new DevicePairingFailure("pairing_service_unavailable", "The AgentMemory account service is unavailable", true);
+			throw new DevicePairingFailure(
+				"pairing_service_unavailable",
+				"The AgentMemory account service is unavailable",
+				true,
+			);
 		}
 	}
 
