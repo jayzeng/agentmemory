@@ -566,14 +566,22 @@ export class DevicePairingClient {
 			}
 		}
 		try {
-			return await operation();
-		} finally {
+			const result = await operation();
 			fs.closeSync(descriptor);
+			fs.unlinkSync(lockPath);
+			return result;
+		} catch (error) {
+			try {
+				fs.closeSync(descriptor);
+			} catch {
+				// Preserve the operation or cleanup failure.
+			}
 			try {
 				fs.unlinkSync(lockPath);
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			} catch {
+				// Preserve the operation or cleanup failure.
 			}
+			throw error;
 		}
 	}
 
