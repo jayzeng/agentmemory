@@ -4,7 +4,7 @@ import * as path from "node:path";
 
 import type { PluginNextActionV1 } from "./plugin-bootstrap.js";
 import { type PluginEntitlementStatusV1, validatePluginEntitlementStatusV1 } from "./plugin-host.js";
-import { SignedEntitlementCache } from "./signed-entitlement.js";
+import { type EntitlementVerificationKeys, SignedEntitlementCache } from "./signed-entitlement.js";
 
 const DEVICE_FILE = "credentials/device.json";
 const DEVICE_CREDENTIAL = /^am_device_[a-f0-9]{64}$/;
@@ -32,6 +32,7 @@ interface DevicePairingClientOptions {
 	accountWebOrigin: string;
 	fetchImplementation?: typeof globalThis.fetch;
 	now?: () => Date;
+	entitlementKeys?: EntitlementVerificationKeys;
 }
 
 interface StartResponseV1 {
@@ -231,7 +232,7 @@ export class DevicePairingClient {
 		this.accountWebOrigin = validHttpsOrigin(options.accountWebOrigin);
 		this.fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
 		this.now = options.now ?? (() => new Date());
-		this.entitlementCache = new SignedEntitlementCache(this.root);
+		this.entitlementCache = new SignedEntitlementCache(this.root, options.entitlementKeys);
 	}
 
 	async getManagementAction(): Promise<PluginNextActionV1> {
