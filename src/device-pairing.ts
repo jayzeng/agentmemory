@@ -4,6 +4,7 @@ import * as path from "node:path";
 
 import type { PluginNextActionV1 } from "./plugin-bootstrap.js";
 import { type PluginEntitlementStatusV1, validatePluginEntitlementStatusV1 } from "./plugin-host.js";
+import { SignedEntitlementCache } from "./signed-entitlement.js";
 
 const DEVICE_FILE = "credentials/device.json";
 const DEVICE_CREDENTIAL = /^am_device_[a-f0-9]{64}$/;
@@ -11,6 +12,8 @@ const APPROVAL_CODE = /^[a-f0-9]{32}$/;
 const INSTALLATION_ID = /^am_install_[A-Za-z0-9_-]{32}$/;
 const RESPONSE_MAX_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
+const DAY_MS = 86_400_000;
+const RENEW_BEFORE_MS = 3 * DAY_MS;
 
 interface DevicePairingStateV1 {
 	schemaVersion: 1;
@@ -45,6 +48,13 @@ interface StatusResponseV1 {
 	state: "pending" | "approved";
 	installationId: string;
 	credentialExpiresAt?: string;
+}
+
+interface RenewResponseV1 {
+	schemaVersion: 1;
+	installationId: string;
+	deviceCredential: string;
+	credentialExpiresAt: string;
 }
 
 export class DevicePairingFailure extends Error {
@@ -131,11 +141,35 @@ function validateStatus(value: unknown, expectedInstallationId: string, now: Dat
 	return result as StatusResponseV1;
 }
 
-function validateOnlineEntitlement(value: unknown, expectedInstallationId: string): PluginEntitlementStatusV1 {
+function validateRenew(value: unknown, expectedInstallationId: string, now: Date): RenewResponseV1 {
+	if (!value || typeof value !== "object" || Array.isArray(value))
+		throw new DevicePairingFailure("pairing_response_invalid", "The device renewal response is invalid");
+	const result = value as Partial<RenewResponseV1>;
+	if (
+		result.schemaVersion !== 1 ||
+		result.installationId !== expectedInstallationId ||
+		typeof result.deviceCredential !== "string" ||
+		!DEVICE_CREDENTIAL.test(result.deviceCredential) ||
+		typeof result.credentialExpiresAt !== "string" ||
+		!isFuture(result.credentialExpiresAt, now)
+	)
+		throw new DevicePairingFailure("pairing_response_invalid", "The device renewal response is invalid");
+	return result as RenewResponseV1;
+}
+
+function validateOnlineEntitlement(
+	value: unknown,
+	expectedInstallationId: string,
+): { entitlement: PluginEntitlementStatusV1; signedEntitlement: unknown } {
 	if (!value || typeof value !== "object" || Array.isArray(value))
 		throw new DevicePairingFailure("entitlement_response_invalid", "The online entitlement response is invalid");
-	const result = value as { schemaVersion?: unknown; installationId?: unknown; entitlement?: unknown };
-	if (result.schemaVersion !== 1 || result.installationId !== expectedInstallationId)
+	const result = value as {
+		schemaVersion?: unknown;
+		installationId?: unknown;
+		entitlement?: unknown;
+		signedEntitlement?: unknown;
+	};
+	if (result.schemaVersion !== 1 || result.installationId !== expectedInstallationId || !result.signedEntitlement)
 		throw new DevicePairingFailure("entitlement_response_invalid", "The online entitlement response is invalid");
 	try {
 		validatePluginEntitlementStatusV1(result.entitlement);
@@ -174,7 +208,11 @@ function validateOnlineEntitlement(value: unknown, expectedInstallationId: strin
 		)
 			throw new DevicePairingFailure("entitlement_response_invalid", "The free entitlement policy is invalid");
 	}
-	return structuredClone(entitlement);
+	return { entitlement: structuredClone(entitlement), signedEntitlement: result.signedEntitlement };
+}
+
+function policiesMatch(a: PluginEntitlementStatusV1, b: PluginEntitlementStatusV1): boolean {
+	return a.plan === b.plan && JSON.stringify(a.features) === JSON.stringify(b.features) && JSON.stringify(a.capabilities) === JSON.stringify(b.capabilities);
 }
 
 export class DevicePairingClient {
@@ -184,6 +222,7 @@ export class DevicePairingClient {
 	private readonly accountWebOrigin: string;
 	private readonly fetchImplementation: typeof globalThis.fetch;
 	private readonly now: () => Date;
+	private readonly entitlementCache: SignedEntitlementCache;
 
 	constructor(options: DevicePairingClientOptions) {
 		this.root = path.resolve(options.root);
@@ -192,33 +231,53 @@ export class DevicePairingClient {
 		this.accountWebOrigin = validHttpsOrigin(options.accountWebOrigin);
 		this.fetchImplementation = options.fetchImplementation ?? globalThis.fetch;
 		this.now = options.now ?? (() => new Date());
+		this.entitlementCache = new SignedEntitlementCache(this.root);
 	}
 
 	async getManagementAction(): Promise<PluginNextActionV1> {
 		let state = this.readState();
 		if (state) {
-			const status = await this.status(state);
-			if (status === null) {
-				this.removeState();
-				state = null;
-			} else if (status.state === "approved") {
-				const approved = this.approvedState(state, status.credentialExpiresAt as string);
-				this.writeState(approved);
-				return {
-					kind: "manage",
-					url: this.accountWebOrigin,
-					message: `This device is linked to your AgentMemory account through ${status.credentialExpiresAt}.`,
-				};
-			} else if (
-				state.approvalCode &&
-				APPROVAL_CODE.test(state.approvalCode) &&
-				state.approvalExpiresAt &&
-				isFuture(state.approvalExpiresAt, this.now())
-			) {
-				return this.pendingAction(state);
-			} else {
-				this.removeState();
-				state = null;
+			if (state.credentialExpiresAt) {
+				const expiry = Date.parse(state.credentialExpiresAt);
+				if (Number.isFinite(expiry) && expiry <= this.now().getTime()) {
+					const renewed = await this.renew(state);
+					if (renewed) {
+						return {
+							kind: "manage",
+							url: this.accountWebOrigin,
+							message: `This device is linked to your AgentMemory account through ${renewed.credentialExpiresAt}.`,
+						};
+					}
+					this.removeStateAndCache();
+					state = null;
+				}
+			}
+			if (state) {
+				const status = await this.status(state);
+				if (status === null) {
+					this.removeStateAndCache();
+					state = null;
+				} else if (status.state === "approved") {
+					let approved = this.approvedState(state, status.credentialExpiresAt as string);
+					if (Date.parse(status.credentialExpiresAt as string) - this.now().getTime() <= RENEW_BEFORE_MS)
+						approved = (await this.renew(approved)) ?? approved;
+					this.writeState(approved);
+					return {
+						kind: "manage",
+						url: this.accountWebOrigin,
+						message: `This device is linked to your AgentMemory account through ${approved.credentialExpiresAt}.`,
+					};
+				} else if (
+					state.approvalCode &&
+					APPROVAL_CODE.test(state.approvalCode) &&
+					state.approvalExpiresAt &&
+					isFuture(state.approvalExpiresAt, this.now())
+				) {
+					return this.pendingAction(state);
+				} else {
+					this.removeStateAndCache();
+					state = null;
+				}
 			}
 		}
 
@@ -229,31 +288,69 @@ export class DevicePairingClient {
 	async getOnlineEntitlement(): Promise<PluginEntitlementStatusV1 | null> {
 		let state = this.readState();
 		if (!state) return null;
-		if (!state.credentialExpiresAt || !isFuture(state.credentialExpiresAt, this.now())) {
+		try {
+			state = await this.ensureCredential(state);
+			if (!state) return null;
+			const response = await this.fetch(`${this.apiOrigin}/v1/plugin/entitlement`, {
+				method: "POST",
+				headers: { Accept: "application/json", Authorization: `Bearer ${state.deviceCredential}` },
+			});
+			if (response.status === 401) {
+				this.removeStateAndCache();
+				return null;
+			}
+			if (!response.ok)
+				throw new DevicePairingFailure(
+					"entitlement_service_unavailable",
+					`AgentMemory paid access is unavailable (HTTP ${response.status})`,
+					response.status >= 500 || response.status === 429,
+				);
+			const online = validateOnlineEntitlement(await boundedJson(response), state.installationId);
+			let verified: PluginEntitlementStatusV1;
+			try {
+				verified = this.entitlementCache.write(online.signedEntitlement, state.installationId, this.now());
+			} catch {
+				throw new DevicePairingFailure("entitlement_signature_invalid", "The signed AgentMemory entitlement is invalid");
+			}
+			if (verified.state !== "active" || !policiesMatch(online.entitlement, verified)) {
+				this.entitlementCache.remove();
+				throw new DevicePairingFailure("entitlement_response_invalid", "The signed and online entitlement policies disagree");
+			}
+			return verified;
+		} catch (error) {
+			if (error instanceof DevicePairingFailure && error.retryable) {
+				const cached = this.entitlementCache.read(state.installationId, this.now());
+				if (cached && (cached.state === "active" || cached.state === "grace")) return cached;
+			}
+			throw error;
+		}
+	}
+
+	private async ensureCredential(state: DevicePairingStateV1): Promise<DevicePairingStateV1 | null> {
+		if (!state.credentialExpiresAt) {
 			const status = await this.status(state);
 			if (status === null) {
-				this.removeState();
+				this.removeStateAndCache();
 				return null;
 			}
 			if (status.state === "pending") return null;
 			state = this.approvedState(state, status.credentialExpiresAt as string);
 			this.writeState(state);
 		}
-		const response = await this.fetch(`${this.apiOrigin}/v1/plugin/entitlement`, {
-			method: "POST",
-			headers: { Accept: "application/json", Authorization: `Bearer ${state.deviceCredential}` },
-		});
-		if (response.status === 401) {
-			this.removeState();
+		const expiresAt = Date.parse(state.credentialExpiresAt as string);
+		if (!Number.isFinite(expiresAt)) {
+			this.removeStateAndCache();
 			return null;
 		}
-		if (!response.ok)
-			throw new DevicePairingFailure(
-				"entitlement_service_unavailable",
-				`AgentMemory paid access is unavailable (HTTP ${response.status})`,
-				response.status >= 500 || response.status === 429,
-			);
-		return validateOnlineEntitlement(await boundedJson(response), state.installationId);
+		if (expiresAt - this.now().getTime() <= RENEW_BEFORE_MS) {
+			const renewed = await this.renew(state);
+			if (!renewed) {
+				this.removeStateAndCache();
+				return null;
+			}
+			return renewed;
+		}
+		return state;
 	}
 
 	private approvedState(state: DevicePairingStateV1, credentialExpiresAt: string): DevicePairingStateV1 {
@@ -323,6 +420,30 @@ export class DevicePairingClient {
 				response.status >= 500 || response.status === 429,
 			);
 		return validateStatus(await boundedJson(response), state.installationId, this.now());
+	}
+
+	private async renew(state: DevicePairingStateV1): Promise<DevicePairingStateV1 | null> {
+		const response = await this.fetch(`${this.apiOrigin}/v1/plugin/devices/renew`, {
+			method: "POST",
+			headers: { Accept: "application/json", Authorization: `Bearer ${state.deviceCredential}` },
+		});
+		if (response.status === 401) return null;
+		if (!response.ok)
+			throw new DevicePairingFailure(
+				"pairing_renewal_failed",
+				`AgentMemory device credential renewal is unavailable (HTTP ${response.status})`,
+				response.status >= 500 || response.status === 429,
+			);
+		const renewed = validateRenew(await boundedJson(response), state.installationId, this.now());
+		const next: DevicePairingStateV1 = {
+			schemaVersion: 1,
+			installationId: state.installationId,
+			deviceCredential: renewed.deviceCredential,
+			createdAt: state.createdAt,
+			credentialExpiresAt: renewed.credentialExpiresAt,
+		};
+		this.writeState(next);
+		return next;
 	}
 
 	private async fetch(url: string, init: RequestInit): Promise<Response> {
@@ -400,6 +521,11 @@ export class DevicePairingClient {
 				// The original write/rename failure is more useful than cleanup noise.
 			}
 		}
+	}
+
+	private removeStateAndCache(): void {
+		this.removeState();
+		this.entitlementCache.remove();
 	}
 
 	private removeState(): void {
