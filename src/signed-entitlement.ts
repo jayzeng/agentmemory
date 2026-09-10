@@ -189,7 +189,8 @@ export class SignedEntitlementCache {
 		const target = this.path();
 		fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
 		const directory = fs.lstatSync(path.dirname(target));
-		if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error("entitlement credential directory is unsafe");
+		if (!directory.isDirectory() || directory.isSymbolicLink())
+			throw new Error("entitlement credential directory is unsafe");
 		const temporary = `${target}.tmp-${process.pid}-${randomUUID()}`;
 		try {
 			fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
