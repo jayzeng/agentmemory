@@ -14,6 +14,7 @@ const RESPONSE_MAX_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DAY_MS = 86_400_000;
 const RENEW_BEFORE_MS = 3 * DAY_MS;
+const LOCK_INIT_GRACE_MS = 1_000;
 
 interface DevicePairingStateV1 {
 	schemaVersion: 1;
@@ -213,11 +214,21 @@ function validateOnlineEntitlement(
 	return { entitlement: structuredClone(entitlement), signedEntitlement: result.signedEntitlement };
 }
 
+function canonicalJson(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(canonicalJson);
+	if (!value || typeof value !== "object") return value;
+	return Object.fromEntries(
+		Object.entries(value as Record<string, unknown>)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([key, child]) => [key, canonicalJson(child)]),
+	);
+}
+
 function policiesMatch(a: PluginEntitlementStatusV1, b: PluginEntitlementStatusV1): boolean {
 	return (
 		a.plan === b.plan &&
-		JSON.stringify(a.features) === JSON.stringify(b.features) &&
-		JSON.stringify(a.capabilities) === JSON.stringify(b.capabilities)
+		JSON.stringify([...a.features].sort()) === JSON.stringify([...b.features].sort()) &&
+		JSON.stringify(canonicalJson(a.capabilities)) === JSON.stringify(canonicalJson(b.capabilities))
 	);
 }
 
@@ -511,22 +522,36 @@ export class DevicePairingClient {
 		while (true) {
 			try {
 				descriptor = fs.openSync(lockPath, "wx", 0o600);
-				fs.writeFileSync(descriptor, String(process.pid));
+				try {
+					fs.writeFileSync(descriptor, String(process.pid));
+				} catch (error) {
+					fs.closeSync(descriptor);
+					try {
+						fs.unlinkSync(lockPath);
+					} catch {
+						// Preserve the lock initialization failure.
+					}
+					throw error;
+				}
 				break;
 			} catch (error) {
 				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-				// Recover a lock from a terminated process; never time out an active owner.
+				// Recover a lock from a terminated process. A just-created empty lock gets
+				// a brief grace period so we never race an owner between open() and PID write.
 				try {
 					const stat = fs.lstatSync(lockPath);
 					if (!stat.isFile() || stat.isSymbolicLink())
 						throw new DevicePairingFailure("pairing_path_invalid", "The device pairing lock is unsafe");
-					const pid = Number(fs.readFileSync(lockPath, "utf8"));
+					const rawPid = fs.readFileSync(lockPath, "utf8").trim();
+					const pid = Number(rawPid);
 					if (Number.isSafeInteger(pid) && pid > 0) {
 						try {
 							process.kill(pid, 0);
 						} catch (ownerError) {
 							if ((ownerError as NodeJS.ErrnoException).code === "ESRCH") fs.unlinkSync(lockPath);
 						}
+					} else if (Date.now() - stat.mtimeMs >= LOCK_INIT_GRACE_MS) {
+						fs.unlinkSync(lockPath);
 					}
 				} catch (lockError) {
 					if ((lockError as NodeJS.ErrnoException).code !== "ENOENT") throw lockError;
@@ -544,7 +569,11 @@ export class DevicePairingClient {
 			return await operation();
 		} finally {
 			fs.closeSync(descriptor);
-			fs.unlinkSync(lockPath);
+			try {
+				fs.unlinkSync(lockPath);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
 		}
 	}
 
