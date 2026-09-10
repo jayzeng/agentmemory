@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -23,6 +23,7 @@ interface DevicePairingStateV1 {
 	approvalCode?: string;
 	approvalExpiresAt?: string;
 	credentialExpiresAt?: string;
+	pendingDeviceCredential?: string;
 }
 
 interface DevicePairingClientOptions {
@@ -240,7 +241,15 @@ export class DevicePairingClient {
 	}
 
 	async getManagementAction(): Promise<PluginNextActionV1> {
+		return this.withCredentialLock(() => this.managementAction());
+	}
+
+	private async managementAction(): Promise<PluginNextActionV1> {
 		let state = this.readState();
+		if (state?.pendingDeviceCredential) {
+			state = await this.renew(state);
+			if (!state) this.removeStateAndCache();
+		}
 		if (state) {
 			if (state.credentialExpiresAt) {
 				const expiry = Date.parse(state.credentialExpiresAt);
@@ -264,8 +273,14 @@ export class DevicePairingClient {
 					state = null;
 				} else if (status.state === "approved") {
 					let approved = this.approvedState(state, status.credentialExpiresAt as string);
-					if (Date.parse(status.credentialExpiresAt as string) - this.now().getTime() <= RENEW_BEFORE_MS)
-						approved = (await this.renew(approved)) ?? approved;
+					if (Date.parse(status.credentialExpiresAt as string) - this.now().getTime() <= RENEW_BEFORE_MS) {
+						const renewed = await this.renew(approved);
+						if (!renewed) {
+							this.removeStateAndCache();
+							return this.pendingAction(await this.start());
+						}
+						approved = renewed;
+					}
 					this.writeState(approved);
 					return {
 						kind: "manage",
@@ -291,6 +306,11 @@ export class DevicePairingClient {
 	}
 
 	async getOnlineEntitlement(): Promise<PluginEntitlementStatusV1 | null> {
+		if (!this.readState()) return null;
+		return this.withCredentialLock(() => this.onlineEntitlement());
+	}
+
+	private async onlineEntitlement(): Promise<PluginEntitlementStatusV1 | null> {
 		let state = this.readState();
 		if (!state) return null;
 		const pairingInstallationId = state.installationId;
@@ -354,7 +374,7 @@ export class DevicePairingClient {
 			this.removeStateAndCache();
 			return null;
 		}
-		if (expiresAt - this.now().getTime() <= RENEW_BEFORE_MS) {
+		if (state.pendingDeviceCredential || expiresAt - this.now().getTime() <= RENEW_BEFORE_MS) {
 			const renewed = await this.renew(state);
 			if (!renewed) {
 				this.removeStateAndCache();
@@ -435,18 +455,28 @@ export class DevicePairingClient {
 	}
 
 	private async renew(state: DevicePairingStateV1): Promise<DevicePairingStateV1 | null> {
+		const nextDeviceCredential = state.pendingDeviceCredential ?? `am_device_${randomBytes(32).toString("hex")}`;
+		// Persist before sending: even a crash or a lost response can retry the same rotation.
+		this.writeState({ ...state, pendingDeviceCredential: nextDeviceCredential });
 		const response = await this.fetch(`${this.apiOrigin}/v1/plugin/devices/renew`, {
 			method: "POST",
-			headers: { Accept: "application/json", Authorization: `Bearer ${state.deviceCredential}` },
+			headers: {
+				Accept: "application/json",
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${state.deviceCredential}`,
+			},
+			body: JSON.stringify({ nextDeviceCredential }),
 		});
 		if (response.status === 401) return null;
 		if (!response.ok)
 			throw new DevicePairingFailure(
 				"pairing_renewal_failed",
 				`AgentMemory device credential renewal is unavailable (HTTP ${response.status})`,
-				response.status >= 500 || response.status === 429,
+				response.status >= 500 || response.status === 429 || response.status === 409,
 			);
 		const renewed = validateRenew(await boundedJson(response), state.installationId, this.now());
+		if (renewed.deviceCredential !== nextDeviceCredential)
+			throw new DevicePairingFailure("pairing_response_invalid", "The device renewal credential does not match");
 		const next: DevicePairingStateV1 = {
 			schemaVersion: 1,
 			installationId: state.installationId,
@@ -467,6 +497,54 @@ export class DevicePairingClient {
 				"The AgentMemory account service is unavailable",
 				true,
 			);
+		}
+	}
+
+	private async withCredentialLock<T>(operation: () => Promise<T>): Promise<T> {
+		fs.mkdirSync(this.root, { recursive: true, mode: 0o700 });
+		const root = fs.lstatSync(this.root);
+		if (!root.isDirectory() || root.isSymbolicLink())
+			throw new DevicePairingFailure("pairing_path_invalid", "The plugin state root is unsafe");
+		const lockPath = path.join(this.root, "device-pairing.lock");
+		const deadline = Date.now() + 35_000;
+		let descriptor: number;
+		while (true) {
+			try {
+				descriptor = fs.openSync(lockPath, "wx", 0o600);
+				fs.writeFileSync(descriptor, String(process.pid));
+				break;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+				// Recover a lock from a terminated process; never time out an active owner.
+				try {
+					const stat = fs.lstatSync(lockPath);
+					if (!stat.isFile() || stat.isSymbolicLink())
+						throw new DevicePairingFailure("pairing_path_invalid", "The device pairing lock is unsafe");
+					const pid = Number(fs.readFileSync(lockPath, "utf8"));
+					if (Number.isSafeInteger(pid) && pid > 0) {
+						try {
+							process.kill(pid, 0);
+						} catch (ownerError) {
+							if ((ownerError as NodeJS.ErrnoException).code === "ESRCH") fs.unlinkSync(lockPath);
+						}
+					}
+				} catch (lockError) {
+					if ((lockError as NodeJS.ErrnoException).code !== "ENOENT") throw lockError;
+				}
+				if (Date.now() >= deadline)
+					throw new DevicePairingFailure(
+						"pairing_busy",
+						"Another process is updating this device; retry shortly",
+						true,
+					);
+				await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+		}
+		try {
+			return await operation();
+		} finally {
+			fs.closeSync(descriptor);
+			fs.unlinkSync(lockPath);
 		}
 	}
 
@@ -502,7 +580,8 @@ export class DevicePairingClient {
 				!Number.isFinite(Date.parse(value.createdAt)) ||
 				(value.approvalCode !== undefined && !APPROVAL_CODE.test(value.approvalCode)) ||
 				(value.approvalExpiresAt !== undefined && !Number.isFinite(Date.parse(value.approvalExpiresAt))) ||
-				(value.credentialExpiresAt !== undefined && !Number.isFinite(Date.parse(value.credentialExpiresAt)))
+				(value.credentialExpiresAt !== undefined && !Number.isFinite(Date.parse(value.credentialExpiresAt))) ||
+				(value.pendingDeviceCredential !== undefined && !DEVICE_CREDENTIAL.test(value.pendingDeviceCredential))
 			)
 				return null;
 			return value as DevicePairingStateV1;

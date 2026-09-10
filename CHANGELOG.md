@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Persist pending replacement device credentials before renewal, serialize pairing operations, and recover renewal retries without losing paired access.
+
 - `upsertClaudeHookGroup` now recognizes legacy, pre-`HOOK_MARKER_JSON` hook entries by command string without collapsing a whole duplicate group — an unrelated hand-added hook sharing that group is preserved, and duplicate entries within a single group are deduplicated down to one instead of both being individually "fixed" in place. Clearing a group's stale `matcher` is now scoped to groups that are exclusively agent-memory's.
 - `removeClaudeHookGroup` (used by downgrade from per-turn to stable, and by full uninstall) now matches legacy pre-marker hooks the same way install already does, so downgrading no longer reports success while leaving a legacy `UserPromptSubmit` hook active.
 

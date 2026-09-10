@@ -185,7 +185,7 @@ describe("account-device pairing client", () => {
 			})}\n`,
 			{ mode: 0o600 },
 		);
-		const rotatedCredential = `am_device_${"d".repeat(64)}`;
+		let rotatedCredential = "";
 		const pairing = new DevicePairingClient({
 			root: stateRoot,
 			coreVersion: "0.6.0-test",
@@ -203,6 +203,7 @@ describe("account-device pairing client", () => {
 						credentialExpiresAt: "2026-09-11T20:00:00.000Z",
 					});
 				expect(url).toBe("https://api.example.test/v1/plugin/devices/renew");
+				rotatedCredential = JSON.parse(String(init?.body)).nextDeviceCredential;
 				return response({
 					schemaVersion: 1,
 					installationId,
@@ -219,4 +220,63 @@ describe("account-device pairing client", () => {
 		expect(state.credentialExpiresAt).toBe("2026-10-09T20:00:00.000Z");
 		expect(JSON.stringify(action)).not.toContain(rotatedCredential);
 	});
+});
+
+test("lost rotation responses survive a client restart and concurrent clients share one renewal", async () => {
+	const stateRoot = root();
+	const credentials = path.join(stateRoot, "credentials");
+	fs.mkdirSync(credentials, { mode: 0o700 });
+	const target = path.join(credentials, "device.json");
+	fs.writeFileSync(
+		target,
+		JSON.stringify({
+			schemaVersion: 1,
+			installationId,
+			deviceCredential,
+			createdAt: "2026-09-01T00:00:00.000Z",
+			credentialExpiresAt: "2026-09-11T20:00:00.000Z",
+		}),
+		{ mode: 0o600 },
+	);
+	let attempts = 0;
+	let replacement = "";
+	const fetchImplementation = (async (input, init) => {
+		if (String(input).endsWith("/renew")) {
+			const next = JSON.parse(String(init?.body)).nextDeviceCredential;
+			expect(JSON.parse(fs.readFileSync(target, "utf8")).pendingDeviceCredential).toBe(next);
+			if (++attempts === 1) {
+				replacement = next;
+				throw new Error("response lost after server commit");
+			}
+			expect(next).toBe(replacement);
+			return response({
+				schemaVersion: 1,
+				installationId,
+				deviceCredential: next,
+				credentialExpiresAt: "2026-10-09T20:00:00.000Z",
+			});
+		}
+		return response({
+			schemaVersion: 1,
+			installationId,
+			state: "approved",
+			credentialExpiresAt: replacement ? "2026-10-09T20:00:00.000Z" : "2026-09-11T20:00:00.000Z",
+		});
+	}) as typeof fetch;
+	const createClient = () =>
+		new DevicePairingClient({
+			root: stateRoot,
+			coreVersion: "0.6.0-test",
+			apiOrigin: "https://api.example.test",
+			accountWebOrigin: "https://account.example.test",
+			now: () => new Date("2026-09-09T20:00:00.000Z"),
+			fetchImplementation,
+		});
+	await expect(createClient().getManagementAction()).rejects.toThrow();
+	const results = await Promise.all([createClient().getManagementAction(), createClient().getManagementAction()]);
+	expect(results.map((r) => r.kind)).toEqual(["manage", "manage"]);
+	expect(attempts).toBe(2);
+	const persisted = JSON.parse(fs.readFileSync(target, "utf8"));
+	expect(persisted.deviceCredential).toBe(replacement);
+	expect(persisted.pendingDeviceCredential).toBeUndefined();
 });
