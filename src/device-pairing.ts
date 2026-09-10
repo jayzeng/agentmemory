@@ -316,11 +316,17 @@ export class DevicePairingClient {
 			try {
 				verified = this.entitlementCache.write(online.signedEntitlement, state.installationId, this.now());
 			} catch {
-				throw new DevicePairingFailure("entitlement_signature_invalid", "The signed AgentMemory entitlement is invalid");
+				throw new DevicePairingFailure(
+					"entitlement_signature_invalid",
+					"The signed AgentMemory entitlement is invalid",
+				);
 			}
 			if (verified.state !== "active" || !policiesMatch(online.entitlement, verified)) {
 				this.entitlementCache.remove();
-				throw new DevicePairingFailure("entitlement_response_invalid", "The signed and online entitlement policies disagree");
+				throw new DevicePairingFailure(
+					"entitlement_response_invalid",
+					"The signed and online entitlement policies disagree",
+				);
 			}
 			return verified;
 		} catch (error) {
