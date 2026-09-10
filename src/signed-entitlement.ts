@@ -1,4 +1,4 @@
-import { createPublicKey, verify } from "node:crypto";
+import { createPublicKey, randomUUID, verify } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -15,6 +15,8 @@ const SIGNATURE = /^[A-Za-z0-9+/]+={0,2}$/;
 const RELEASE_SIGNING_KEY_2026_08 = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEASefZFUVFy1EmvGbd0ckHZThmPgqQ3u9HCwZRReAZQW8=
 -----END PUBLIC KEY-----`;
+
+export type EntitlementVerificationKeys = Record<string, string | Buffer>;
 
 export interface SignedEntitlementClaimsV1 {
 	schemaVersion: 1;
@@ -39,7 +41,7 @@ export interface SignedEntitlementEnvelopeV1 {
 	};
 }
 
-const PINNED_KEYS: Record<string, string> = {
+const PINNED_KEYS: EntitlementVerificationKeys = {
 	"agentmemory-temporary-2026-08": RELEASE_SIGNING_KEY_2026_08,
 };
 
@@ -95,6 +97,7 @@ export function verifySignedEntitlementV1(
 	value: unknown,
 	expectedInstallationId: string,
 	now: Date,
+	keys: EntitlementVerificationKeys = PINNED_KEYS,
 ): PluginEntitlementStatusV1 {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("signed entitlement is invalid");
 	const envelope = value as Partial<SignedEntitlementEnvelopeV1>;
@@ -127,7 +130,6 @@ export function verifySignedEntitlementV1(
 	const offlineUntil = parseTime(claims.offlineUntil, "offlineUntil");
 	if (!(issuedAt <= refreshAfter && refreshAfter <= offlineUntil && offlineUntil <= expiresAt))
 		throw new Error("signed entitlement time bounds are invalid");
-	// Refuse grants minted implausibly far in the future. Small clock skew is tolerated.
 	if (issuedAt > now.getTime() + 5 * 60_000) throw new Error("signed entitlement was issued in the future");
 	const signature = envelope.signature as SignedEntitlementEnvelopeV1["signature"];
 	if (
@@ -137,7 +139,7 @@ export function verifySignedEntitlementV1(
 		!SIGNATURE.test(signature.value)
 	)
 		throw new Error("signed entitlement signature is invalid");
-	const pem = PINNED_KEYS[signature.keyId];
+	const pem = keys[signature.keyId];
 	if (!pem) throw new Error("signed entitlement uses an unknown key");
 	const valid = verify(
 		null,
@@ -167,25 +169,28 @@ export function verifySignedEntitlementV1(
 }
 
 export class SignedEntitlementCache {
-	constructor(private readonly root: string) {}
+	constructor(
+		private readonly root: string,
+		private readonly keys: EntitlementVerificationKeys = PINNED_KEYS,
+	) {}
 
 	read(expectedInstallationId: string, now: Date): PluginEntitlementStatusV1 | null {
 		const envelope = this.readEnvelope();
 		if (!envelope) return null;
 		try {
-			return verifySignedEntitlementV1(envelope, expectedInstallationId, now);
+			return verifySignedEntitlementV1(envelope, expectedInstallationId, now, this.keys);
 		} catch {
 			return null;
 		}
 	}
 
 	write(value: unknown, expectedInstallationId: string, now: Date): PluginEntitlementStatusV1 {
-		const entitlement = verifySignedEntitlementV1(value, expectedInstallationId, now);
+		const entitlement = verifySignedEntitlementV1(value, expectedInstallationId, now, this.keys);
 		const target = this.path();
 		fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
 		const directory = fs.lstatSync(path.dirname(target));
 		if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error("entitlement credential directory is unsafe");
-		const temporary = `${target}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`;
+		const temporary = `${target}.tmp-${process.pid}-${randomUUID()}`;
 		try {
 			fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
 			fs.renameSync(temporary, target);
