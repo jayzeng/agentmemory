@@ -280,3 +280,26 @@ test("lost rotation responses survive a client restart and concurrent clients sh
 	expect(persisted.deviceCredential).toBe(replacement);
 	expect(persisted.pendingDeviceCredential).toBeUndefined();
 });
+
+test("an abandoned empty pairing lock is reclaimed instead of blocking future pairing", async () => {
+	const stateRoot = root();
+	const lockPath = path.join(stateRoot, "device-pairing.lock");
+	fs.writeFileSync(lockPath, "", { mode: 0o600 });
+	fs.utimesSync(lockPath, new Date(0), new Date(0));
+	let starts = 0;
+	const pairing = new DevicePairingClient({
+		root: stateRoot,
+		coreVersion: "0.6.0-test",
+		apiOrigin: "https://api.example.test",
+		accountWebOrigin: "https://account.example.test",
+		fetchImplementation: (async (input) => {
+			expect(String(input)).toBe("https://api.example.test/v1/plugin/devices/start");
+			starts++;
+			return started();
+		}) as typeof fetch,
+	});
+	const action = await pairing.getManagementAction();
+	expect(action.kind).toBe("authenticate");
+	expect(starts).toBe(1);
+	expect(fs.existsSync(lockPath)).toBe(false);
+});
