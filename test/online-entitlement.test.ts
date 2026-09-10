@@ -144,6 +144,30 @@ describe("paired signed paid entitlement", () => {
 			expect(fs.statSync(path.join(stateRoot, "credentials", "entitlement.json")).mode & 0o077).toBe(0);
 	});
 
+	test("online and signed policies compare structurally regardless of property or feature order", async () => {
+		const stateRoot = root();
+		const signedPolicy = proPolicy();
+		const onlinePolicy = {
+			...signedPolicy,
+			features: [...signedPolicy.features].reverse(),
+			capabilities: Object.fromEntries(Object.entries(signedPolicy.capabilities).reverse()),
+		};
+		const pairing = client(
+			stateRoot,
+			(async () =>
+				json({
+					schemaVersion: 1,
+					installationId,
+					entitlement: onlinePolicy,
+					signedEntitlement: signed(signedPolicy),
+				})) as typeof fetch,
+			"2026-09-09T20:01:00.000Z",
+		);
+		const entitlement = await pairing.getOnlineEntitlement();
+		expect(entitlement?.plan).toBe("pro");
+		expect(entitlement?.state).toBe("active");
+	});
+
 	test("a network outage uses the last verified Pro envelope during signed grace", async () => {
 		const stateRoot = root();
 		const online = client(
