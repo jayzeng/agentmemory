@@ -213,7 +213,11 @@ function validateOnlineEntitlement(
 }
 
 function policiesMatch(a: PluginEntitlementStatusV1, b: PluginEntitlementStatusV1): boolean {
-	return a.plan === b.plan && JSON.stringify(a.features) === JSON.stringify(b.features) && JSON.stringify(a.capabilities) === JSON.stringify(b.capabilities);
+	return (
+		a.plan === b.plan &&
+		JSON.stringify(a.features) === JSON.stringify(b.features) &&
+		JSON.stringify(a.capabilities) === JSON.stringify(b.capabilities)
+	);
 }
 
 export class DevicePairingClient {
@@ -289,6 +293,7 @@ export class DevicePairingClient {
 	async getOnlineEntitlement(): Promise<PluginEntitlementStatusV1 | null> {
 		let state = this.readState();
 		if (!state) return null;
+		const pairingInstallationId = state.installationId;
 		try {
 			state = await this.ensureCredential(state);
 			if (!state) return null;
@@ -320,7 +325,7 @@ export class DevicePairingClient {
 			return verified;
 		} catch (error) {
 			if (error instanceof DevicePairingFailure && error.retryable) {
-				const cached = this.entitlementCache.read(state.installationId, this.now());
+				const cached = this.entitlementCache.read(pairingInstallationId, this.now());
 				if (cached && (cached.state === "active" || cached.state === "grace")) return cached;
 			}
 			throw error;
