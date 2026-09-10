@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+const onboarding = readFileSync(new URL("../docs/onboarding.md", import.meta.url), "utf8");
 
 describe("public support contract", () => {
 	test("documents the merged mechanized capture matrix without overstating Pi", () => {
@@ -25,6 +26,13 @@ describe("public support contract", () => {
 		expect(readme).toContain("The current Pro bundle is intentionally Bun-native");
 		expect(readme).toContain("Node-runtime compatibility is not currently claimed for Pro");
 		expect(readme).not.toContain("Pro session recall requires Node.js 22.13+");
+		expect(onboarding).toContain("Core is portable under Node.js 20+ on macOS, Linux, and Windows");
+		expect(onboarding).toContain("the current Pro bundle is Bun-native");
+		expect(onboarding).toContain("npm (cross-platform Core; Node.js 20+)");
+		expect(onboarding).toContain("Bun build from source (macOS / Linux / Windows; supported Pro runtime)");
+		expect(onboarding).toContain("plugin_runtime_unsupported");
+		expect(onboarding).not.toContain("npm-hosted Pro session index requires Node.js 22.13+");
+		expect(onboarding).not.toContain("Pro needs Node.js 22.13+");
 	});
 
 	test("does not regress to the pre-Codex/Qoder/Cursor capture description", () => {
