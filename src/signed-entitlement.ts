@@ -52,45 +52,15 @@ function parseTime(value: unknown, label: string): number {
 	return timestamp;
 }
 
-function validatePolicy(claims: SignedEntitlementClaimsV1): void {
-	const candidate: PluginEntitlementStatusV1 = {
+function validateEntitlementShape(claims: SignedEntitlementClaimsV1): void {
+	validatePluginEntitlementStatusV1({
 		plan: claims.plan,
 		state: "active",
 		features: claims.features,
 		capabilities: claims.capabilities,
 		expiresAt: claims.expiresAt,
 		offlineUntil: claims.offlineUntil,
-	};
-	validatePluginEntitlementStatusV1(candidate);
-	if (
-		claims.capabilities["session-index"]?.enabled !== true ||
-		claims.capabilities.recall?.enabled !== true ||
-		claims.capabilities.learning?.enabled !== true ||
-		claims.capabilities["web-console"]?.enabled !== true ||
-		claims.capabilities["memory-explorer"]?.enabled !== true
-	)
-		throw new Error("required entitlement capabilities are missing");
-	if (claims.plan === "pro") {
-		if (
-			claims.capabilities["session-worker"]?.enabled !== true ||
-			claims.capabilities.recall.quota !== undefined ||
-			claims.capabilities.learning.quota !== undefined
-		)
-			throw new Error("Pro entitlement policy is invalid");
-		return;
-	}
-	const recall = claims.capabilities.recall.quota;
-	const learning = claims.capabilities.learning.quota;
-	if (
-		claims.capabilities["session-worker"]?.enabled !== false ||
-		recall?.limit !== 20 ||
-		recall.window !== "day" ||
-		recall.scope !== "device" ||
-		learning?.limit !== 5 ||
-		learning.window !== "day" ||
-		learning.scope !== "device"
-	)
-		throw new Error("free entitlement policy is invalid");
+	});
 }
 
 export function verifySignedEntitlementV1(
@@ -148,7 +118,7 @@ export function verifySignedEntitlementV1(
 		Buffer.from(signature.value, "base64"),
 	);
 	if (!valid) throw new Error("signed entitlement signature verification failed");
-	validatePolicy(claims);
+	validateEntitlementShape(claims);
 	const timestamp = now.getTime();
 	const state: PluginEntitlementStatusV1["state"] =
 		timestamp > expiresAt || timestamp > offlineUntil ? "expired" : timestamp > refreshAfter ? "grace" : "active";
