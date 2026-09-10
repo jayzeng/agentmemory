@@ -1,5 +1,5 @@
-import { generateKeyPairSync, sign } from "node:crypto";
 import { afterEach, describe, expect, test } from "bun:test";
+import { generateKeyPairSync, sign } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -217,7 +217,13 @@ describe("paired signed paid entitlement", () => {
 		};
 		const pairing = client(
 			stateRoot,
-			(async () => json({ schemaVersion: 1, installationId, entitlement: policy, signedEntitlement: envelope })) as typeof fetch,
+			(async () =>
+				json({
+					schemaVersion: 1,
+					installationId,
+					entitlement: policy,
+					signedEntitlement: envelope,
+				})) as typeof fetch,
 			"2026-09-09T20:01:00.000Z",
 		);
 		await expect(pairing.getOnlineEntitlement()).rejects.toThrow("signed AgentMemory entitlement is invalid");
