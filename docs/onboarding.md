@@ -39,21 +39,24 @@ agent-memory --version
 
 ## Step 1 — Install
 
-Ask which method the human prefers if they have one; otherwise default to npm. Before running any install command, check that its prerequisite actually exists — don't run `npm install` blind and then guess at a confusing "command not found":
+Ask which method the human prefers if they have one; otherwise default to npm for Core. Before running any install command, check that its prerequisite actually exists — don't run an installer blind and then guess at a confusing "command not found":
 
 ```bash
-node --version   # npm path needs 20+
-brew --version   # Homebrew path
-git --version && bun --version   # build-from-source path
+node --version   # npm Core path needs Node.js 20+
+brew --version   # macOS Core + Pro path
+bun --version    # Pro runtime / build-from-source path needs Bun 1.3.14+
+git --version    # build-from-source path
 ```
 
-Pick whichever path has its prerequisite satisfied. Core requires Node.js 20+; the npm-hosted Pro session index requires Node.js 22.13+. The Homebrew build includes its compatible runtime. If none of those prerequisites are satisfied, say so before continuing — installing a runtime is outside this doc's scope.
+The GA runtime boundary is deliberate: **Core is portable under Node.js 20+ on macOS, Linux, and Windows; the current Pro bundle is Bun-native and is not supported in a plain Node process.** On macOS, Homebrew installs the Bun-compiled CLI and is the simplest supported Core + Pro path. On Linux or Windows, use a Bun-compiled CLI when Pro is wanted. Memory files remain portable between install paths.
 
-**npm (cross-platform; Core needs Node.js 20+, Pro needs Node.js 22.13+):**
+**npm (cross-platform Core; Node.js 20+):**
 
 ```bash
 npm install -g myagentmemory
 ```
+
+This installs the portable Node-hosted Core CLI. Do not tell the human that this plain Node executable can load Pro. If they later want Pro, move them to a supported Bun-compiled CLI first.
 
 If this fails with a TLS/certificate error (common behind corporate proxies), the human's org likely needs a private CA:
 
@@ -69,14 +72,14 @@ npm install -g myagentmemory --registry https://registry.npmjs.org
 
 That's a one-off override for this install — it doesn't change the human's global npm config, so nothing else on their machine is affected.
 
-**Homebrew (macOS):**
+**Homebrew (macOS; supported Core + Pro path):**
 
 ```bash
 brew tap jayzeng/agentmemory https://github.com/jayzeng/agentmemory
 brew install jayzeng/agentmemory/agent-memory
 ```
 
-**From source (no npm registry access, or contributing):**
+**Bun build from source (macOS / Linux / Windows; supported Pro runtime):**
 
 ```bash
 git clone https://github.com/jayzeng/agentmemory
@@ -152,7 +155,7 @@ Two rows are different — each is a real change outside the memory dir and need
 | Doctor row | What's involved | How to ask |
 |---|---|---|
 | qmd search index not installed | `bun install -g https://github.com/tobi/qmd` — a global binary install from a raw GitHub URL. Genuinely optional: writing, reading, scratchpad, and hooks all work without it: only keyword/semantic search is degraded. | State plainly what the command does and that it's optional. Offer to run it yourself if approved, or let the human run it and paste back confirmation. Skipping is a perfectly fine default — don't treat this as a gap that must be closed. |
-| AgentMemory Pro not installed | `agent-memory pro install` | See the privacy note in Step 5 before running this. If `~/.agent-memory/system/plugins/state/agentmemory.pro/` already has real data (session-index, learnings) but `bundles/` is empty, this is a repair, not a first-time install — the reinstall reuses the existing index rather than rebuilding it, so it's cheap even with a large session corpus (this commonly happens after a core CLI upgrade drops the bundle registration without touching accumulated state). |
+| AgentMemory Pro not installed | `agent-memory pro install` | First verify the running CLI is the supported Bun-compiled Pro runtime. A plain npm/Node Core CLI must not be presented as Pro-compatible. See the privacy note in Step 5 before running this. If `~/.agent-memory/system/plugins/state/agentmemory.pro/` already has real data (session-index, learnings) but `bundles/` is empty, this is a repair, not a first-time install — the reinstall reuses the existing index rather than rebuilding it. |
 
 Re-run `agent-memory doctor --json` after each fix. Once clean (or clean enough for what the human cares about), move to Step 5.
 
@@ -183,6 +186,8 @@ If doctor came back mostly green — either because you just finished setup or b
    agent-memory pro preview
    ```
    This reports how many raw sessions it found per harness (Claude Code / Codex / Pi) and how many it actually looked at today against that cap.
+
+   **Before installing Pro, confirm the CLI is Bun-compiled.** The current commercial bundle imports Bun-native modules such as `bun:sqlite`; a plain npm/Node Core executable is intentionally unsupported and should fail with `plugin_runtime_unsupported` rather than attempting a partial load. On macOS, use the Homebrew path above; on Linux/Windows, use the Bun build path.
 
    **Then ask before running `pro install`** — that's the command that actually builds the searchable index, and effort scales with what `preview` just found:
    - **A handful to a few dozen sessions:** indexing is local text parsing (regex-based digest extraction, no LLM call per session, and no session content sent to AgentMemory's services) — this finishes in seconds.
@@ -232,7 +237,8 @@ Close the loop by pointing at `agent-memory status` (quick health readout) and `
 ## Troubleshooting
 
 - **`npm install -g myagentmemory` 404s or pulls from an unexpected internal mirror:** the environment's default registry is likely an internal proxy that doesn't mirror this package. Re-run with `--registry https://registry.npmjs.org` (a one-off flag, doesn't touch global npm config).
-- **No qmd installed:** search and selective context injection are degraded (keyword-only or unavailable), but writing, reading, and hooks all still work. It's optional, not a blocker.
+- **Plain npm/Node Core reports `plugin_runtime_unsupported` for Pro:** this is the expected GA boundary, not a corrupted plugin. Core is supported under Node.js 20+, but Pro is currently Bun-native. On macOS use the Homebrew CLI; on Linux/Windows use a Bun-compiled CLI if the human wants Pro.
+- **No qmd installed:** search and selective context injection are degraded (keyword-only or unavailable), but writing, reading, scratchpad, and hooks all still work. It's optional, not a blocker.
 - **Scripted / no TTY environment:** anything interactive (`setup`, `install-hooks`, `init`) accepts `--yes`; pair with `--json` for machine-readable output.
 - **AgentMemory Pro bootstrap failed:** doctor's row itself usually just says "not installed" — the real error only shows up in `agent-memory pro install`'s own output, so check that directly rather than expecting doctor to carry it. One retry is reasonable in case it was transient. If the exact same error repeats on retry, it's deterministic, not flaky — stop, report the exact error text to the human, and don't try to route around it (see ground rule 6). Either way, core functionality (write/read/scratchpad/search/hooks) is entirely unaffected — Pro failures are isolated by design.
 - **`agent-memory pro install` fails with `The free preview policy is invalid`:** this is a strict field-by-field validation of the server's entitlement response — it throws this same generic message regardless of which field mismatched, so the message alone doesn't tell you the cause. Treat it as the deterministic-failure case above: one retry, then stop and report rather than digging into source.
@@ -258,6 +264,3 @@ Close the loop by pointing at `agent-memory status` (quick health readout) and `
 | `agent-memory install-skills` / `install-hooks` | Wire agent hosts up individually |
 | `agent-memory pro <preview\|install\|status\|upgrade\|manage>` | Manage the Pro preview |
 | `agent-memory upgrade [--check]` | Check/install newer CLI or Pro releases |
-| `agent-memory tutorial` | 3-minute guided walkthrough in a sandbox |
-
-Full command list and flags: run `agent-memory help`, or see the [README](https://github.com/jayzeng/agentmemory#cli-commands).
