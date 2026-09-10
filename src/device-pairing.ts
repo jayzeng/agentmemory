@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { PluginNextActionV1 } from "./plugin-bootstrap.js";
+import { type PluginEntitlementStatusV1, validatePluginEntitlementStatusV1 } from "./plugin-host.js";
 
 const DEVICE_FILE = "credentials/device.json";
 const DEVICE_CREDENTIAL = /^am_device_[a-f0-9]{64}$/;
@@ -130,6 +131,52 @@ function validateStatus(value: unknown, expectedInstallationId: string, now: Dat
 	return result as StatusResponseV1;
 }
 
+function validateOnlineEntitlement(value: unknown, expectedInstallationId: string): PluginEntitlementStatusV1 {
+	if (!value || typeof value !== "object" || Array.isArray(value))
+		throw new DevicePairingFailure("entitlement_response_invalid", "The online entitlement response is invalid");
+	const result = value as { schemaVersion?: unknown; installationId?: unknown; entitlement?: unknown };
+	if (result.schemaVersion !== 1 || result.installationId !== expectedInstallationId)
+		throw new DevicePairingFailure("entitlement_response_invalid", "The online entitlement response is invalid");
+	try {
+		validatePluginEntitlementStatusV1(result.entitlement);
+	} catch {
+		throw new DevicePairingFailure("entitlement_response_invalid", "The online entitlement policy is invalid");
+	}
+	const entitlement = result.entitlement;
+	if (
+		entitlement.state !== "active" ||
+		(entitlement.plan !== "pro" && entitlement.plan !== "free") ||
+		entitlement.capabilities["session-index"]?.enabled !== true ||
+		entitlement.capabilities.recall?.enabled !== true ||
+		entitlement.capabilities.learning?.enabled !== true ||
+		entitlement.capabilities["web-console"]?.enabled !== true ||
+		entitlement.capabilities["memory-explorer"]?.enabled !== true
+	)
+		throw new DevicePairingFailure("entitlement_response_invalid", "The online entitlement policy is invalid");
+	if (entitlement.plan === "pro") {
+		if (
+			entitlement.capabilities["session-worker"]?.enabled !== true ||
+			entitlement.capabilities.recall.quota !== undefined ||
+			entitlement.capabilities.learning.quota !== undefined
+		)
+			throw new DevicePairingFailure("entitlement_response_invalid", "The Pro entitlement policy is invalid");
+	} else {
+		const recall = entitlement.capabilities.recall.quota;
+		const learning = entitlement.capabilities.learning.quota;
+		if (
+			entitlement.capabilities["session-worker"]?.enabled !== false ||
+			recall?.limit !== 20 ||
+			recall.window !== "day" ||
+			recall.scope !== "device" ||
+			learning?.limit !== 5 ||
+			learning.window !== "day" ||
+			learning.scope !== "device"
+		)
+			throw new DevicePairingFailure("entitlement_response_invalid", "The free entitlement policy is invalid");
+	}
+	return structuredClone(entitlement);
+}
+
 export class DevicePairingClient {
 	private readonly root: string;
 	private readonly coreVersion: string;
@@ -155,13 +202,7 @@ export class DevicePairingClient {
 				this.removeState();
 				state = null;
 			} else if (status.state === "approved") {
-				const approved: DevicePairingStateV1 = {
-					schemaVersion: 1,
-					installationId: state.installationId,
-					deviceCredential: state.deviceCredential,
-					createdAt: state.createdAt,
-					credentialExpiresAt: status.credentialExpiresAt,
-				};
+				const approved = this.approvedState(state, status.credentialExpiresAt as string);
 				this.writeState(approved);
 				return {
 					kind: "manage",
@@ -183,6 +224,46 @@ export class DevicePairingClient {
 
 		if (!state) state = await this.start();
 		return this.pendingAction(state);
+	}
+
+	async getOnlineEntitlement(): Promise<PluginEntitlementStatusV1 | null> {
+		let state = this.readState();
+		if (!state) return null;
+		if (!state.credentialExpiresAt || !isFuture(state.credentialExpiresAt, this.now())) {
+			const status = await this.status(state);
+			if (status === null) {
+				this.removeState();
+				return null;
+			}
+			if (status.state === "pending") return null;
+			state = this.approvedState(state, status.credentialExpiresAt as string);
+			this.writeState(state);
+		}
+		const response = await this.fetch(`${this.apiOrigin}/v1/plugin/entitlement`, {
+			method: "POST",
+			headers: { Accept: "application/json", Authorization: `Bearer ${state.deviceCredential}` },
+		});
+		if (response.status === 401) {
+			this.removeState();
+			return null;
+		}
+		if (!response.ok)
+			throw new DevicePairingFailure(
+				"entitlement_service_unavailable",
+				`AgentMemory paid access is unavailable (HTTP ${response.status})`,
+				response.status >= 500 || response.status === 429,
+			);
+		return validateOnlineEntitlement(await boundedJson(response), state.installationId);
+	}
+
+	private approvedState(state: DevicePairingStateV1, credentialExpiresAt: string): DevicePairingStateV1 {
+		return {
+			schemaVersion: 1,
+			installationId: state.installationId,
+			deviceCredential: state.deviceCredential,
+			createdAt: state.createdAt,
+			credentialExpiresAt,
+		};
 	}
 
 	private pendingAction(state: DevicePairingStateV1): PluginNextActionV1 {

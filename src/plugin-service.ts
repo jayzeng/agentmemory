@@ -433,9 +433,22 @@ export class AgentMemoryServiceBackend implements PluginBootstrapBackendV1 {
 	}
 
 	async getLocalEntitlement(): Promise<PluginEntitlementStatusV1> {
+		if (process.env.AGENT_MEMORY_DEV_ENTITLEMENT === "1") return devEntitlement();
+		try {
+			const { DevicePairingClient } = await import("./device-pairing.js");
+			const online = await new DevicePairingClient({
+				root: this.root,
+				coreVersion: this.coreVersion,
+				apiOrigin: this.apiOrigin,
+				accountWebOrigin: "https://agentmemory.paperpilot.me",
+				fetchImplementation: this.fetchImplementation,
+			}).getOnlineEntitlement();
+			if (online) return online;
+		} catch {
+			// Paid access is fail-safe: until signed offline entitlements ship, an account-service outage falls back to Core/free.
+		}
 		const activation = this.readActivation();
 		if (!activation) return cloneEntitlement(MISSING_ENTITLEMENT);
-		if (process.env.AGENT_MEMORY_DEV_ENTITLEMENT === "1") return devEntitlement();
 		return freeEntitlement();
 	}
 
