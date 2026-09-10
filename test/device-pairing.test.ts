@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { DevicePairingClient } from "../src/device-pairing.js";
 import { AgentMemoryServiceBackend } from "../src/plugin-service.js";
 
 const roots: string[] = [];
@@ -167,5 +168,55 @@ describe("account-device pairing client", () => {
 		expect(second?.userCode).toBe(approvalCode);
 		expect(starts).toBe(2);
 		expect(statuses).toBe(1);
+	});
+
+	test("an approved credential nearing expiry is rotated without re-pairing", async () => {
+		const stateRoot = root();
+		const credentials = path.join(stateRoot, "credentials");
+		fs.mkdirSync(credentials, { mode: 0o700 });
+		fs.writeFileSync(
+			path.join(credentials, "device.json"),
+			`${JSON.stringify({
+				schemaVersion: 1,
+				installationId,
+				deviceCredential,
+				createdAt: "2026-09-01T00:00:00.000Z",
+				credentialExpiresAt: "2026-09-11T20:00:00.000Z",
+			})}\n`,
+			{ mode: 0o600 },
+		);
+		const rotatedCredential = `am_device_${"d".repeat(64)}`;
+		const pairing = new DevicePairingClient({
+			root: stateRoot,
+			coreVersion: "0.6.0-test",
+			apiOrigin: "https://api.example.test",
+			accountWebOrigin: "https://account.example.test",
+			now: () => new Date("2026-09-09T20:00:00.000Z"),
+			fetchImplementation: (async (input, init) => {
+				const url = String(input);
+				expect(init?.headers).toMatchObject({ Authorization: `Bearer ${deviceCredential}` });
+				if (url.endsWith("/status"))
+					return response({
+						schemaVersion: 1,
+						state: "approved",
+						installationId,
+						credentialExpiresAt: "2026-09-11T20:00:00.000Z",
+					});
+				expect(url).toBe("https://api.example.test/v1/plugin/devices/renew");
+				return response({
+					schemaVersion: 1,
+					installationId,
+					deviceCredential: rotatedCredential,
+					credentialExpiresAt: "2026-10-09T20:00:00.000Z",
+				});
+			}) as typeof fetch,
+		});
+
+		const action = await pairing.getManagementAction();
+		expect(action).toMatchObject({ kind: "manage", url: "https://account.example.test" });
+		const state = JSON.parse(fs.readFileSync(path.join(credentials, "device.json"), "utf-8"));
+		expect(state.deviceCredential).toBe(rotatedCredential);
+		expect(state.credentialExpiresAt).toBe("2026-10-09T20:00:00.000Z");
+		expect(JSON.stringify(action)).not.toContain(rotatedCredential);
 	});
 });
