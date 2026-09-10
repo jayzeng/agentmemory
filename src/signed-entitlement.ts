@@ -12,8 +12,8 @@ const DOMAIN = "agentmemory-entitlement-v1\n";
 const ENTITLEMENT_FILE = "credentials/entitlement.json";
 const INSTALLATION_ID = /^am_install_[A-Za-z0-9_-]{32}$/;
 const SIGNATURE = /^[A-Za-z0-9+/]+={0,2}$/;
-const RELEASE_SIGNING_KEY_2026_08 = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEASefZFUVFy1EmvGbd0ckHZThmPgqQ3u9HCwZRReAZQW8=
+const ENTITLEMENT_SIGNING_KEY_2026_09 = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAftH3jSng1OqGIiHH3ADUgkCKb3k8CE98Kj18iUF+TAs=
 -----END PUBLIC KEY-----`;
 
 export type EntitlementVerificationKeys = Record<string, string | Buffer>;
@@ -42,7 +42,7 @@ export interface SignedEntitlementEnvelopeV1 {
 }
 
 const PINNED_KEYS: EntitlementVerificationKeys = {
-	"agentmemory-temporary-2026-08": RELEASE_SIGNING_KEY_2026_08,
+	"agentmemory-entitlement-2026-09": ENTITLEMENT_SIGNING_KEY_2026_09,
 };
 
 function parseTime(value: unknown, label: string): number {
