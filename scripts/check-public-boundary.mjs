@@ -18,9 +18,21 @@ const rules = [
   "SmF5IFplbmc=",
 ].map(decode);
 
+// Keep the MIT implementation surface intentionally small. Adding another source
+// module requires an explicit boundary review instead of merely choosing a neutral
+// filename that happens not to match the lexical rules below.
+const allowedSourceFiles = new Set([
+  "src/core.ts",
+  "src/cli.ts",
+  "src/external-command.ts",
+  "src/launcher.ts",
+]);
+
 const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
 const violations = [];
 for (const file of tracked) {
+  if (file.startsWith("src/") && file.endsWith(".ts") && !allowedSourceFiles.has(file)) violations.push(file);
+
   let data;
   try {
     data = fs.readFileSync(file);
