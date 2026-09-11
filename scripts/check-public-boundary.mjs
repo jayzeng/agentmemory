@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 const decode = (value) => Buffer.from(value, "base64").toString("utf8");
+const attribution = decode("SmF5IFplbmc=");
 const rules = [
   "cGx1Z2lu",
   "cGFwZXJwaWxvdC5tZQ==",
@@ -30,7 +31,7 @@ for (const file of tracked) {
   const text = data.toString("utf8");
   const lowered = text.toLowerCase();
   for (const rule of rules) {
-    if (file === "LICENSE" && rule === "Jay Zeng") continue;
+    if (file === "LICENSE" && rule === attribution) continue;
     if (lowered.includes(rule.toLowerCase())) violations.push(file);
   }
 }
