@@ -1,154 +1,88 @@
 {
-	"name": "myagentmemory",
-	"version": "0.5.5",
-	"description": "agentmemory (agent-memory) is persistent memory for coding agents (Claude Code, OpenAI Codex, Cursor, Agent) with qmd-powered semantic search across daily logs, long-term memory, and scratchpad",
-	"main": "./dist/core.js",
-	"types": "./dist/core.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/core.d.ts",
-			"default": "./dist/core.js"
-		},
-		"./plugin-bootstrap": {
-			"types": "./dist/plugin-bootstrap.d.ts",
-			"default": "./dist/plugin-bootstrap.js"
-		},
-		"./plugin-host": {
-			"types": "./dist/plugin-host.d.ts",
-			"default": "./dist/plugin-host.js"
-		},
-		"./completions": {
-			"types": "./dist/completions.d.ts",
-			"default": "./dist/completions.js"
-		},
-		"./hooks": {
-			"types": "./dist/hooks.d.ts",
-			"default": "./dist/hooks.js"
-		}
-	},
-	"bin": {
-		"agent-memory": "dist/cli.js"
-	},
-	"type": "module",
-	"engines": {
-		"node": ">=20"
-	},
-	"keywords": [
-		"agentmemory",
-		"agent-memory",
-		"agent memory",
-		"ai-memory",
-		"llm-memory",
-		"memory",
-		"search",
-		"qmd",
-		"semantic-search",
-		"scratchpad",
-		"daily-log",
-		"claude-code",
-		"openai-codex",
-		"codex",
-		"cursor",
-		"agent",
-		"coding-agent",
-		"developer-tools",
-		"knowledge-management"
-	],
-	"author": "jayzeng",
-	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/jayzeng/agentmemory.git"
-	},
-	"bugs": {
-		"url": "https://github.com/jayzeng/agentmemory/issues"
-	},
-	"homepage": "https://github.com/jayzeng/agentmemory#readme",
-	"files": [
-		"src/core.ts",
-		"src/cli-spec.ts",
-		"src/completions.ts",
-		"src/hooks.ts",
-		"src/plugin-host.ts",
-		"src/plugin-bootstrap.ts",
-		"src/device-pairing.ts",
-		"skills",
-		"scripts/install-skills.sh",
-		"scripts/install-skills.ps1",
-		"scripts/postinstall.cjs",
-		"dist/capture-check.d.ts",
-		"dist/capture-check.js",
-		"dist/codex-capture-check.d.ts",
-		"dist/codex-capture-check.js",
-		"dist/cursor-capture.d.ts",
-		"dist/cursor-capture.js",
-		"dist/cli.d.ts",
-		"dist/cli.js",
-		"dist/core.d.ts",
-		"dist/core.js",
-		"dist/cli-spec.d.ts",
-		"dist/cli-spec.js",
-		"dist/completions.d.ts",
-		"dist/completions.js",
-		"dist/device-pairing.d.ts",
-		"dist/device-pairing.js",
-		"dist/hooks.d.ts",
-		"dist/hooks.js",
-		"dist/plugin-bootstrap.d.ts",
-		"dist/plugin-bootstrap.js",
-		"dist/plugin-host.d.ts",
-		"dist/plugin-host.js",
-		"dist/plugin-runtime.d.ts",
-		"dist/plugin-runtime.js",
-		"dist/plugin-service.d.ts",
-		"dist/plugin-service.js",
-		"dist/mcp-server.d.ts",
-		"dist/mcp-server.js",
-		"dist/upgrade.d.ts",
-		"dist/upgrade.js",
-		"docs/official-plugin-bootstrap.md",
-		"README.md",
-		"LICENSE"
-	],
-	"publishConfig": {
-		"access": "public"
-	},
-	"scripts": {
-		"postinstall": "node scripts/postinstall.cjs",
-		"build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.eval.json --noEmit",
-		"build:eval": "tsc -p tsconfig.eval.json --noEmit",
-		"build:lib": "tsc -p tsconfig.build.json",
-		"build:cli": "bun build src/cli.ts --compile --outfile dist/agent-memory --define __VERSION__=\"'$(node -p \"require('./package.json').version\")'\"",
-		"eval:feedback": "bun eval/run.ts",
-		"eval:regression": "bun eval/run.ts --dataset eval/datasets/agent-memory-regression-v1.json",
-		"eval:longmemeval": "bun eval/longmemeval.ts",
-		"eval:longitudinal-behavior": "bun eval/longitudinal-behavior.ts",
-		"eval:token-savings": "bun eval/token-savings.ts",
-		"eval:capture": "bun eval/capture-reliability.ts",
-		"prepare": "npm run build:lib",
-		"prepack": "npm run build:lib",
-		"lint": "biome check .",
-		"test": "bun test test/unit.test.ts test/device-pairing.test.ts test/online-entitlement.test.ts",
-		"test:unit": "bun test test/unit.test.ts test/device-pairing.test.ts test/online-entitlement.test.ts",
-		"test:cli": "bun test test/cli.test.ts test/codex-stop-install.test.ts test/qoder-stop-install.test.ts test/cursor-stop-install.test.ts --timeout 15000",
-		"test:eval": "bun test test/eval.test.ts test/codex-capture.test.ts test/longitudinal-behavior.test.ts test/docs-contract.test.ts",
-		"test:harness": "npm run build:cli && bun test test/harness.test.ts --timeout 60000",
-		"test:token-savings": "bun test test/token-savings.test.ts",
-		"eval:harness": "bun eval/harness.ts",
-		"verify": "bash scripts/verify.sh",
-		"verify:quick": "bash scripts/verify.sh --quick",
-		"install-skills": "bash scripts/install-skills.sh"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.4.0",
-		"@types/bun": "^1.3.14",
-		"@types/node": "^25.3.0",
-		"tsx": "^4.0.0",
-		"typescript": "^5.9.3"
-	},
-	"overrides": {
-		"esbuild": "^0.28.1",
-		"rimraf": "^6.1.3",
-		"glob": "^13.0.3"
-	}
+  "name": "myagentmemory",
+  "version": "0.5.5",
+  "description": "Local-first persistent memory for coding agents with plain Markdown storage and optional qmd search",
+  "main": "./dist/core.js",
+  "types": "./dist/core.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/core.d.ts",
+      "default": "./dist/core.js"
+    }
+  },
+  "bin": {
+    "agent-memory": "dist/cli.js"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "agentmemory",
+    "agent-memory",
+    "agent memory",
+    "ai-memory",
+    "llm-memory",
+    "memory",
+    "search",
+    "qmd",
+    "semantic-search",
+    "scratchpad",
+    "daily-log",
+    "claude-code",
+    "openai-codex",
+    "codex",
+    "cursor",
+    "coding-agent",
+    "developer-tools",
+    "knowledge-management"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jayzeng/agentmemory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jayzeng/agentmemory/issues"
+  },
+  "homepage": "https://github.com/jayzeng/agentmemory#readme",
+  "files": [
+    "src/core.ts",
+    "skills",
+    "scripts/install-skills.sh",
+    "scripts/install-skills.ps1",
+    "scripts/postinstall.cjs",
+    "dist/cli.d.ts",
+    "dist/cli.js",
+    "dist/core.d.ts",
+    "dist/core.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.cjs",
+    "check:public-boundary": "node scripts/check-public-boundary.mjs",
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.eval.json --noEmit",
+    "build:eval": "tsc -p tsconfig.eval.json --noEmit",
+    "build:lib": "tsc -p tsconfig.build.json",
+    "build:cli": "bun build src/cli.ts --compile --outfile dist/agent-memory --define __VERSION__=\"'$(node -p \"require('./package.json').version\")'\"",
+    "eval:feedback": "bun eval/run.ts",
+    "prepare": "npm run build:lib",
+    "prepack": "npm run check:public-boundary && npm run build:lib",
+    "lint": "biome check .",
+    "test": "bun test test/unit.test.ts",
+    "test:unit": "bun test test/unit.test.ts",
+    "test:cli": "bun test test/cli.test.ts --timeout 15000",
+    "test:eval": "bun test test/eval.test.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.0",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^25.3.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3"
+  }
 }
