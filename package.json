@@ -11,7 +11,7 @@
     }
   },
   "bin": {
-    "agent-memory": "dist/cli.js"
+    "agent-memory": "./dist/cli.js"
   },
   "type": "module",
   "engines": {
