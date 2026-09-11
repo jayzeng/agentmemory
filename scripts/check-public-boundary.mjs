@@ -42,4 +42,4 @@ if (unique.length) {
   for (const file of unique) console.error(`- ${file}`);
   process.exit(1);
 }
-console.log(`Public-source boundary passed for ${tracked.length} tracked files.`);
+console.error(`Public-source boundary passed for ${tracked.length} tracked files.`);
