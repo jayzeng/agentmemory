@@ -1,6 +1,6 @@
 ---
 name: agent-memory
-description: Persistent memory across coding sessions — long-term facts, daily logs, topic notes, scratchpad checklist, and keyword/semantic search, plus recall of past chat sessions. Use whenever the user says "remember", "recall", or asks to look up/search memory.
+description: Persistent memory across coding sessions — long-term facts, daily logs, topic notes, scratchpad checklist, and semantic search.
 ---
 
 # Agent Memory
@@ -19,8 +19,6 @@ agent-memory context --no-search 2>/dev/null
 
 This prints your scratchpad, today's log, long-term memory, and yesterday's log. Review it — especially **open scratchpad items** — before starting work.
 
-Run this even if a SessionStart hook already fired — the hook only injects the narrower "stable" layer (MEMORY.md + scratchpad) to keep per-turn re-injection cheap. Seeing two context blocks in one session is expected; treat this fuller one as authoritative.
-
 If the user's task relates to prior work, search for relevant memories:
 ```bash
 agent-memory search --query "<topic>" --mode keyword
@@ -31,12 +29,6 @@ agent-memory search --query "<topic>" --mode keyword
 1. Log what was accomplished in the daily log
 2. Mark completed scratchpad items as done; add new follow-ups
 3. Only write to long-term memory if you discovered a **durable fact** that doesn't already exist there
-
-## Capture at meaningful checkpoints
-
-When the user explicitly asks you to remember something, save it in that turn. After a decision is settled, a correction is accepted, or a fix is verified, record the useful outcome before reporting completion; do not wait for the session to end. Respect the user's memory and privacy preferences.
-
-Check whether that outcome was already saved. A write attempt is not a completed capture: verify the tool succeeded, and report a failed write rather than claiming you remembered it. Avoid duplicate notes and do not save routine chatter or unverified guesses. A hook reminder asks you to review missing capture; it does not require a write when nothing useful is missing.
 
 ## Where to Write — Decision Guide
 
@@ -114,15 +106,6 @@ agent-memory search --query "how we handle auth" --mode semantic # Finds related
 agent-memory search --query "performance" --mode deep --limit 10 # Hybrid + reranking
 ```
 
-`search` only looks at what you saved (daily logs, MEMORY.md, topics, scratchpad). For **prior sessions** — things you or the agent said in a past Claude/Codex/pi chat — use `recall`:
-
-```bash
-agent-memory recall "deploy-to-dev label workflow"          # Cross-session, verbatim events
-agent-memory recall "auth refresh" --scope current --limit 5 # Restrict to this workspace
-```
-
-When qmd search returns no hits and AgentMemory Pro is installed, `search` automatically falls back to `recall` — but calling `recall` directly is faster and clearer when you know you want session history.
-
 If qmd is not installed, fall back to reading files directly:
 ```bash
 agent-memory read --target long_term
@@ -132,7 +115,7 @@ agent-memory read --target daily
 ### Setup
 
 ```bash
-agent-memory setup     # Idempotent: memory dir, qmd collection, skills, hooks, MCP
+agent-memory init      # Create dirs, detect qmd, setup collection
 agent-memory sync      # Re-index and embed all files (requires qmd)
 agent-memory status    # Show config, file counts, qmd status
 ```
@@ -189,6 +172,5 @@ Distil scans daily logs and topic notes, groups entries by their `#tags`, and ge
 - Use `--target long_term` sparingly: architecture, preferences, key commands, hard-won lessons
 - Prefer the scratchpad for any TODOs or follow-ups (persistent, cross-session tracking)
 - Use `#tags` and `[[links]]` in content to improve search recall
-- Use `agent-memory search` to find things you saved (daily logs, MEMORY.md, topics) before starting related tasks
-- Use `agent-memory recall "<query>"` to find things from prior chat sessions (Pro) — not the same as `search`
+- Use `agent-memory search` to recall past work before starting related tasks
 - All `agent-memory` commands are safe — they read/write only to the memory directory (`~/.agent-memory/` by default)

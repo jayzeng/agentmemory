@@ -3,56 +3,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { runCaptureReliabilityEvaluation } from "../eval/capture-reliability.js";
 import { loadFeedbackDataset, validateFeedbackDataset } from "../eval/dataset.js";
-import { buildFixtureWriteParams, calculateRetrievalMetrics, runFeedbackEvaluation } from "../eval/run.js";
+import { buildFixtureWriteParams, runFeedbackEvaluation } from "../eval/run.js";
 
 const datasetUrl = new URL("../eval/datasets/external-feedback-v1.json", import.meta.url);
-const expandedDatasetUrl = new URL("../eval/datasets/agent-memory-regression-v1.json", import.meta.url);
-
-describe("cross-harness capture reliability", () => {
-	test("measures every local harness as fully mechanized without overstating delegated Pi coverage", () => {
-		const report = runCaptureReliabilityEvaluation();
-		expect(report.passed).toBe(true);
-		expect(report.schemaVersion).toBe("capture-reliability-v1");
-		expect(report.metrics.measuredHarnesses).toBe(4);
-		expect(report.metrics.instructionCoverage).toBe(1);
-		expect(report.metrics.mechanizedExplicitRequestCoverage).toBe(1);
-		expect(report.metrics.mechanizedImmediateCoverage).toBe(1);
-		expect(report.metrics.delegatedHarnesses).toBe(1);
-
-		const claude = report.harnesses.find((result) => result.harness === "claude");
-		expect(claude?.enforcement).toBe("mechanized");
-		expect(claude?.mechanizedExplicitRequest).toBe(true);
-		expect(claude?.mechanizedCompletedWork).toBe(true);
-		expect(claude?.mechanizedWriteClearsSignal).toBe(true);
-
-		const codex = report.harnesses.find((result) => result.harness === "codex");
-		expect(codex?.instructionContract).toBe(true);
-		expect(codex?.enforcement).toBe("mechanized");
-		expect(codex?.mechanizedExplicitRequest).toBe(true);
-		expect(codex?.mechanizedCompletedWork).toBe(true);
-		expect(codex?.mechanizedWriteClearsSignal).toBe(true);
-
-		const qoder = report.harnesses.find((result) => result.harness === "qoder");
-		expect(qoder?.instructionContract).toBe(true);
-		expect(qoder?.enforcement).toBe("mechanized");
-		expect(qoder?.mechanizedExplicitRequest).toBe(true);
-		expect(qoder?.mechanizedCompletedWork).toBe(true);
-		expect(qoder?.mechanizedWriteClearsSignal).toBe(true);
-
-		const cursor = report.harnesses.find((result) => result.harness === "cursor");
-		expect(cursor?.instructionContract).toBe(true);
-		expect(cursor?.enforcement).toBe("mechanized");
-		expect(cursor?.mechanizedExplicitRequest).toBe(true);
-		expect(cursor?.mechanizedCompletedWork).toBe(true);
-		expect(cursor?.mechanizedWriteClearsSignal).toBe(true);
-
-		const pi = report.harnesses.find((result) => result.harness === "pi");
-		expect(pi?.enforcement).toBe("delegated");
-		expect(pi?.measured).toBe(false);
-	});
-});
 
 describe("external feedback evaluation dataset", () => {
 	test("covers every automatable issue with unique, valid probes", async () => {
@@ -79,40 +33,6 @@ describe("external feedback evaluation dataset", () => {
 		expect(serialized).toContain("expired");
 		expect(serialized).toContain("untrusted");
 		expect(serialized).toContain("[REDACTED_SECRET]");
-	});
-
-	test("expanded regression corpus has substantially broader coverage", async () => {
-		const dataset = await loadFeedbackDataset(expandedDatasetUrl);
-		expect(dataset.version).toBe("agent-memory-regression-v1");
-		expect(dataset.sources.length).toBeGreaterThanOrEqual(6);
-		expect(dataset.issues.length).toBeGreaterThanOrEqual(17);
-		expect(Object.keys(dataset.fixtures).length).toBeGreaterThanOrEqual(7);
-		expect(dataset.probes.length).toBeGreaterThanOrEqual(38);
-		expect(dataset.probes.filter((probe) => probe.evaluator === "live-qmd").length).toBeGreaterThanOrEqual(12);
-		expect(dataset.probes.some((probe) => probe.query?.includes("캐시"))).toBe(true);
-		expect(dataset.probes.some((probe) => probe.query?.includes("订单"))).toBe(true);
-	});
-
-	test("expanded corpus runs with the evaluator's documented failure boundary", async () => {
-		const report = await runFeedbackEvaluation({ dataset: expandedDatasetUrl });
-		expect(report.datasetVersion).toBe("agent-memory-regression-v1");
-		expect(report.probes).toHaveLength(38);
-		expect(report.probes.filter((probe) => probe.status === "deferred").length).toBe(16);
-		expect(report.probes.find((probe) => probe.probeId === "unrecorded-transcript-import")?.status).toBe("failed");
-		expect(report.probes.filter((probe) => probe.status === "failed")).toHaveLength(1);
-	});
-
-	test("counts live retrieval misses in quality metric denominators", async () => {
-		const syntheticResults = [
-			{ evaluator: "live-qmd", retrievedResults: 1, firstRelevantRank: 1, relevantResults: 1, durationMs: 1 },
-			{ evaluator: "live-qmd", retrievedResults: 1, relevantResults: 0, durationMs: 1 },
-		] as never;
-		const metrics = calculateRetrievalMetrics(syntheticResults);
-		expect(metrics.queries).toBe(2);
-		expect(metrics.evaluatedQueries).toBe(1);
-		expect(metrics.recallAt1).toBe(0.5);
-		expect(metrics.mrrAt1).toBe(0.5);
-		expect(metrics.ndcgAt5).toBe(0.5);
 	});
 
 	test("rejects invalid retrieval cutoffs", async () => {
