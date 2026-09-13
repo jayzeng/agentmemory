@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import * as path from "node:path";
 
 import { resolveExternalCommandHost, shouldTryExternalCommand } from "../src/external-command.js";
 
@@ -35,9 +34,9 @@ describe("external command handoff", () => {
 		expect(shouldTryExternalCommand("recall/foo")).toBe(false);
 	});
 
-	test("resolves one fixed user-local host path", () => {
-		const homeDir = path.join(path.sep, "tmp", "home");
-		const expected = path.join(homeDir, ".agent-memory", "bin", "agent-memory-extension");
+	test("resolves one fixed POSIX user-local host path", () => {
+		const homeDir = "/tmp/home";
+		const expected = "/tmp/home/.agent-memory/bin/agent-memory-extension";
 		expect(
 			resolveExternalCommandHost({
 				homeDir,
@@ -48,9 +47,9 @@ describe("external command handoff", () => {
 		expect(resolveExternalCommandHost({ homeDir, platform: "linux", isFile: () => false })).toBeNull();
 	});
 
-	test("uses an executable suffix on Windows", () => {
+	test("uses Windows path semantics and executable suffix independent of test host", () => {
 		const homeDir = "C:\\Users\\test";
-		const expected = path.join(homeDir, ".agent-memory", "bin", "agent-memory-extension.exe");
+		const expected = "C:\\Users\\test\\.agent-memory\\bin\\agent-memory-extension.exe";
 		expect(
 			resolveExternalCommandHost({
 				homeDir,
