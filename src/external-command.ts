@@ -43,7 +43,8 @@ export function resolveExternalCommandHost(options?: {
 			}
 		});
 	const filename = platform === "win32" ? "agent-memory-extension.exe" : "agent-memory-extension";
-	const target = path.join(homeDir, ".agent-memory", "bin", filename);
+	const pathApi = platform === "win32" ? path.win32 : path.posix;
+	const target = pathApi.join(homeDir, ".agent-memory", "bin", filename);
 	return isFile(target) ? target : null;
 }
 
