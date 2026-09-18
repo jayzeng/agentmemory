@@ -3,12 +3,14 @@
 ## Project Structure & Module Organization
 
 - `src/core.ts`: all logic — paths, truncation, scratchpad, context builder, qmd integration, standalone tool functions (`memoryWrite`, `memoryRead`, `scratchpadAction`, `memorySearch`)
-- `src/cli.ts`: CLI entry point — subcommands (context/write/read/scratchpad/search/init/status), compiles to `dist/agent-memory` binary
+- `src/cli.ts`: CLI entry point — subcommands (context/write/read/scratchpad/search/init/status/serve), compiles to `dist/agent-memory` binary
+- `src/mcp-server.ts`: real MCP server over stdio (`agent-memory serve --mcp`) — JSON-RPC 2.0, `initialize`/`tools/list`/`tools/call`/`ping`, five tools (`memory_context`, `memory_search`, `memory_read`, `memory_write`, `memory_scratchpad`) each calling the same `core.ts` functions the equivalent CLI command uses. This is the local stdio server any MCP-capable harness should spawn instead of shelling out to individual CLI commands; remote-only clients (e.g. ChatGPT) need a separate relay bridging to this same process, not a different tool implementation.
 - `skills/claude-code/SKILL.md`: Claude Code skill file
 - `skills/codex/SKILL.md`: Codex skill file
 - `skills/cursor/SKILL.md`: Cursor skill file
 - `skills/agent/SKILL.md`: Agent (Cursor CLI) skill file
 - `test/unit.test.ts`, `test/cli.test.ts`: unit tests (bun:test)
+- `test/mcp-server.test.ts`: MCP server tests — both direct tool-level calls and integration tests that spawn the real `agent-memory serve --mcp` stdio subprocess and drive it with real JSON-RPC frames
 - `README.md`: user-facing install/usage docs
 
 Runtime data lives outside the repo under the memory directory:
@@ -52,8 +54,9 @@ Before every `git add`, `commit`, and `push`, you **must** run and verify all pa
 
 1. `bun test test/unit.test.ts` — unit tests
 2. `bun test test/cli.test.ts` — CLI tests
-3. `bun run lint` — Biome linting and formatting
-4. `bun run build` — TypeScript type-checking
+3. `bun test test/mcp-server.test.ts` — MCP server tests (tool-level + real stdio subprocess)
+4. `bun run lint` — Biome linting and formatting
+5. `bun run build` — TypeScript type-checking
 
 Do not commit or push if any of the above fail. Fix issues first.
 

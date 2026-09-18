@@ -7,16 +7,18 @@
  * stdin/stdout, no framing headers, stderr reserved for diagnostics/logs
  * (never JSON-RPC).
  *
- * This is the piece the local-context-handoff HTML's §10b and the
- * poc-chatgpt-relay POC both assumed already existed and both found does
- * not: agentmemory/src/cli.ts had no `serve` subcommand, and
- * agent-memory-plugin/src/bundle.ts's `registerMcpTool` hooks had no host
- * implementation anywhere that actually spoke MCP over a transport. This
- * file is that host, for the public MIT core's five tools. The relay in
- * ../../poc-chatgpt-relay spawns this exact file as a subprocess and
- * forwards ChatGPT-originated MCP frames to its stdin, so any tool added
- * here is automatically reachable from ChatGPT once the relay side is
- * deployed — no relay-side changes needed for new tools.
+ * Exposes five tools (memory_context, memory_search, memory_read,
+ * memory_write, memory_scratchpad), each calling the exact same core.ts
+ * functions the equivalent CLI command uses — this server is not a second
+ * implementation of AgentMemory's behavior, just a second transport for
+ * the same one.
+ *
+ * Any MCP-capable client that can spawn a local process should point
+ * directly at `agent-memory serve --mcp`. A client that can only reach a
+ * remote HTTPS endpoint (e.g. a hosted connector) needs a separate relay
+ * component that forwards authenticated calls to this same process — that
+ * bridging concern is deliberately out of scope for this file and for this
+ * package; this server only needs to speak correct MCP over stdio.
  *
  * Deliberately dependency-free (no @modelcontextprotocol/sdk) to keep the
  * public core's install footprint small; the protocol surface used here

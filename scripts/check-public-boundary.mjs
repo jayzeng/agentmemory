@@ -26,6 +26,13 @@ const allowedSourceFiles = new Set([
   "src/cli.ts",
   "src/external-command.ts",
   "src/launcher.ts",
+  // Real MCP server over stdio (`agent-memory serve --mcp`). Deliberately
+  // added here, not merely permitted by accident: it calls only core.ts's
+  // existing exported functions, has zero new external dependencies, and
+  // exposes no capability the CLI didn't already expose (memory_context/
+  // memory_search/memory_read/memory_write/memory_scratchpad mirror the
+  // context/search/read/write/scratchpad CLI commands one-to-one).
+  "src/mcp-server.ts",
 ]);
 
 const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
