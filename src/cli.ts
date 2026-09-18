@@ -776,6 +776,8 @@ Commands:
   sync        Re-index and embed all files (requires qmd)
   init        Initialize memory directory and qmd collection
   status      Show configuration and status (--probe for a live embeddings check)
+  serve --mcp Run a Model Context Protocol server over stdio (tools: memory_context,
+              memory_search, memory_read, memory_write, memory_scratchpad)
 
 Global flags:
   --dir <path>   Override memory directory
@@ -798,7 +800,8 @@ Examples:
   agent-memory distil --dry-run
   agent-memory context --query "database choice"
   agent-memory sync
-  agent-memory status --json`);
+  agent-memory status --json
+  agent-memory serve --mcp`);
 }
 
 // ---------------------------------------------------------------------------
@@ -860,6 +863,13 @@ async function main() {
 		case "status":
 			await cmdStatus(flags);
 			break;
+		case "serve":
+			if (!hasFlag(flags, "mcp")) {
+				exitError("Usage: agent-memory serve --mcp", json);
+				return;
+			}
+			(await import("./mcp-server.js")).runMcpServer();
+			return; // keep process alive on stdin; do not fall through to exit
 		default:
 			exitError(`Unknown command: ${command}. Run 'agent-memory help' for usage.`, json);
 	}
