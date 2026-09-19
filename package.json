@@ -1,6 +1,6 @@
 {
   "name": "myagentmemory",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Local-first persistent memory for coding agents with plain Markdown storage and optional qmd search",
   "main": "./dist/core.js",
   "types": "./dist/core.d.ts",
@@ -62,6 +62,8 @@
     "dist/external-command.js",
     "dist/launcher.d.ts",
     "dist/launcher.js",
+    "dist/mcp-server.d.ts",
+    "dist/mcp-server.js",
     "README.md",
     "LICENSE"
   ],

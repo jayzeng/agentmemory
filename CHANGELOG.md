@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.6.1
+
+### Fixed
+
+- `agent-memory serve --mcp` crashed in the actually-published npm package
+  (`Cannot find module '.../dist/mcp-server.js'`) because `dist/mcp-server.js`
+  and its `.d.ts` were never added to `package.json`'s publish `files`
+  allowlist when the MCP server was added in 0.6.0. Every other test stayed
+  green because they all ran against the local, unpacked `dist/` directly
+  instead of the packed tarball. Added `dist/mcp-server.{js,d.ts}` to `files`
+  and strengthened the npm-package-portability test to pack, install, and
+  actually invoke `serve --mcp` against the real installed binary so this
+  class of bug fails CI going forward.
+
 ## 0.6.0
 
 ### Added

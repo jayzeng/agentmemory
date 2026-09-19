@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { spawnSync as nodeSpawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -955,6 +956,7 @@ describe("npm package portability", () => {
 			}>;
 			const packedPaths = pack.files.map((file) => file.path);
 			expect(packedPaths).toContain("dist/cli.js");
+			expect(packedPaths).toContain("dist/mcp-server.js");
 			expect(packedPaths).not.toContain("dist/agent-memory");
 			expect(packedPaths).not.toContain("dist/agent-memory.exe");
 			expect(pack.unpackedSize).toBeLessThan(2_000_000);
@@ -973,6 +975,27 @@ describe("npm package portability", () => {
 			const versionResult = Bun.spawnSync([executable, "version"], { stdout: "pipe", stderr: "pipe" });
 			expect(versionResult.exitCode).toBe(0);
 			expect(versionResult.stdout.toString().trim()).toBe(packageJson.version);
+
+			// Regression guard: dist/mcp-server.js was previously importable locally
+			// but missing from package.json's publish "files" allowlist, so `serve
+			// --mcp` crashed only in the actually-published/packed tarball while
+			// every other test (which runs against the local, unpacked dist/)
+			// stayed green. Exercise the real packed-and-installed binary here.
+			const mcpHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-memory-npm-package-mcp-"));
+			try {
+				// Bun.spawnSync's `input` option unreliably delivers stdin to the
+				// child here; node:child_process's spawnSync does not.
+				const mcpResult = nodeSpawnSync(executable, ["serve", "--mcp"], {
+					input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n',
+					encoding: "utf8",
+					env: { ...process.env, AGENT_MEMORY_DIR: mcpHome },
+				});
+				expect(mcpResult.status).toBe(0);
+				const response = JSON.parse(mcpResult.stdout.trim().split("\n")[0]);
+				expect(response.result.tools.map((tool: { name: string }) => tool.name)).toContain("memory_context");
+			} finally {
+				fs.rmSync(mcpHome, { recursive: true, force: true });
+			}
 		} finally {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		}
