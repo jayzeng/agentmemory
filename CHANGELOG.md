@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.6.0
 
 ### Added
 
@@ -13,12 +13,23 @@ All notable changes to this project will be documented in this file.
   local stdio server any MCP-capable harness (or a remote relay, for harnesses
   like ChatGPT that cannot spawn local subprocesses) can now spawn instead of
   shelling out to individual CLI commands.
+- A generic external-command handoff: any CLI invocation that isn't a known
+  Core command is now forwarded to a platform-correct external host binary
+  next to the running CLI, if one exists, instead of just failing. This is
+  what lets a separate, non-public companion add its own commands (e.g. `pro`)
+  without Core needing to know about it.
 
 ### Changed
 
 - Re-established AgentMemory as a standalone MIT-licensed local memory project.
 - Removed account/device distribution integration and private service references from the public source tree.
 - Added an automated public-source boundary check to CI and package publication.
+
+### Fixed
+
+- The npm package now ships and runs a portable Node.js CLI on Windows instead
+  of assuming a POSIX-style native binary; external-command host-path
+  resolution is platform-correct on Windows.
 
 ## 0.5.5
 
